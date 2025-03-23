@@ -58,6 +58,14 @@ private:
     double m_initialEquity;                // Initial account equity
     datetime m_challengeStartDate;         // Challenge start date
     
+    // Time management
+    int m_challengeTotalDays;             // Total days in the challenge
+    int m_challengeRemainingDays;         // Remaining days in the challenge
+    
+    // Emergency mode
+    bool m_isEmergencyMode;
+    bool m_isCloseToTarget;
+    
     // Helper methods
     void ConfigurePropFirm();
     void CalculateProgress();
@@ -95,6 +103,16 @@ public:
     double GetProgressPercentage() const;
     int GetRemainingDays() const;
     
+    // Time management
+    void SetChallengeTimeframe(datetime startDate, int totalDays);
+    int GetTotalDays() const { return m_challengeTotalDays; }
+    datetime GetStartDate() const { return m_challengeStartDate; }
+    double GetProgressPercent() const;
+    
+    // Emergency mode
+    bool IsEmergencyMode() const { return m_isEmergencyMode; }
+    bool IsCloseToTarget() const { return m_isCloseToTarget; }
+    
     // Set dependencies
     void SetLogger(CLogger* logger) { m_logger = logger; }
     
@@ -128,6 +146,10 @@ CPropSettings::CPropSettings(ENUM_PROP_FIRM propFirm, ENUM_CHALLENGE_PHASE phase
     m_initialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
     m_initialEquity = AccountInfoDouble(ACCOUNT_EQUITY);
     m_challengeStartDate = TimeCurrent();
+    
+    // Initialize time management variables
+    m_challengeTotalDays = 30; // Default 30 days
+    m_challengeRemainingDays = m_challengeTotalDays;
     
     // Configure PropFirm settings
     ConfigurePropFirm();
@@ -322,6 +344,10 @@ void CPropSettings::Reset()
     m_initialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
     m_initialEquity = AccountInfoDouble(ACCOUNT_EQUITY);
     
+    // Reset time management variables
+    m_challengeTotalDays = 30; // Default 30 days
+    m_challengeRemainingDays = m_challengeTotalDays;
+    
     if(m_logger) {
         m_logger.Info("Challenge progress reset. New start date: " + 
                     TimeToString(m_challengeStartDate));
@@ -446,4 +472,36 @@ string CPropSettings::GetStatusText() const
              " (" + IntegerToString(GetRemainingDays()) + " remaining)\n";
     
     return status;
+}
+
+//+------------------------------------------------------------------+
+//| Set challenge timeframe                                          |
+//+------------------------------------------------------------------+
+void CPropSettings::SetChallengeTimeframe(datetime startDate, int totalDays)
+{
+    m_challengeStartDate = startDate;
+    m_challengeTotalDays = totalDays;
+    
+    // Calculate remaining days
+    int secondsPerDay = 24 * 60 * 60;
+    int secondsElapsed = (int)(TimeCurrent() - m_challengeStartDate);
+    int daysElapsed = secondsElapsed / secondsPerDay;
+    
+    m_challengeRemainingDays = m_challengeTotalDays - daysElapsed;
+    
+    // Ensure remaining days is not negative
+    if(m_challengeRemainingDays < 0) {
+        m_challengeRemainingDays = 0;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Get progress percentage of challenge                             |
+//+------------------------------------------------------------------+
+double CPropSettings::GetProgressPercent() const
+{
+    if(m_challengeTotalDays <= 0) return 0.0;
+    
+    double daysElapsed = m_challengeTotalDays - m_challengeRemainingDays;
+    return 100.0 * daysElapsed / m_challengeTotalDays;
 }

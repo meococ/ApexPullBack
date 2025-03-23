@@ -9,6 +9,8 @@
 #include "SonicR_Core.mqh"
 #include "SonicR_StateMachine.mqh"
 #include "SonicR_PropSettings.mqh"
+#include "SonicR_RiskManager.mqh"
+#include "SonicR_AdaptiveFilters.mqh"
 
 // Dashboard class for on-chart visualization
 class CDashboard
@@ -17,8 +19,10 @@ private:
     // Dependencies
     CLogger* m_logger;
     CSonicRCore* m_core;
+    CRiskManager* m_riskManager;
     CStateMachine* m_stateMachine;
     CPropSettings* m_propSettings;
+    CAdaptiveFilters* m_adaptiveFilters;
     
     // Dashboard settings
     int m_x;                   // X position
@@ -65,15 +69,14 @@ public:
     ~CDashboard();
     
     // Main methods
-    void Create();
+    bool Create();
     void Update();
     void Remove();
     
     // Set dependencies
-    void SetDependencies(CSonicRCore* core, 
-                        CStateMachine* stateMachine, 
-                        CPropSettings* propSettings);
+    void SetDependencies(CSonicRCore* core, CRiskManager* riskManager, CStateMachine* stateMachine, CPropSettings* propSettings);
     void SetLogger(CLogger* logger) { m_logger = logger; }
+    void SetAdaptiveFilters(CAdaptiveFilters* adaptiveFilters) { m_adaptiveFilters = adaptiveFilters; }
     
     // Settings
     void SetPosition(int x, int y) { m_x = x; m_y = y; }
@@ -83,6 +86,9 @@ public:
     
     // Event handler
     void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam);
+    
+    // New method
+    void Draw();
 };
 
 //+------------------------------------------------------------------+
@@ -92,8 +98,10 @@ CDashboard::CDashboard()
 {
     m_logger = NULL;
     m_core = NULL;
+    m_riskManager = NULL;
     m_stateMachine = NULL;
     m_propSettings = NULL;
+    m_adaptiveFilters = NULL;
     
     // Set default dashboard settings
     m_x = 20;
@@ -128,11 +136,10 @@ CDashboard::~CDashboard()
 //+------------------------------------------------------------------+
 //| Set dependencies                                                 |
 //+------------------------------------------------------------------+
-void CDashboard::SetDependencies(CSonicRCore* core, 
-                                CStateMachine* stateMachine, 
-                                CPropSettings* propSettings)
+void CDashboard::SetDependencies(CSonicRCore* core, CRiskManager* riskManager, CStateMachine* stateMachine, CPropSettings* propSettings)
 {
     m_core = core;
+    m_riskManager = riskManager;
     m_stateMachine = stateMachine;
     m_propSettings = propSettings;
 }
@@ -160,12 +167,12 @@ void CDashboard::SetFont(string name, int size)
 //+------------------------------------------------------------------+
 //| Create the dashboard                                             |
 //+------------------------------------------------------------------+
-void CDashboard::Create()
+bool CDashboard::Create()
 {
     // Check if dependencies are set
     if(!m_core || !m_stateMachine || !m_propSettings) {
         if(m_logger) m_logger.Error("Cannot create dashboard: dependencies not set");
-        return;
+        return false;
     }
     
     // Clean up existing objects
@@ -183,6 +190,7 @@ void CDashboard::Create()
     Update();
     
     if(m_logger) m_logger.Info("Dashboard created");
+    return true;
 }
 
 //+------------------------------------------------------------------+
@@ -494,5 +502,71 @@ void CDashboard::DeleteAllObjects()
         if(StringFind(objName, m_prefixName) == 0) {
             ObjectDelete(0, objName);
         }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Draw dashboard                                                   |
+//+------------------------------------------------------------------+
+void CDashboard::Draw()
+{
+    // ... existing drawing code ...
+    
+    // Draw Performance section
+    // ... existing code ...
+    
+    // Draw Market Info section
+    // ... existing code ...
+    
+    // Draw Adaptive Filters section (new)
+    if(m_adaptiveFilters != NULL) {
+        int y = 220; // Adjust based on your layout
+        
+        // Section header
+        DrawLabel("SonicR_Dash_AdaptiveHeader", "ADAPTIVE FILTERS", 10, y, clrWhite, 9, "Arial Bold");
+        y += 20;
+        
+        // Market regime info
+        DrawLabel("SonicR_Dash_Regime", "Regime: " + m_adaptiveFilters.GetCurrentRegimeAsString(), 
+                 15, y, clrYellow, 8, "Arial");
+        y += 15;
+        
+        // Trend info
+        string trendDir = "";
+        int direction = m_adaptiveFilters.GetTrendDirection();
+        if(direction > 0) trendDir = "Up";
+        else if(direction < 0) trendDir = "Down";
+        else trendDir = "Sideways";
+        
+        DrawLabel("SonicR_Dash_Trend", "Trend: " + trendDir + " (" + 
+                 DoubleToString(m_adaptiveFilters.GetTrendStrength(), 1) + ")", 
+                 15, y, clrYellow, 8, "Arial");
+        y += 15;
+        
+        // Volatility 
+        DrawLabel("SonicR_Dash_Vol", "Volatility: " + 
+                 DoubleToString(m_adaptiveFilters.GetVolatilityRatio(), 2), 
+                 15, y, clrYellow, 8, "Arial");
+        y += 15;
+        
+        // Parameters
+        DrawLabel("SonicR_Dash_Risk", "Risk %: " + 
+                 DoubleToString(m_adaptiveFilters.GetBaseRiskPercent(_Symbol), 2), 
+                 15, y, clrAqua, 8, "Arial");
+        y += 15;
+        
+        DrawLabel("SonicR_Dash_RR", "Min R:R: " + 
+                 DoubleToString(m_adaptiveFilters.GetMinRR(), 1), 
+                 15, y, clrAqua, 8, "Arial");
+        y += 15;
+        
+        DrawLabel("SonicR_Dash_MaxTrades", "Max Trades: " + 
+                 IntegerToString(m_adaptiveFilters.GetMaxTradesForRegime()), 
+                 15, y, clrAqua, 8, "Arial");
+        y += 15;
+        
+        DrawLabel("SonicR_Dash_Scout", "Scout Entries: " + 
+                 (m_adaptiveFilters.ShouldUseScoutEntries() ? "Yes" : "No"), 
+                 15, y, clrAqua, 8, "Arial");
     }
 }

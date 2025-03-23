@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 #property copyright "SonicR Trading Systems"
 #property link      "https://sonicr.com"
-#property version   "1.70"
+#property version   "1.80"
 #property strict
 #property description "SonicR PropFirm EA - Price Action based EA optimized for PropFirm challenges"
 
@@ -18,6 +18,7 @@
 #include "Include\SonicR_PropSettings.mqh"
 #include "Include\SonicR_Logger.mqh"
 #include "Include\SonicR_Dashboard.mqh"
+#include "Include\SonicR_AdaptiveFilters.mqh"  // New include for adaptive filters
 
 // Enumerations
 enum ENUM_PROP_FIRM
@@ -123,6 +124,14 @@ input bool TradeBearishRegime = true;           // Trade Bearish Regime
 input bool TradeRangingRegime = true;           // Trade Ranging Regime
 input bool TradeVolatileRegime = false;         // Trade Volatile Regime
 
+// --- Adaptive Filters Settings ---
+input string AdaptiveFiltersSettings = "===== Adaptive Filters =====";
+input bool UseAdaptiveFilters = true;           // Use Adaptive Filters
+input int ChallengeDaysTotal = 30;              // Total Challenge Days
+input int ChallengeDaysRemaining = 30;          // Days Remaining in Challenge
+input double EmergencyProgressThreshold = 30.0; // Emergency Progress Threshold (%)
+input double ConservativeProgressThreshold = 80.0; // Conservative Progress Threshold (%)
+
 // Global objects
 CLogger* g_logger = NULL;                       // Logger
 CSonicRCore* g_sonicCore = NULL;                // Core strategy
@@ -137,6 +146,7 @@ CMarketRegimeFilter* g_marketRegimeFilter = NULL; // Market regime filter
 CDashboard* g_dashboard = NULL;                 // Dashboard
 CPropSettings* g_propSettings = NULL;           // PropFirm settings
 CTrade* g_trade = NULL;                         // MT5 trade object
+CAdaptiveFilters* g_adaptiveFilters = NULL;     // Adaptive filters
 
 // State variables
 bool g_initialized = false;
@@ -187,7 +197,7 @@ int OnInit()
         return INIT_FAILED;
     }
     
-    g_logger.Info("Initializing SonicR PropFirm EA v1.70...");
+    g_logger.Info("Initializing SonicR PropFirm EA v1.80...");
     
     // Initialize MT5 trade object
     g_trade = new CTrade();
@@ -255,12 +265,16 @@ int OnInit()
         g_propSettings.SetCustomValues(CustomTargetProfit, CustomMaxDrawdown, CustomDailyDrawdown);
     }
     
+    // Set challenge timeframe
+    datetime startDate = TimeCurrent() - (ChallengeDaysTotal - ChallengeDaysRemaining) * 86400; // 86400 seconds = 1 day
+    g_propSettings.SetChallengeTimeframe(startDate, ChallengeDaysTotal);
+    
     // Auto-detect phase if requested
     if(AutoDetectPhase) {
         ENUM_CHALLENGE_PHASE detectedPhase = g_propSettings.AutoDetectPhase();
         if(detectedPhase != ChallengePhase) {
             g_logger.Warning("Auto-detected phase " + EnumToString(detectedPhase) + 
-                           " differs from input parameter " + EnumToString(ChallengePhase));
+                            " differs from input parameter " + EnumToString(ChallengePhase));
             g_propSettings.SetPhase(detectedPhase);
         }
     }
@@ -334,13 +348,37 @@ int OnInit()
             g_logger.Warning("Failed to initialize Dashboard. Continuing without dashboard.");
         }
         else {
+            g_dashboard.SetLogger(g_logger);
             g_dashboard.SetDependencies(g_sonicCore, g_riskManager, g_stateMachine, g_propSettings);
+            g_dashboard.SetAdaptiveFilters(g_adaptiveFilters); // Set adaptive filters for dashboard
             g_dashboard.Create();
         }
     }
     
+    // Initialize adaptive filters
+    g_adaptiveFilters = new CAdaptiveFilters();
+    if(g_adaptiveFilters == NULL) {
+        g_logger.Error("Failed to initialize AdaptiveFilters");
+        return INIT_FAILED;
+    }
+    
+    // Set logger for adaptive filters
+    g_adaptiveFilters.SetLogger(g_logger);
+    
+    // Set progress thresholds for adaptive filters
+    g_adaptiveFilters.SetProgressThresholds(EmergencyProgressThreshold, ConservativeProgressThreshold);
+    
     // Update PropFirm settings
     g_propSettings.Update();
+    
+    // Log adaptive filters status
+    if(UseAdaptiveFilters) {
+        g_logger.Info("Adaptive Filters: Enabled - Challenge progress: " + 
+                     DoubleToString(g_propSettings.GetProgressPercent(), 1) + "%, " +
+                     "Days remaining: " + IntegerToString(ChallengeDaysRemaining));
+    } else {
+        g_logger.Info("Adaptive Filters: Disabled");
+    }
     
     // Log successful initialization
     g_logger.Info("Initialization complete. Running in " + EnumToString(g_propSettings.GetPhase()) + 
@@ -377,6 +415,7 @@ void OnDeinit(const int reason)
     SafeDelete(g_stateMachine);
     SafeDelete(g_riskManager);
     SafeDelete(g_sonicCore);
+    SafeDelete(g_adaptiveFilters);  // Free adaptive filters resources
     SafeDelete(g_trade);
     SafeDelete(g_logger);
     
@@ -437,6 +476,36 @@ void OnTick()
     g_riskManager.Update();
     g_propSettings.Update();
     g_exitManager.Update();
+    
+    // Update adaptive filters if enabled
+    if(UseAdaptiveFilters) {
+        g_adaptiveFilters.Update(g_sonicCore);
+        
+        // Adjust adaptive filters for challenge progress
+        g_adaptiveFilters.AdjustForChallengeProgress(ChallengeDaysRemaining, ChallengeDaysTotal);
+        
+        // Use adaptive parameters
+        double adxThreshold = g_adaptiveFilters.GetADXThreshold(_Symbol);
+        int maxTrades = g_adaptiveFilters.GetMaxTradesForRegime();
+        double riskPercent = g_adaptiveFilters.GetBaseRiskPercent(_Symbol);
+        
+        // Update risk manager with adaptive parameters
+        g_riskManager.SetMaxTradesPerDay(maxTrades);
+        g_riskManager.SetRiskPercent(riskPercent);
+        
+        // Update entry manager with adaptive parameters
+        g_entryManager.SetMinRR(g_adaptiveFilters.GetMinRR());
+        g_entryManager.SetUseScoutEntries(g_adaptiveFilters.ShouldUseScoutEntries());
+        
+        // Log adaptive filter status occasionally
+        static datetime lastAdaptiveLog = 0;
+        if(TimeCurrent() - lastAdaptiveLog >= 3600) { // Log every hour
+            g_logger.Info("Adaptive Filters: " + g_adaptiveFilters.GetCurrentRegimeAsString() + 
+                         ", Risk: " + DoubleToString(riskPercent, 2) + 
+                         ", MaxTrades: " + IntegerToString(maxTrades));
+            lastAdaptiveLog = TimeCurrent();
+        }
+    }
     
     // Process actions based on state machine
     ProcessStateMachine(isNewBar);
@@ -677,14 +746,24 @@ void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest&
         dealProfit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT);
         
         g_logger.Info("New deal: " + IntegerToString(trans.deal) + ", Order: " + 
-                    IntegerToString(trans.order) + ", Volume: " + DoubleToString(trans.volume, 2) + 
-                    ", Profit: " + DoubleToString(dealProfit, 2));
+                     IntegerToString(trans.order) + ", Volume: " + DoubleToString(trans.volume, 2) + 
+                     ", Profit: " + DoubleToString(dealProfit, 2));
         
         // Update P/L statistics
         if(dealProfit > 0) {
             g_totalProfit += dealProfit;
+            
+            // Update adaptive filters with winning trade result
+            if(UseAdaptiveFilters && g_adaptiveFilters != NULL) {
+                g_adaptiveFilters.UpdateBasedOnResults(true, _Symbol);
+            }
         } else if(dealProfit < 0) {
             g_totalLoss += MathAbs(dealProfit);
+            
+            // Update adaptive filters with losing trade result
+            if(UseAdaptiveFilters && g_adaptiveFilters != NULL) {
+                g_adaptiveFilters.UpdateBasedOnResults(false, _Symbol);
+            }
         }
     }
 }
