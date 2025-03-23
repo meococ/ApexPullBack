@@ -1,17 +1,20 @@
 //+------------------------------------------------------------------+
-//|                                                ExitManager.mqh |
-//|                           SonicR PropFirm EA - Exit Management |
+//|                                           SonicR_ExitManager.mqh |
+//|                SonicR PropFirm EA - Exit Management Component    |
 //+------------------------------------------------------------------+
-#property copyright "SonicR PropFirm EA"
+#property copyright "SonicR Trading Systems"
 #property link      "https://sonicr.com"
 
-#ifndef EXIT_MANAGER_MQH
-#define EXIT_MANAGER_MQH
+#include <Trade\Trade.mqh>
+#include "SonicR_Logger.mqh"
 
 // Exit manager class for handling trade exits
 class CExitManager
 {
 private:
+    // Logger
+    CLogger* m_logger;
+    
     // Exit settings
     bool m_usePartialClose;           // Use partial close
     double m_tp1Percent;              // Percentage to close at TP1
@@ -29,6 +32,10 @@ private:
     
     int m_magicNumber;                // Magic number for trades
     int m_slippage;                   // Slippage in points
+    bool m_useVirtualSL;              // Use virtual SL and TP
+    
+    // Trade execution object
+    CTrade* m_trade;
     
     // Trade tracking
     struct TradeInfo {
@@ -45,10 +52,23 @@ private:
         double trailingLevel;         // Current trailing level
         double profit;                // Current profit
         double maxProfit;             // Maximum profit reached
+        datetime openTime;            // Open time
+        string symbol;                // Symbol
     };
     
     TradeInfo m_trades[50];           // Array to track open trades
     int m_tradeCount;                 // Number of trades being tracked
+    
+    // Virtual SL/TP tracking
+    struct VirtualLevel {
+        ulong ticket;                 // Ticket number
+        double sl;                    // Virtual stop loss
+        double tp;                    // Virtual take profit
+        datetime lastCheck;           // Last check time
+    };
+    
+    VirtualLevel m_virtualLevels[50]; // Array to track virtual levels
+    int m_virtualCount;               // Number of virtual levels
     
     // Helper methods
     void UpdateTradeInfo();
@@ -56,12 +76,16 @@ private:
     bool ModifyStopLoss(ulong ticket, double newSL);
     bool ModifyTakeProfit(ulong ticket, double newTP);
     double CalculateOptimalTrailingStop(double entryPrice, double currentPrice, int type, double originalSL);
-    double CalculateATR(int period = 14);
-    bool IsMarketOpen();
+    double CalculateATR(int period = 14, string symbol = NULL);
+    bool IsMarketOpen(string symbol = NULL);
     
-    // Direct trade execution with MT5 functions
-    bool OrderModify(ulong ticket, double sl, double tp);
-    bool OrderClose(ulong ticket, double volume);
+    // Virtual SL/TP management
+    void UpdateVirtualLevels();
+    bool CheckVirtualStopLoss(TradeInfo &trade);
+    bool CheckVirtualTakeProfit(TradeInfo &trade);
+    void AddVirtualLevel(ulong ticket, double sl, double tp);
+    void RemoveVirtualLevel(int index);
+    int FindVirtualLevel(ulong ticket);
     
 public:
     // Constructor
@@ -77,14 +101,22 @@ public:
                 double trailingStep = 15.0,
                 bool useAdaptiveTrailing = true);
     
+    // Destructor
+    ~CExitManager();
+    
     // Main methods
     void Update();
     void ManageExits();
     void CloseAllPositions(string reason = "Manual close");
     
+    // Set dependencies
+    void SetTrade(CTrade* trade) { m_trade = trade; }
+    void SetLogger(CLogger* logger) { m_logger = logger; }
+    
     // Set magic number and slippage
     void SetMagicNumber(int magic) { m_magicNumber = magic; }
     void SetSlippage(int slippage) { m_slippage = slippage; }
+    void SetUseVirtualSL(bool virtualSL) { m_useVirtualSL = virtualSL; }
     
     // Settings
     void SetPartialCloseSettings(bool use, double percent) { 
@@ -135,6 +167,9 @@ CExitManager::CExitManager(bool usePartialClose,
                          double trailingStep,
                          bool useAdaptiveTrailing)
 {
+    m_logger = NULL;
+    m_trade = NULL;
+    
     // Initialize settings
     m_usePartialClose = usePartialClose;
     m_tp1Percent = tp1Percent;
@@ -154,6 +189,18 @@ CExitManager::CExitManager(bool usePartialClose,
     m_tradeCount = 0;
     m_magicNumber = 0;
     m_slippage = 10; // Default slippage (10 points)
+    m_useVirtualSL = false;
+    
+    // Initialize virtual SL/TP tracking
+    m_virtualCount = 0;
+}
+
+//+------------------------------------------------------------------+
+//| Destructor                                                       |
+//+------------------------------------------------------------------+
+CExitManager::~CExitManager()
+{
+    // Nothing to clean up
 }
 
 //+------------------------------------------------------------------+
@@ -163,6 +210,11 @@ void CExitManager::Update()
 {
     // Update trade info
     UpdateTradeInfo();
+    
+    // Update virtual SL/TP levels
+    if(m_useVirtualSL) {
+        UpdateVirtualLevels();
+    }
     
     // Manage exits if market is open
     if(IsMarketOpen()) {
@@ -182,9 +234,10 @@ void CExitManager::UpdateTradeInfo()
     for(int i = 0; i < PositionsTotal(); i++) {
         ulong ticket = PositionGetTicket(i);
         
-        // Skip positions with different symbol or magic number
-        if(PositionGetString(POSITION_SYMBOL) != _Symbol || 
-           PositionGetInteger(POSITION_MAGIC) != m_magicNumber) {
+        if(ticket <= 0) continue;
+        
+        // Skip positions with different magic number
+        if(PositionGetInteger(POSITION_MAGIC) != m_magicNumber) {
             continue;
         }
         
@@ -196,9 +249,13 @@ void CExitManager::UpdateTradeInfo()
         m_trades[m_tradeCount].stopLoss = PositionGetDouble(POSITION_SL);
         m_trades[m_tradeCount].takeProfit = PositionGetDouble(POSITION_TP);
         m_trades[m_tradeCount].profit = PositionGetDouble(POSITION_PROFIT);
+        m_trades[m_tradeCount].openTime = (datetime)PositionGetInteger(POSITION_TIME);
+        m_trades[m_tradeCount].symbol = PositionGetString(POSITION_SYMBOL);
         
         // For new trades, initialize tracking variables
         bool isNewTrade = true;
+        
+        // Check if this trade was previously tracked
         for(int j = 0; j < m_tradeCount; j++) {
             if(m_trades[j].ticket == ticket) {
                 isNewTrade = false;
@@ -207,12 +264,36 @@ void CExitManager::UpdateTradeInfo()
         }
         
         if(isNewTrade) {
-            m_trades[m_tradeCount].originalSL = m_trades[m_tradeCount].stopLoss;
-            m_trades[m_tradeCount].originalTP = m_trades[m_tradeCount].takeProfit;
+            // For virtual SL/TP, check if we have stored levels
+            int virtualIndex = FindVirtualLevel(ticket);
+            
+            if(m_useVirtualSL && virtualIndex >= 0) {
+                // Use stored virtual levels
+                m_trades[m_tradeCount].originalSL = m_virtualLevels[virtualIndex].sl;
+                m_trades[m_tradeCount].originalTP = m_virtualLevels[virtualIndex].tp;
+            }
+            else {
+                // Use actual SL/TP as original values
+                m_trades[m_tradeCount].originalSL = m_trades[m_tradeCount].stopLoss;
+                m_trades[m_tradeCount].originalTP = m_trades[m_tradeCount].takeProfit;
+                
+                // If using virtual SL/TP, store these levels
+                if(m_useVirtualSL) {
+                    AddVirtualLevel(ticket, m_trades[m_tradeCount].stopLoss, m_trades[m_tradeCount].takeProfit);
+                }
+            }
+            
             m_trades[m_tradeCount].tp1Hit = false;
             m_trades[m_tradeCount].breakEvenSet = false;
             m_trades[m_tradeCount].trailingLevel = 0;
             m_trades[m_tradeCount].maxProfit = 0;
+            
+            if(m_logger) {
+                m_logger.Info("New trade detected: " + m_trades[m_tradeCount].symbol + 
+                            " " + (m_trades[m_tradeCount].type == 0 ? "BUY" : "SELL") + 
+                            " " + DoubleToString(m_trades[m_tradeCount].lots, 2) + 
+                            " lots at " + DoubleToString(m_trades[m_tradeCount].openPrice, _Digits));
+            }
         }
         
         // Update max profit
@@ -230,10 +311,195 @@ void CExitManager::UpdateTradeInfo()
 }
 
 //+------------------------------------------------------------------+
+//| Update virtual SL/TP levels                                      |
+//+------------------------------------------------------------------+
+void CExitManager::UpdateVirtualLevels()
+{
+    if(!m_useVirtualSL) return;
+    
+    for(int i = 0; i < m_tradeCount; i++) {
+        // Find corresponding virtual level
+        int index = FindVirtualLevel(m_trades[i].ticket);
+        
+        // If not found, add it
+        if(index < 0) {
+            AddVirtualLevel(m_trades[i].ticket, m_trades[i].stopLoss, m_trades[i].takeProfit);
+            continue;
+        }
+        
+        // Check if virtual stop loss hit
+        if(CheckVirtualStopLoss(m_trades[i])) {
+            // Close position at market
+            if(m_trade != NULL) {
+                if(m_logger) {
+                    m_logger.Warning("Virtual stop loss hit for ticket " + IntegerToString(m_trades[i].ticket) + 
+                                   " at price " + DoubleToString(m_virtualLevels[index].sl, _Digits));
+                }
+                
+                // Close position
+                m_trade.PositionClose(m_trades[i].ticket);
+                
+                // Remove virtual level
+                RemoveVirtualLevel(index);
+            }
+        }
+        
+        // Check if virtual take profit hit
+        if(CheckVirtualTakeProfit(m_trades[i])) {
+            // Close position at market
+            if(m_trade != NULL) {
+                if(m_logger) {
+                    m_logger.Info("Virtual take profit hit for ticket " + IntegerToString(m_trades[i].ticket) + 
+                                " at price " + DoubleToString(m_virtualLevels[index].tp, _Digits));
+                }
+                
+                // Close position
+                m_trade.PositionClose(m_trades[i].ticket);
+                
+                // Remove virtual level
+                RemoveVirtualLevel(index);
+            }
+        }
+    }
+    
+    // Clean up virtual levels for closed positions
+    for(int i = m_virtualCount - 1; i >= 0; i--) {
+        bool found = false;
+        
+        // Check if position still exists
+        for(int j = 0; j < m_tradeCount; j++) {
+            if(m_trades[j].ticket == m_virtualLevels[i].ticket) {
+                found = true;
+                break;
+            }
+        }
+        
+        // If not found, remove virtual level
+        if(!found) {
+            RemoveVirtualLevel(i);
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Check if virtual stop loss hit                                   |
+//+------------------------------------------------------------------+
+bool CExitManager::CheckVirtualStopLoss(TradeInfo &trade)
+{
+    if(!m_useVirtualSL) return false;
+    
+    int index = FindVirtualLevel(trade.ticket);
+    if(index < 0) return false;
+    
+    // Get current bid/ask
+    double bid = SymbolInfoDouble(trade.symbol, SYMBOL_BID);
+    double ask = SymbolInfoDouble(trade.symbol, SYMBOL_ASK);
+    
+    // Check if SL hit
+    if(trade.type == 0) { // Buy
+        if(bid <= m_virtualLevels[index].sl) {
+            return true;
+        }
+    }
+    else { // Sell
+        if(ask >= m_virtualLevels[index].sl) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Check if virtual take profit hit                                 |
+//+------------------------------------------------------------------+
+bool CExitManager::CheckVirtualTakeProfit(TradeInfo &trade)
+{
+    if(!m_useVirtualSL) return false;
+    
+    int index = FindVirtualLevel(trade.ticket);
+    if(index < 0) return false;
+    
+    // Get current bid/ask
+    double bid = SymbolInfoDouble(trade.symbol, SYMBOL_BID);
+    double ask = SymbolInfoDouble(trade.symbol, SYMBOL_ASK);
+    
+    // Check if TP hit
+    if(trade.type == 0) { // Buy
+        if(bid >= m_virtualLevels[index].tp) {
+            return true;
+        }
+    }
+    else { // Sell
+        if(ask <= m_virtualLevels[index].tp) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Add virtual level                                                |
+//+------------------------------------------------------------------+
+void CExitManager::AddVirtualLevel(ulong ticket, double sl, double tp)
+{
+    if(m_virtualCount >= ArraySize(m_virtualLevels)) {
+        if(m_logger) m_logger.Warning("Virtual levels array is full");
+        return;
+    }
+    
+    m_virtualLevels[m_virtualCount].ticket = ticket;
+    m_virtualLevels[m_virtualCount].sl = sl;
+    m_virtualLevels[m_virtualCount].tp = tp;
+    m_virtualLevels[m_virtualCount].lastCheck = TimeCurrent();
+    
+    m_virtualCount++;
+}
+
+//+------------------------------------------------------------------+
+//| Remove virtual level                                             |
+//+------------------------------------------------------------------+
+void CExitManager::RemoveVirtualLevel(int index)
+{
+    if(index < 0 || index >= m_virtualCount) {
+        if(m_logger) m_logger.Warning("Invalid virtual level index: " + IntegerToString(index));
+        return;
+    }
+    
+    // Shift elements
+    for(int i = index; i < m_virtualCount - 1; i++) {
+        m_virtualLevels[i] = m_virtualLevels[i+1];
+    }
+    
+    m_virtualCount--;
+}
+
+//+------------------------------------------------------------------+
+//| Find virtual level by ticket                                     |
+//+------------------------------------------------------------------+
+int CExitManager::FindVirtualLevel(ulong ticket)
+{
+    for(int i = 0; i < m_virtualCount; i++) {
+        if(m_virtualLevels[i].ticket == ticket) {
+            return i;
+        }
+    }
+    
+    return -1;
+}
+
+//+------------------------------------------------------------------+
 //| Manage exits for all open positions                              |
 //+------------------------------------------------------------------+
 void CExitManager::ManageExits()
 {
+    // Skip if no trade object
+    if(m_trade == NULL) {
+        if(m_logger) m_logger.Error("Trade object not set in ExitManager");
+        return;
+    }
+    
     // Loop through all tracked trades
     for(int i = 0; i < m_tradeCount; i++) {
         // Skip trades with invalid SL
@@ -243,23 +509,23 @@ void CExitManager::ManageExits()
         
         // Get current price
         double currentPrice = m_trades[i].type == 0 ? 
-                            SymbolInfoDouble(_Symbol, SYMBOL_BID) : 
-                            SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                            SymbolInfoDouble(m_trades[i].symbol, SYMBOL_BID) : 
+                            SymbolInfoDouble(m_trades[i].symbol, SYMBOL_ASK);
         
         // Calculate distance from entry in pips
         double entryToCurrentPips = 0;
         if(m_trades[i].type == 0) { // Buy
-            entryToCurrentPips = (currentPrice - m_trades[i].openPrice) / _Point;
+            entryToCurrentPips = (currentPrice - m_trades[i].openPrice) / SymbolInfoDouble(m_trades[i].symbol, SYMBOL_POINT);
         } else { // Sell
-            entryToCurrentPips = (m_trades[i].openPrice - currentPrice) / _Point;
+            entryToCurrentPips = (m_trades[i].openPrice - currentPrice) / SymbolInfoDouble(m_trades[i].symbol, SYMBOL_POINT);
         }
         
         // Calculate distance from entry to SL in pips
         double entryToSLPips = 0;
         if(m_trades[i].type == 0) { // Buy
-            entryToSLPips = (m_trades[i].openPrice - m_trades[i].originalSL) / _Point;
+            entryToSLPips = (m_trades[i].openPrice - m_trades[i].originalSL) / SymbolInfoDouble(m_trades[i].symbol, SYMBOL_POINT);
         } else { // Sell
-            entryToSLPips = (m_trades[i].originalSL - m_trades[i].openPrice) / _Point;
+            entryToSLPips = (m_trades[i].originalSL - m_trades[i].openPrice) / SymbolInfoDouble(m_trades[i].symbol, SYMBOL_POINT);
         }
         
         // Check if entryToSLPips is valid
@@ -273,14 +539,17 @@ void CExitManager::ManageExits()
             double lotsToClose = m_trades[i].lots * (m_tp1Percent / 100.0);
             
             // Ensure minimum lot size
-            double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+            double minLot = SymbolInfoDouble(m_trades[i].symbol, SYMBOL_VOLUME_MIN);
             lotsToClose = MathMax(minLot, MathFloor(lotsToClose / minLot) * minLot);
             
             // Check if we have enough lots to close
             if(lotsToClose < m_trades[i].lots) {
                 // Close partial position
                 if(ClosePartialPosition(m_trades[i].ticket, lotsToClose)) {
-                    Print("Partial close at TP1: ", lotsToClose, " lots from ticket ", m_trades[i].ticket);
+                    if(m_logger) {
+                        m_logger.Info("Partial close at TP1: " + DoubleToString(lotsToClose, 2) + 
+                                    " lots from ticket " + IntegerToString((int)m_trades[i].ticket));
+                    }
                     m_trades[i].tp1Hit = true;
                 }
             }
@@ -291,16 +560,36 @@ void CExitManager::ManageExits()
             // Calculate break-even price with offset
             double bePrice = 0;
             if(m_trades[i].type == 0) { // Buy
-                bePrice = m_trades[i].openPrice + m_breakEvenOffset * _Point;
+                bePrice = m_trades[i].openPrice + m_breakEvenOffset * SymbolInfoDouble(m_trades[i].symbol, SYMBOL_POINT);
             } else { // Sell
-                bePrice = m_trades[i].openPrice - m_breakEvenOffset * _Point;
+                bePrice = m_trades[i].openPrice - m_breakEvenOffset * SymbolInfoDouble(m_trades[i].symbol, SYMBOL_POINT);
             }
             
-            // Modify stop loss
-            if(ModifyStopLoss(m_trades[i].ticket, bePrice)) {
-                Print("Break-even set for ticket ", m_trades[i].ticket);
-                m_trades[i].breakEvenSet = true;
-                m_trades[i].stopLoss = bePrice;
+            // Modify stop loss (real or virtual)
+            if(m_useVirtualSL) {
+                // Update virtual SL
+                int index = FindVirtualLevel(m_trades[i].ticket);
+                if(index >= 0) {
+                    m_virtualLevels[index].sl = bePrice;
+                    m_trades[i].breakEvenSet = true;
+                    m_trades[i].stopLoss = bePrice;
+                    
+                    if(m_logger) {
+                        m_logger.Info("Virtual break-even set for ticket " + IntegerToString((int)m_trades[i].ticket) + 
+                                    " at " + DoubleToString(bePrice, _Digits));
+                    }
+                }
+            }
+            else {
+                // Modify stop loss
+                if(ModifyStopLoss(m_trades[i].ticket, bePrice)) {
+                    if(m_logger) {
+                        m_logger.Info("Break-even set for ticket " + IntegerToString((int)m_trades[i].ticket) + 
+                                    " at " + DoubleToString(bePrice, _Digits));
+                    }
+                    m_trades[i].breakEvenSet = true;
+                    m_trades[i].stopLoss = bePrice;
+                }
             }
         }
         
@@ -319,19 +608,39 @@ void CExitManager::ManageExits()
             
             if(m_trades[i].type == 0) { // Buy
                 // New SL should be higher than current SL
-                shouldModify = (trailingStop > m_trades[i].stopLoss + m_trailingStep * _Point);
+                shouldModify = (trailingStop > m_trades[i].stopLoss + m_trailingStep * SymbolInfoDouble(m_trades[i].symbol, SYMBOL_POINT));
             } else { // Sell
                 // New SL should be lower than current SL
-                shouldModify = (trailingStop < m_trades[i].stopLoss - m_trailingStep * _Point);
+                shouldModify = (trailingStop < m_trades[i].stopLoss - m_trailingStep * SymbolInfoDouble(m_trades[i].symbol, SYMBOL_POINT));
             }
             
             // Modify stop loss if needed
             if(shouldModify) {
-                if(ModifyStopLoss(m_trades[i].ticket, trailingStop)) {
-                    Print("Trailing stop updated for ticket ", m_trades[i].ticket, 
-                         " from ", m_trades[i].stopLoss, " to ", trailingStop);
-                    m_trades[i].stopLoss = trailingStop;
-                    m_trades[i].trailingLevel = entryToCurrentPips;
+                if(m_useVirtualSL) {
+                    // Update virtual SL
+                    int index = FindVirtualLevel(m_trades[i].ticket);
+                    if(index >= 0) {
+                        m_virtualLevels[index].sl = trailingStop;
+                        m_trades[i].stopLoss = trailingStop;
+                        m_trades[i].trailingLevel = entryToCurrentPips;
+                        
+                        if(m_logger) {
+                            m_logger.Info("Virtual trailing stop updated for ticket " + IntegerToString((int)m_trades[i].ticket) + 
+                                        " from " + DoubleToString(m_trades[i].stopLoss, _Digits) + 
+                                        " to " + DoubleToString(trailingStop, _Digits));
+                        }
+                    }
+                }
+                else {
+                    if(ModifyStopLoss(m_trades[i].ticket, trailingStop)) {
+                        if(m_logger) {
+                            m_logger.Info("Trailing stop updated for ticket " + IntegerToString((int)m_trades[i].ticket) + 
+                                        " from " + DoubleToString(m_trades[i].stopLoss, _Digits) + 
+                                        " to " + DoubleToString(trailingStop, _Digits));
+                        }
+                        m_trades[i].stopLoss = trailingStop;
+                        m_trades[i].trailingLevel = entryToCurrentPips;
+                    }
                 }
             }
         }
@@ -343,13 +652,23 @@ void CExitManager::ManageExits()
 //+------------------------------------------------------------------+
 bool CExitManager::ClosePartialPosition(ulong ticket, double lots)
 {
-    // Set position by ticket
-    if(!PositionSelectByTicket(ticket)) {
+    // Check if we have a trade object
+    if(m_trade == NULL) {
+        if(m_logger) m_logger.Error("Trade object not set in ExitManager");
         return false;
     }
     
+    // Set position by ticket
+    if(!PositionSelectByTicket(ticket)) {
+        if(m_logger) m_logger.Warning("Cannot select position by ticket " + IntegerToString((int)ticket));
+        return false;
+    }
+    
+    // Set trade parameters
+    m_trade.SetDeviationInPoints(m_slippage);
+    
     // Close partial position
-    return OrderClose(ticket, lots);
+    return m_trade.PositionClosePartial(ticket, lots);
 }
 
 //+------------------------------------------------------------------+
@@ -357,8 +676,15 @@ bool CExitManager::ClosePartialPosition(ulong ticket, double lots)
 //+------------------------------------------------------------------+
 bool CExitManager::ModifyStopLoss(ulong ticket, double newSL)
 {
+    // Check if we have a trade object
+    if(m_trade == NULL) {
+        if(m_logger) m_logger.Error("Trade object not set in ExitManager");
+        return false;
+    }
+    
     // Set position by ticket
     if(!PositionSelectByTicket(ticket)) {
+        if(m_logger) m_logger.Warning("Cannot select position by ticket " + IntegerToString((int)ticket));
         return false;
     }
     
@@ -366,7 +692,7 @@ bool CExitManager::ModifyStopLoss(ulong ticket, double newSL)
     double tp = PositionGetDouble(POSITION_TP);
     
     // Modify position
-    return OrderModify(ticket, newSL, tp);
+    return m_trade.PositionModify(ticket, newSL, tp);
 }
 
 //+------------------------------------------------------------------+
@@ -374,8 +700,15 @@ bool CExitManager::ModifyStopLoss(ulong ticket, double newSL)
 //+------------------------------------------------------------------+
 bool CExitManager::ModifyTakeProfit(ulong ticket, double newTP)
 {
+    // Check if we have a trade object
+    if(m_trade == NULL) {
+        if(m_logger) m_logger.Error("Trade object not set in ExitManager");
+        return false;
+    }
+    
     // Set position by ticket
     if(!PositionSelectByTicket(ticket)) {
+        if(m_logger) m_logger.Warning("Cannot select position by ticket " + IntegerToString((int)ticket));
         return false;
     }
     
@@ -383,83 +716,7 @@ bool CExitManager::ModifyTakeProfit(ulong ticket, double newTP)
     double sl = PositionGetDouble(POSITION_SL);
     
     // Modify position
-    return OrderModify(ticket, sl, newTP);
-}
-
-//+------------------------------------------------------------------+
-//| Order modification using MT5 core functions                      |
-//+------------------------------------------------------------------+
-bool CExitManager::OrderModify(ulong ticket, double sl, double tp)
-{
-    // Select the position
-    if(!PositionSelectByTicket(ticket)) {
-        return false;
-    }
-    
-    // Prepare request
-    MqlTradeRequest request;
-    MqlTradeResult result;
-    ZeroMemory(request);
-    ZeroMemory(result);
-    
-    // Fill the request
-    request.action = TRADE_ACTION_SLTP;
-    request.position = ticket;
-    request.symbol = PositionGetString(POSITION_SYMBOL);
-    request.sl = sl;
-    request.tp = tp;
-    
-    // Send the request
-    bool success = OrderSend(request, result);
-    
-    if(!success) {
-        Print("OrderModify error: ", GetLastError());
-    }
-    
-    return (success && result.retcode == TRADE_RETCODE_DONE);
-}
-
-//+------------------------------------------------------------------+
-//| Order close (partial or full) using MT5 core functions           |
-//+------------------------------------------------------------------+
-bool CExitManager::OrderClose(ulong ticket, double volume)
-{
-    // Select the position
-    if(!PositionSelectByTicket(ticket)) {
-        return false;
-    }
-    
-    // Prepare request
-    MqlTradeRequest request;
-    MqlTradeResult result;
-    ZeroMemory(request);
-    ZeroMemory(result);
-    
-    // Fill the request
-    request.action = TRADE_ACTION_DEAL;
-    request.position = ticket;
-    request.symbol = PositionGetString(POSITION_SYMBOL);
-    request.volume = volume;
-    
-    // Set the price
-    if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) {
-        request.price = SymbolInfoDouble(request.symbol, SYMBOL_BID);
-        request.type = ORDER_TYPE_SELL;
-    } else {
-        request.price = SymbolInfoDouble(request.symbol, SYMBOL_ASK);
-        request.type = ORDER_TYPE_BUY;
-    }
-    
-    request.deviation = m_slippage;
-    
-    // Send the request
-    bool success = OrderSend(request, result);
-    
-    if(!success) {
-        Print("OrderClose error: ", GetLastError());
-    }
-    
-    return (success && result.retcode == TRADE_RETCODE_DONE);
+    return m_trade.PositionModify(ticket, sl, newTP);
 }
 
 //+------------------------------------------------------------------+
@@ -468,40 +725,42 @@ bool CExitManager::OrderClose(ulong ticket, double volume)
 double CExitManager::CalculateOptimalTrailingStop(double entryPrice, double currentPrice, 
                                                int type, double originalSL)
 {
+    string symbol = PositionGetString(POSITION_SYMBOL);
+    
     // Simple trailing stop - fixed distance
     if(!m_useAdaptiveTrailing) {
         if(type == 0) { // Buy
-            return currentPrice - m_trailingStep * _Point;
+            return currentPrice - m_trailingStep * SymbolInfoDouble(symbol, SYMBOL_POINT);
         } else { // Sell
-            return currentPrice + m_trailingStep * _Point;
+            return currentPrice + m_trailingStep * SymbolInfoDouble(symbol, SYMBOL_POINT);
         }
     }
     
     // Adaptive trailing stop - based on ATR
-    double atr = CalculateATR(14);
+    double atr = CalculateATR(14, symbol);
     
     // If ATR is 0 or invalid, use fixed distance
     if(atr <= 0) {
         if(type == 0) { // Buy
-            return currentPrice - m_trailingStep * _Point;
+            return currentPrice - m_trailingStep * SymbolInfoDouble(symbol, SYMBOL_POINT);
         } else { // Sell
-            return currentPrice + m_trailingStep * _Point;
+            return currentPrice + m_trailingStep * SymbolInfoDouble(symbol, SYMBOL_POINT);
         }
     }
     
     // Calculate trailing distance - smaller for larger profits
     double entryToCurrentPips = 0;
     if(type == 0) { // Buy
-        entryToCurrentPips = (currentPrice - entryPrice) / _Point;
+        entryToCurrentPips = (currentPrice - entryPrice) / SymbolInfoDouble(symbol, SYMBOL_POINT);
     } else { // Sell
-        entryToCurrentPips = (entryPrice - currentPrice) / _Point;
+        entryToCurrentPips = (entryPrice - currentPrice) / SymbolInfoDouble(symbol, SYMBOL_POINT);
     }
     
     double entryToSLPips = 0;
     if(type == 0) { // Buy
-        entryToSLPips = (entryPrice - originalSL) / _Point;
+        entryToSLPips = (entryPrice - originalSL) / SymbolInfoDouble(symbol, SYMBOL_POINT);
     } else { // Sell
-        entryToSLPips = (originalSL - entryPrice) / _Point;
+        entryToSLPips = (originalSL - entryPrice) / SymbolInfoDouble(symbol, SYMBOL_POINT);
     }
     
     // Use tighter trailing as profit increases
@@ -527,16 +786,24 @@ double CExitManager::CalculateOptimalTrailingStop(double entryPrice, double curr
 //+------------------------------------------------------------------+
 //| Calculate ATR                                                    |
 //+------------------------------------------------------------------+
-double CExitManager::CalculateATR(int period)
+double CExitManager::CalculateATR(int period, string symbol)
 {
-    double atr[1];
-    int handle = iATR(_Symbol, PERIOD_CURRENT, period);
+    if(symbol == NULL || symbol == "") {
+        symbol = _Symbol;
+    }
+    
+    int handle = iATR(symbol, PERIOD_CURRENT, period);
     
     if(handle == INVALID_HANDLE) {
+        if(m_logger) m_logger.Warning("Failed to create ATR handle");
         return 0;
     }
     
+    double atr[1];
+    
     if(CopyBuffer(handle, 0, 0, 1, atr) <= 0) {
+        if(m_logger) m_logger.Warning("Failed to copy ATR buffer");
+        IndicatorRelease(handle);
         return 0;
     }
     
@@ -550,28 +817,35 @@ double CExitManager::CalculateATR(int period)
 //+------------------------------------------------------------------+
 void CExitManager::CloseAllPositions(string reason)
 {
+    if(m_trade == NULL) {
+        if(m_logger) m_logger.Error("Trade object not set in ExitManager");
+        return;
+    }
+    
+    if(m_logger) m_logger.Info("Closing all positions. Reason: " + reason);
+    
     // Loop through all positions
-    for(int i = 0; i < PositionsTotal(); i++) {
-        // Get position ticket
+    for(int i = PositionsTotal() - 1; i >= 0; i--) {
         ulong ticket = PositionGetTicket(i);
         
-        // Skip positions with different symbol or magic number
-        if(PositionGetString(POSITION_SYMBOL) != _Symbol || 
-           PositionGetInteger(POSITION_MAGIC) != m_magicNumber) {
+        if(ticket <= 0) continue;
+        
+        // Skip positions with different magic number
+        if(PositionGetInteger(POSITION_MAGIC) != m_magicNumber) {
             continue;
         }
         
-        // Close position fully
-        double volume = PositionGetDouble(POSITION_VOLUME);
-        bool result = OrderClose(ticket, volume);
+        // Close position
+        m_trade.PositionClose(ticket);
         
-        // If position closed, decrement counter to account for removed position
-        if(result) {
-            i--;
+        // Remove from virtual tracking if needed
+        if(m_useVirtualSL) {
+            int index = FindVirtualLevel(ticket);
+            if(index >= 0) {
+                RemoveVirtualLevel(index);
+            }
         }
     }
-    
-    Print("All positions closed. Reason: ", reason);
 }
 
 //+------------------------------------------------------------------+
@@ -586,13 +860,18 @@ void CExitManager::SetMoreConservative(bool value)
         m_breakEvenTrigger *= 0.8;   // Set break-even sooner
         m_trailingStart *= 0.8;      // Start trailing sooner
         m_trailingStep *= 0.75;      // Tighter trailing
-    } else {
+        
+        if(m_logger) m_logger.Info("Exit Manager switched to more conservative settings");
+    }
+    else {
         // Reset to normal settings
         m_tp1Distance /= 0.8;
         m_tp1Percent -= 10.0;
         m_breakEvenTrigger /= 0.8;
         m_trailingStart /= 0.8;
         m_trailingStep /= 0.75;
+        
+        if(m_logger) m_logger.Info("Exit Manager returned to normal settings");
     }
 }
 
@@ -613,11 +892,15 @@ double CExitManager::GetTotalProfit() const
 //+------------------------------------------------------------------+
 //| Check if market is open                                          |
 //+------------------------------------------------------------------+
-bool CExitManager::IsMarketOpen()
+bool CExitManager::IsMarketOpen(string symbol)
 {
+    if(symbol == NULL || symbol == "") {
+        symbol = _Symbol;
+    }
+    
     // Check if we can get current bid price
-    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+    double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
     
     return (bid > 0 && ask > 0 && ask > bid);
 }
@@ -653,6 +936,8 @@ string CExitManager::GetStatusText() const
         status += "\n";
     }
     
+    status += "Virtual SL/TP: " + (m_useVirtualSL ? "ON" : "OFF") + "\n";
+    
     // Open positions
     status += "Open Positions: " + IntegerToString(m_tradeCount) + "\n";
     
@@ -660,7 +945,7 @@ string CExitManager::GetStatusText() const
         status += "Current Trades:\n";
         
         for(int i = 0; i < MathMin(m_tradeCount, 3); i++) {
-            status += "  #" + IntegerToString(m_trades[i].ticket) + ": ";
+            status += "  #" + IntegerToString((int)m_trades[i].ticket) + ": ";
             status += (m_trades[i].type == 0 ? "BUY" : "SELL") + " ";
             status += DoubleToString(m_trades[i].lots, 2) + " lots, ";
             status += "Profit: " + DoubleToString(m_trades[i].profit, 2) + "\n";
@@ -681,5 +966,3 @@ string CExitManager::GetStatusText() const
     
     return status;
 }
-
-#endif // EXIT_MANAGER_MQH
