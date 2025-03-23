@@ -126,6 +126,7 @@ input bool TradeVolatileRegime = false;         // Trade Volatile Regime
 // Global objects
 CLogger* g_logger = NULL;                       // Logger
 CSonicRCore* g_sonicCore = NULL;                // Core strategy
+CSonicRSR* g_srSystem = NULL;                   // Support/Resistance system
 CRiskManager* g_riskManager = NULL;             // Risk management
 CEntryManager* g_entryManager = NULL;           // Entry management
 CExitManager* g_exitManager = NULL;             // Exit management
@@ -198,6 +199,18 @@ int OnInit()
     g_trade.SetExpertMagicNumber(MagicNumber);
     g_trade.SetDeviationInPoints(SlippagePoints);
     g_trade.LogLevel(LOG_LEVEL_ERRORS); // Only log errors from trade object
+    
+    // Initialize SR system
+    g_srSystem = new CSonicRSR();
+    if(g_srSystem == NULL) {
+        g_logger.Error("Failed to initialize SR system");
+        return INIT_FAILED;
+    }
+    
+    if(!g_srSystem.Initialize()) {
+        g_logger.Error("Failed to initialize SR system indicators");
+        return INIT_FAILED;
+    }
     
     // Initialize core strategy
     g_sonicCore = new CSonicRCore();
@@ -342,21 +355,22 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-    // Log deinitialization
+    // Log EA stopping
     if(g_logger != NULL) {
-        g_logger.Info("Shutting down SonicR PropFirm EA. Reason: " + GetDeinitReasonText(reason));
+        g_logger.Info("Stopping SonicR PropFirm EA. Reason: " + IntegerToString(reason));
     }
     
-    // Remove dashboard
+    // Remove dashboard if exists
     if(g_dashboard != NULL) {
         g_dashboard.Remove();
     }
     
-    // Free resources using SafeDelete
+    // Free resources using SafeDelete template function
     SafeDelete(g_dashboard);
     SafeDelete(g_marketRegimeFilter);
     SafeDelete(g_newsFilter);
     SafeDelete(g_sessionFilter);
+    SafeDelete(g_srSystem);     // Free SR system resources
     SafeDelete(g_exitManager);
     SafeDelete(g_entryManager);
     SafeDelete(g_propSettings);
@@ -366,7 +380,7 @@ void OnDeinit(const int reason)
     SafeDelete(g_trade);
     SafeDelete(g_logger);
     
-    // Remove chart objects
+    // Delete chart objects
     ObjectsDeleteAll(0, "SonicR_");
 }
 
@@ -449,17 +463,26 @@ void ProcessStateMachine(bool isNewBar)
             break;
             
         case STATE_SCANNING: {
-            // Only scan for signals on new bar
+            // Only scan for signals on new bars
             if(isNewBar) {
-                // Check if trading is allowed by all filters
+                // Check if trading is allowed by the filters
                 if(IsTradingAllowed()) {
-                    // Check for new signal
+                    // Check for new signals
                     int signal = g_entryManager.CheckForSignal();
                     
                     if(signal != 0) {
                         g_logger.Info("Signal detected: " + (signal > 0 ? "BUY" : "SELL") + 
                                     " with quality " + DoubleToString(g_entryManager.GetSignalQuality(), 2));
-                        g_stateMachine.TransitionTo(STATE_WAITING, "Signal detected");
+                        
+                        // Confirm signal with S/R system
+                        if(g_srSystem.ConfirmSignal(signal)) {
+                            g_logger.Info("Signal confirmed by SR system");
+                            g_stateMachine.TransitionTo(STATE_WAITING, "Signal detected and confirmed");
+                        }
+                        else {
+                            g_logger.Info("Signal rejected by SR system");
+                            // Stay in scanning state
+                        }
                     }
                 }
             }
