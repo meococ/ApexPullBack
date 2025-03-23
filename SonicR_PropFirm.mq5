@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 #property copyright "SonicR PropFirm EA"
 #property link      "https://sonicr.com"
-#property version   "1.60"
+#property version   "1.61"
 #property strict
 #property description "SonicR PropFirm EA - Hệ thống giao dịch SonicR được tối ưu hóa cho các thử thách PropFirm"
 
@@ -379,7 +379,7 @@ int OnInit()
         return INIT_FAILED;
     }
     
-    g_logger.Info("Đang khởi tạo SonicR PropFirm EA v1.60...");
+    g_logger.Info("Đang khởi tạo SonicR PropFirm EA v1.61...");
     
     // Khởi tạo đối tượng giao dịch
     g_trade = new CTrade();
