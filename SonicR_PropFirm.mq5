@@ -8,6 +8,7 @@
 #property strict
 #property description "SonicR PropFirm EA - Hệ thống giao dịch SonicR được tối ưu hóa cho các thử thách PropFirm"
 
+// Đã cập nhật version 1.61 - Ngày: 28/11/2023
 // Định nghĩa các enum trước khi include
 enum ENUM_PROP_FIRM
 {
