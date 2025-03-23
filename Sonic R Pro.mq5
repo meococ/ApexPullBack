@@ -11,6 +11,7 @@
 // Include necessary files
 #include <Trade\Trade.mqh>
 #include "Include\SonicR_Core.mqh"
+#include "Include\SonicR_SR.mqh"
 #include "Include\SonicR_RiskManager.mqh"
 #include "Include\SonicR_ExitManager.mqh"
 #include "Include\SonicR_Filters.mqh"
