@@ -1201,34 +1201,26 @@ void CSonicRCore::Update()
 }
 
 //+------------------------------------------------------------------+
-//| Check if PVSRA confirms direction                                |
+//| Check if PVSRA confirms the signal direction                     |
 //+------------------------------------------------------------------+
 bool CSonicRCore::IsPVSRAConfirming(int direction) const
 {
-    // Simple implementation since PVSRA indicator isn't fully implemented
-    // In a real implementation, we would check volume patterns
+    // Cần truy cập đến đối tượng PVSRA toàn cục
+    extern CPVSRA* g_pvsra;
     
-    // Check volume for confirmation (simple proxy for PVSRA)
-    long volume[];
-    ArraySetAsSeries(volume, true);
-    
-    if(CopyTickVolume(_Symbol, PERIOD_CURRENT, 0, 5, volume) <= 0) {
+    if(g_pvsra == NULL) {
         return false;
     }
     
-    // Calculate average volume
-    long avgVolume = 0;
-    for(int i = 1; i < 5; i++) {
-        avgVolume += volume[i];
+    // Kiểm tra xác nhận phù hợp với hướng
+    if(direction > 0) {
+        return g_pvsra.IsBullishConfirmation();
     }
-    avgVolume /= 4;
-    
-    // Check if current volume is higher than average
-    if(volume[0] > avgVolume * 1.5) {
-        return true; // Strong volume is confirming
+    else if(direction < 0) {
+        return g_pvsra.IsBearishConfirmation();
     }
     
-    return false; // No confirmation
+    return false;
 }
 
 //+------------------------------------------------------------------+

@@ -4,9 +4,9 @@
 //+------------------------------------------------------------------+
 #property copyright "SonicR Trading Systems"
 #property link      "https://sonicr.com"
-#property version   "1.80"
+#property version   "2.00"
 #property strict
-#property description "SonicR PropFirm EA - Price Action based EA optimized for PropFirm challenges"
+#property description "SonicR PropFirm EA 2.0 - Advanced PropFirm challenge trading system"
 
 // Include necessary files
 #include <Trade\Trade.mqh>
@@ -19,6 +19,7 @@
 #include "Include\SonicR_Logger.mqh"
 #include "Include\SonicR_Dashboard.mqh"
 #include "Include\SonicR_AdaptiveFilters.mqh"  // New include for adaptive filters
+#include "Include\SonicR_PVSRA.mqh"  // Include PVSRA component
 
 // Enumerations
 enum ENUM_PROP_FIRM
@@ -132,6 +133,32 @@ input int ChallengeDaysRemaining = 30;          // Days Remaining in Challenge
 input double EmergencyProgressThreshold = 30.0; // Emergency Progress Threshold (%)
 input double ConservativeProgressThreshold = 80.0; // Conservative Progress Threshold (%)
 
+// --- PVSRA Settings ---
+input string PVSRASettings = "===== PVSRA Settings =====";
+input bool UsePVSRA = true;                   // Use PVSRA Analysis
+input int VolumeAvgPeriod = 20;               // Volume Average Period
+input int SpreadAvgPeriod = 10;               // Spread Average Period
+input int ConfirmationBars = 3;               // Confirmation Bars
+input double VolumeThreshold = 1.5;           // Volume Threshold (150% of avg)
+input double SpreadThreshold = 0.7;           // Spread Threshold (70% of avg)
+
+// --- SR System Settings ---
+input string SRSettings = "===== Support/Resistance Settings =====";
+input bool UseSRFilter = true;                // Use S/R Filter
+input bool UseMultiTimeframeSR = true;        // Use Multi-Timeframe S/R
+input int SRLookbackPeriod = 100;             // S/R Lookback Period
+input double SRQualityThreshold = 70.0;       // S/R Zone Quality Threshold
+
+// --- Dashboard Settings ---
+input string DashboardSettings = "===== Dashboard Settings =====";
+input color BullishColor = clrForestGreen;    // Bullish Color
+input color BearishColor = clrFireBrick;      // Bearish Color
+input color NeutralColor = clrDarkGray;       // Neutral Color
+input color TextColor = clrWhite;             // Text Color
+input color BackgroundColor = C'33,33,33';    // Background Color
+input int FontSize = 8;                      // Font Size
+input bool ShowDetailedStats = true;          // Show Detailed Statistics
+
 // Global objects
 CLogger* g_logger = NULL;                       // Logger
 CSonicRCore* g_sonicCore = NULL;                // Core strategy
@@ -147,6 +174,7 @@ CDashboard* g_dashboard = NULL;                 // Dashboard
 CPropSettings* g_propSettings = NULL;           // PropFirm settings
 CTrade* g_trade = NULL;                         // MT5 trade object
 CAdaptiveFilters* g_adaptiveFilters = NULL;     // Adaptive filters
+CPVSRA* g_pvsra = NULL;                         // PVSRA analysis
 
 // State variables
 bool g_initialized = false;
@@ -197,7 +225,7 @@ int OnInit()
         return INIT_FAILED;
     }
     
-    g_logger.Info("Initializing SonicR PropFirm EA v1.80...");
+    g_logger.Info("Initializing SonicR PropFirm EA v2.00...");
     
     // Initialize MT5 trade object
     g_trade = new CTrade();
@@ -210,15 +238,38 @@ int OnInit()
     g_trade.SetDeviationInPoints(SlippagePoints);
     g_trade.LogLevel(LOG_LEVEL_ERRORS); // Only log errors from trade object
     
-    // Initialize SR system
+    // Initialize SR system with new parameters
     g_srSystem = new CSonicRSR();
     if(g_srSystem == NULL) {
         g_logger.Error("Failed to initialize SR system");
         return INIT_FAILED;
     }
     
+    // Configure SR system with user parameters
+    g_srSystem.SetParameters(SRLookbackPeriod, SRQualityThreshold, UseMultiTimeframeSR);
+    
     if(!g_srSystem.Initialize()) {
         g_logger.Error("Failed to initialize SR system indicators");
+        return INIT_FAILED;
+    }
+    
+    // Initialize PVSRA system
+    g_pvsra = new CPVSRA();
+    if(g_pvsra == NULL) {
+        g_logger.Error("Failed to initialize PVSRA system");
+        return INIT_FAILED;
+    }
+    
+    // Set logger for PVSRA
+    g_pvsra.SetLogger(g_logger);
+    
+    // Configure PVSRA settings
+    g_pvsra.SetParameters(VolumeAvgPeriod, SpreadAvgPeriod, ConfirmationBars);
+    g_pvsra.SetThresholds(VolumeThreshold, SpreadThreshold);
+    
+    // Initialize PVSRA
+    if(!g_pvsra.Initialize()) {
+        g_logger.Error("Failed to initialize PVSRA indicators");
         return INIT_FAILED;
     }
     
@@ -342,18 +393,7 @@ int OnInit()
     );
     
     // Initialize dashboard if required
-    if(DisplayDashboard) {
-        g_dashboard = new CDashboard();
-        if(g_dashboard == NULL) {
-            g_logger.Warning("Failed to initialize Dashboard. Continuing without dashboard.");
-        }
-        else {
-            g_dashboard.SetLogger(g_logger);
-            g_dashboard.SetDependencies(g_sonicCore, g_riskManager, g_stateMachine, g_propSettings);
-            g_dashboard.SetAdaptiveFilters(g_adaptiveFilters); // Set adaptive filters for dashboard
-            g_dashboard.Create();
-        }
-    }
+    InitializeDashboard();
     
     // Initialize adaptive filters
     g_adaptiveFilters = new CAdaptiveFilters();
@@ -380,9 +420,12 @@ int OnInit()
         g_logger.Info("Adaptive Filters: Disabled");
     }
     
-    // Log successful initialization
-    g_logger.Info("Initialization complete. Running in " + EnumToString(g_propSettings.GetPhase()) + 
-                " phase for " + EnumToString(g_propSettings.GetPropFirm()));
+    // Log successful initialization with more details
+    g_logger.Info("Initialization complete. Running SonicR PropFirm EA 2.0 in " + 
+                 EnumToString(g_propSettings.GetPhase()) + " phase for " + 
+                 EnumToString(g_propSettings.GetPropFirm()) + 
+                 " with adaptive filters " + (UseAdaptiveFilters ? "enabled" : "disabled") +
+                 " and PVSRA analysis " + (UsePVSRA ? "enabled" : "disabled"));
     
     g_initialized = true;
     return(INIT_SUCCEEDED);
@@ -416,6 +459,13 @@ void OnDeinit(const int reason)
     SafeDelete(g_riskManager);
     SafeDelete(g_sonicCore);
     SafeDelete(g_adaptiveFilters);  // Free adaptive filters resources
+    
+    // Cleanup and free PVSRA
+    if(g_pvsra != NULL) {
+        g_pvsra.Cleanup();
+        SafeDelete(g_pvsra);
+    }
+    
     SafeDelete(g_trade);
     SafeDelete(g_logger);
     
@@ -468,6 +518,11 @@ void OnTick()
             
             // Log current market regime
             g_logger.Info("Current market regime: " + g_marketRegimeFilter.GetCurrentRegimeAsString());
+        }
+        
+        // Update PVSRA on new bar
+        if(UsePVSRA) {
+            g_pvsra.Update();
         }
     }
     
@@ -544,12 +599,22 @@ void ProcessStateMachine(bool isNewBar)
                                     " with quality " + DoubleToString(g_entryManager.GetSignalQuality(), 2));
                         
                         // Confirm signal with S/R system
-                        if(g_srSystem.ConfirmSignal(signal)) {
-                            g_logger.Info("Signal confirmed by SR system");
+                        bool srConfirmed = g_srSystem.ConfirmSignal(signal);
+                        
+                        // Confirm signal with PVSRA if enabled
+                        bool pvsraConfirmed = true; // Default to true if not using PVSRA
+                        if(UsePVSRA) {
+                            pvsraConfirmed = g_sonicCore.IsPVSRAConfirming(signal);
+                            g_logger.Info("PVSRA confirmation: " + (pvsraConfirmed ? "YES" : "NO"));
+                        }
+                        
+                        // Both systems must confirm
+                        if(srConfirmed && (!UsePVSRA || pvsraConfirmed)) {
+                            g_logger.Info("Signal confirmed by confirmation systems");
                             g_stateMachine.TransitionTo(STATE_WAITING, "Signal detected and confirmed");
                         }
                         else {
-                            g_logger.Info("Signal rejected by SR system");
+                            g_logger.Info("Signal rejected by confirmation systems");
                             // Stay in scanning state
                         }
                     }
@@ -764,6 +829,31 @@ void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest&
             if(UseAdaptiveFilters && g_adaptiveFilters != NULL) {
                 g_adaptiveFilters.UpdateBasedOnResults(false, _Symbol);
             }
+        }
+    }
+}
+
+// Initializing dashboard components
+void InitializeDashboard()
+{
+    // Initialize dashboard if required
+    if(DisplayDashboard) {
+        g_dashboard = new CDashboard();
+        if(g_dashboard == NULL) {
+            g_logger.Warning("Failed to initialize Dashboard. Continuing without dashboard.");
+        }
+        else {
+            g_dashboard.SetLogger(g_logger);
+            g_dashboard.SetDependencies(g_sonicCore, g_riskManager, g_stateMachine, g_propSettings);
+            g_dashboard.SetAdaptiveFilters(g_adaptiveFilters); // Set adaptive filters for dashboard
+            g_dashboard.SetPVSRA(g_pvsra); // Set PVSRA for dashboard
+            
+            // Set colors for dashboard
+            g_dashboard.SetColors(BullishColor, BearishColor, NeutralColor, TextColor, BackgroundColor);
+            g_dashboard.SetFontSize(FontSize);
+            g_dashboard.SetShowDetailedStats(ShowDetailedStats);
+            
+            g_dashboard.Create();
         }
     }
 }

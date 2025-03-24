@@ -113,6 +113,13 @@ public:
     bool IsEmergencyMode() const { return m_isEmergencyMode; }
     bool IsCloseToTarget() const { return m_isCloseToTarget; }
     
+    // PropFirm-specific optimizations
+    void OptimizeForPropFirm();
+    void OptimizeForFTMO();
+    void OptimizeForThe5ers();
+    void OptimizeForMFF();
+    void OptimizeForE8();
+    
     // Set dependencies
     void SetLogger(CLogger* logger) { m_logger = logger; }
     
@@ -401,6 +408,9 @@ void CPropSettings::SetPropFirm(ENUM_PROP_FIRM propFirm)
     if(m_propFirm != propFirm) {
         m_propFirm = propFirm;
         ConfigurePropFirm();
+        
+        // Apply PropFirm-specific optimizations
+        OptimizeForPropFirm();
     }
 }
 
@@ -504,4 +514,330 @@ double CPropSettings::GetProgressPercent() const
     
     double daysElapsed = m_challengeTotalDays - m_challengeRemainingDays;
     return 100.0 * daysElapsed / m_challengeTotalDays;
+}
+
+//+------------------------------------------------------------------+
+//| PropFirm-specific optimizations                                  |
+//+------------------------------------------------------------------+
+void CPropSettings::OptimizeForPropFirm()
+{
+    if(m_logger) m_logger.Info("Optimizing EA parameters for " + EnumToString(m_propFirm));
+    
+    switch(m_propFirm) {
+        case PROP_FIRM_FTMO:
+            OptimizeForFTMO();
+            break;
+            
+        case PROP_FIRM_THE5ERS:
+            OptimizeForThe5ers();
+            break;
+            
+        case PROP_FIRM_MFF:
+            OptimizeForMFF();
+            break;
+            
+        case PROP_FIRM_E8:
+            OptimizeForE8();
+            break;
+            
+        case PROP_FIRM_CUSTOM:
+            // Custom settings already set
+            break;
+            
+        default:
+            if(m_logger) m_logger.Warning("Unknown PropFirm type, using default settings");
+            break;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| FTMO specific optimizations                                      |
+//+------------------------------------------------------------------+
+void CPropSettings::OptimizeForFTMO()
+{
+    // FTMO strategy: Balance between win rate and profit factor
+    extern CRiskManager* g_riskManager;
+    extern CAdaptiveFilters* g_adaptiveFilters;
+    extern CSessionFilter* g_sessionFilter;
+    extern CPVSRA* g_pvsra;
+    extern CSonicRCore* g_sonicCore;
+    extern CEntryManager* g_entryManager;
+    extern CExitManager* g_exitManager;
+    
+    // Risk parameters
+    if(g_riskManager != NULL) {
+        // FTMO has 10% max DD, 5% daily DD
+        // Be conservative - stay below limits
+        g_riskManager.SetRiskPercent(0.5);     // 0.5% per trade
+        g_riskManager.SetMaxDailyDD(3.5);      // 3.5% daily DD limit
+        g_riskManager.SetMaxTotalDD(7.0);      // 7% total DD limit
+        g_riskManager.SetMaxTradesPerDay(3);   // Limit to 3 trades per day
+        
+        // Set recovery mode to be more conservative
+        g_riskManager.SetRecoveryMode(true, 0.5);  // 50% reduction in recovery
+        
+        if(m_logger) m_logger.Info("FTMO: Risk parameters optimized");
+    }
+    
+    // Session filter
+    if(g_sessionFilter != NULL) {
+        // FTMO is more European-focused
+        g_sessionFilter.SetSessionSettings(true, true, true, false);  // All except Asian
+        g_sessionFilter.SetFridaySettings(true, 16);  // Trade Friday until 16:00 GMT
+        
+        if(m_logger) m_logger.Info("FTMO: Session settings optimized");
+    }
+    
+    // PVSRA settings
+    if(g_pvsra != NULL) {
+        // Higher volume thresholds for more quality
+        g_pvsra.SetParameters(20, 10, 3);
+        g_pvsra.SetThresholds(1.7, 0.6);
+        
+        if(m_logger) m_logger.Info("FTMO: PVSRA settings optimized");
+    }
+    
+    // Entry settings
+    if(g_entryManager != NULL) {
+        // Focus on quality over quantity
+        g_entryManager.SetMinRR(1.8);              // Higher R:R
+        g_entryManager.SetMinSignalQuality(75.0);  // Higher quality threshold
+        g_entryManager.SetUseScoutEntries(false);  // No scout entries
+        
+        if(m_logger) m_logger.Info("FTMO: Entry settings optimized");
+    }
+    
+    // Exit settings
+    if(g_exitManager != NULL) {
+        // Conservative exit strategy
+        g_exitManager.SetPartialCloseSettings(true, 60.0, 1.5, 2.5);  // Close 60% at TP1
+        g_exitManager.SetBreakEvenSettings(true, 0.6, 5.0);          // Earlier breakeven
+        g_exitManager.SetTrailingSettings(true, 1.3, 15.0, true);    // Start trailing earlier
+        
+        if(m_logger) m_logger.Info("FTMO: Exit settings optimized");
+    }
+    
+    // Adaptive filters (if available)
+    if(g_adaptiveFilters != NULL) {
+        // Set more conservative thresholds
+        g_adaptiveFilters.SetProgressThresholds(35.0, 75.0);  // Emergency at 35%, conservative at 75%
+        
+        if(m_logger) m_logger.Info("FTMO: Adaptive filters optimized");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| The5ers specific optimizations                                   |
+//+------------------------------------------------------------------+
+void CPropSettings::OptimizeForThe5ers()
+{
+    // The5ers strategy: Ultra conservative
+    extern CRiskManager* g_riskManager;
+    extern CAdaptiveFilters* g_adaptiveFilters;
+    extern CSessionFilter* g_sessionFilter;
+    extern CPVSRA* g_pvsra;
+    extern CSonicRCore* g_sonicCore;
+    extern CEntryManager* g_entryManager;
+    extern CExitManager* g_exitManager;
+    
+    // Risk parameters - The5ers has stricter drawdown requirements
+    if(g_riskManager != NULL) {
+        g_riskManager.SetRiskPercent(0.4);     // Lower risk per trade
+        g_riskManager.SetMaxDailyDD(2.5);      // Lower daily DD limit
+        g_riskManager.SetMaxTotalDD(3.5);      // Lower total DD limit
+        g_riskManager.SetMaxTradesPerDay(2);   // Fewer trades per day
+        g_riskManager.SetRecoveryMode(true, 0.4);  // More aggressive reduction
+        
+        if(m_logger) m_logger.Info("The5ers: Risk parameters optimized - ultra conservative");
+    }
+    
+    // Session filter
+    if(g_sessionFilter != NULL) {
+        // Only the best sessions
+        g_sessionFilter.SetSessionSettings(true, true, true, false);
+        g_sessionFilter.SetFridaySettings(false, 0);  // No Friday trading
+        
+        if(m_logger) m_logger.Info("The5ers: Session settings optimized - only best sessions");
+    }
+    
+    // PVSRA settings
+    if(g_pvsra != NULL) {
+        // Even higher thresholds
+        g_pvsra.SetParameters(25, 10, 4);  // Longer volume average period, more confirmation bars
+        g_pvsra.SetThresholds(1.8, 0.5);   // Higher volume threshold, lower spread threshold
+        
+        if(m_logger) m_logger.Info("The5ers: PVSRA settings optimized - higher quality");
+    }
+    
+    // Entry settings
+    if(g_entryManager != NULL) {
+        // Very high quality only
+        g_entryManager.SetMinRR(2.0);              // Higher R:R
+        g_entryManager.SetMinSignalQuality(80.0);  // Higher quality threshold
+        g_entryManager.SetUseScoutEntries(false);  // No scout entries
+        
+        if(m_logger) m_logger.Info("The5ers: Entry settings optimized - high quality only");
+    }
+    
+    // Exit settings
+    if(g_exitManager != NULL) {
+        // Very conservative exits
+        g_exitManager.SetPartialCloseSettings(true, 70.0, 1.4, 2.5);  // Close 70% at TP1
+        g_exitManager.SetBreakEvenSettings(true, 0.5, 5.0);          // Very early breakeven
+        g_exitManager.SetTrailingSettings(true, 1.2, 10.0, true);    // Tight trailing
+        
+        if(m_logger) m_logger.Info("The5ers: Exit settings optimized - conservative exits");
+    }
+    
+    // Adaptive filters (if available)
+    if(g_adaptiveFilters != NULL) {
+        // Very conservative thresholds
+        g_adaptiveFilters.SetProgressThresholds(40.0, 70.0);  // Even earlier emergency & conservative modes
+        
+        if(m_logger) m_logger.Info("The5ers: Adaptive filters optimized - very conservative");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| MFF specific optimizations                                       |
+//+------------------------------------------------------------------+
+void CPropSettings::OptimizeForMFF()
+{
+    // MFF strategy: More balanced, slightly higher risk
+    extern CRiskManager* g_riskManager;
+    extern CAdaptiveFilters* g_adaptiveFilters;
+    extern CSessionFilter* g_sessionFilter;
+    extern CPVSRA* g_pvsra;
+    extern CSonicRCore* g_sonicCore;
+    extern CEntryManager* g_entryManager;
+    extern CExitManager* g_exitManager;
+    
+    // Risk parameters - MFF has more relaxed drawdown limits
+    if(g_riskManager != NULL) {
+        g_riskManager.SetRiskPercent(0.7);     // Higher risk per trade
+        g_riskManager.SetMaxDailyDD(3.5);      // Standard daily DD limit
+        g_riskManager.SetMaxTotalDD(8.0);      // Higher total DD limit
+        g_riskManager.SetMaxTradesPerDay(4);   // More trades allowed
+        g_riskManager.SetRecoveryMode(true, 0.6);  // Less reduction in recovery
+        
+        if(m_logger) m_logger.Info("MFF: Risk parameters optimized - more balanced approach");
+    }
+    
+    // Session filter
+    if(g_sessionFilter != NULL) {
+        // Allow all major sessions
+        g_sessionFilter.SetSessionSettings(true, true, true, false);
+        g_sessionFilter.SetFridaySettings(true, 18);  // Trade Friday until later
+        
+        if(m_logger) m_logger.Info("MFF: Session settings optimized - more trading hours");
+    }
+    
+    // PVSRA settings
+    if(g_pvsra != NULL) {
+        // Standard thresholds
+        g_pvsra.SetParameters(20, 10, 3);  // Standard settings
+        g_pvsra.SetThresholds(1.5, 0.7);   // Standard thresholds
+        
+        if(m_logger) m_logger.Info("MFF: PVSRA settings optimized - standard quality");
+    }
+    
+    // Entry settings
+    if(g_entryManager != NULL) {
+        // Standard quality
+        g_entryManager.SetMinRR(1.5);              // Standard R:R
+        g_entryManager.SetMinSignalQuality(70.0);  // Standard quality threshold
+        g_entryManager.SetUseScoutEntries(true);   // Allow scout entries in strong trends
+        
+        if(m_logger) m_logger.Info("MFF: Entry settings optimized - more trading opportunities");
+    }
+    
+    // Exit settings
+    if(g_exitManager != NULL) {
+        // Standard exit strategy
+        g_exitManager.SetPartialCloseSettings(true, 50.0, 1.5, 2.5);  // Close 50% at TP1
+        g_exitManager.SetBreakEvenSettings(true, 0.7, 10.0);         // Standard breakeven
+        g_exitManager.SetTrailingSettings(true, 1.5, 20.0, true);    // Looser trailing
+        
+        if(m_logger) m_logger.Info("MFF: Exit settings optimized - balanced exits");
+    }
+    
+    // Adaptive filters (if available)
+    if(g_adaptiveFilters != NULL) {
+        // Standard thresholds
+        g_adaptiveFilters.SetProgressThresholds(30.0, 80.0);  // Standard thresholds
+        
+        if(m_logger) m_logger.Info("MFF: Adaptive filters optimized - standard settings");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| E8 Funding specific optimizations                                |
+//+------------------------------------------------------------------+
+void CPropSettings::OptimizeForE8()
+{
+    // E8 Funding strategy: Balanced approach with moderate risk
+    extern CRiskManager* g_riskManager;
+    extern CAdaptiveFilters* g_adaptiveFilters;
+    extern CSessionFilter* g_sessionFilter;
+    extern CPVSRA* g_pvsra;
+    extern CSonicRCore* g_sonicCore;
+    extern CEntryManager* g_entryManager;
+    extern CExitManager* g_exitManager;
+    
+    // Risk parameters - Using E8 specific settings
+    if(g_riskManager != NULL) {
+        g_riskManager.SetRiskPercent(0.6);     // Moderate risk per trade
+        g_riskManager.SetMaxDailyDD(3.0);      // Moderate daily DD limit
+        g_riskManager.SetMaxTotalDD(7.0);      // Standard total DD limit
+        g_riskManager.SetMaxTradesPerDay(3);   // Standard trades per day
+        g_riskManager.SetRecoveryMode(true, 0.5);  // Standard reduction in recovery
+        
+        if(m_logger) m_logger.Info("E8: Risk parameters optimized - balanced approach");
+    }
+    
+    // Session filter
+    if(g_sessionFilter != NULL) {
+        // Focus on main sessions
+        g_sessionFilter.SetSessionSettings(true, true, true, false);  // All major sessions except Asian
+        g_sessionFilter.SetFridaySettings(true, 17);  // Trade Friday until 17:00 GMT
+        
+        if(m_logger) m_logger.Info("E8: Session settings optimized - main trading sessions");
+    }
+    
+    // PVSRA settings
+    if(g_pvsra != NULL) {
+        // Balanced thresholds
+        g_pvsra.SetParameters(22, 10, 3);  // Slightly longer volume average period
+        g_pvsra.SetThresholds(1.6, 0.65);  // Balanced thresholds
+        
+        if(m_logger) m_logger.Info("E8: PVSRA settings optimized - balanced quality");
+    }
+    
+    // Entry settings
+    if(g_entryManager != NULL) {
+        // Good quality entries
+        g_entryManager.SetMinRR(1.7);              // Good R:R
+        g_entryManager.SetMinSignalQuality(72.0);  // Good quality threshold
+        g_entryManager.SetUseScoutEntries(true);   // Allow limited scout entries
+        
+        if(m_logger) m_logger.Info("E8: Entry settings optimized - good quality entries");
+    }
+    
+    // Exit settings
+    if(g_exitManager != NULL) {
+        // Balanced exit strategy using user-specified parameters
+        g_exitManager.SetPartialCloseSettings(true, 55.0, 1.4, 2.3);  // 55% partial close at TP1
+        g_exitManager.SetBreakEvenSettings(true, 0.65, 7.0);         // Moderate breakeven
+        g_exitManager.SetTrailingSettings(true, 1.4, 15.0, true);    // Balanced trailing
+        
+        if(m_logger) m_logger.Info("E8: Exit settings optimized - balanced exits");
+    }
+    
+    // Adaptive filters (if available)
+    if(g_adaptiveFilters != NULL) {
+        // Balanced thresholds
+        g_adaptiveFilters.SetProgressThresholds(32.0, 78.0);  // Balanced thresholds
+        
+        if(m_logger) m_logger.Info("E8: Adaptive filters optimized - balanced settings");
+    }
 }
