@@ -830,38 +830,38 @@ void CSonicRSR::DrawLevels()
 }
 
 //+------------------------------------------------------------------+
-//| Check if a signal is confirmed by S/R levels                     |
+//| Confirm if signal is valid based on SR levels                     |
 //+------------------------------------------------------------------+
 bool CSonicRSR::ConfirmSignal(int signal)
 {
     if(signal == 0) return false;
     
-    // Get current price
+    // Lấy giá hiện tại
     double currentPrice = signal > 0 ? 
                         SymbolInfoDouble(_Symbol, SYMBOL_ASK) : 
                         SymbolInfoDouble(_Symbol, SYMBOL_BID);
     
-    // Check if price is at a significant S/R level
+    // Kiểm tra giá có ở gần S/R hay không
     bool atSR = IsPriceAtSR(currentPrice, signal);
     
-    // Check if price is at EMA
+    // Kiểm tra giá có ở gần EMA
     bool atEMA = IsPriceAtEMA(currentPrice, signal);
     
-    // Check for price reaction at EMA
+    // Kiểm tra phản ứng giá tại EMA
     bool emaReaction = HasEMAReaction(signal);
     
-    // Confirm if either criteria is met
+    // Xác nhận nếu thỏa mãn một trong các điều kiện
     bool isConfirmed = atSR || atEMA || emaReaction;
     
     if(m_logger) {
         if(isConfirmed) {
-            m_logger.Info("Signal confirmed by S/R: " + 
-                        (atSR ? "At S/R level" : "") + 
-                        (atEMA ? " At EMA" : "") + 
-                        (emaReaction ? " EMA reaction" : ""));
+            m_logger.Info("Tín hiệu được xác nhận bởi S/R: " + 
+                        (atSR ? "Tại S/R" : "") + 
+                        (atEMA ? " Tại EMA" : "") + 
+                        (emaReaction ? " Phản ứng tại EMA" : ""));
         }
         else {
-            m_logger.Debug("Signal not confirmed by S/R");
+            m_logger.Debug("Tín hiệu không được xác nhận bởi S/R");
         }
     }
     
@@ -941,23 +941,35 @@ bool CSonicRSR::IsPriceAtSR(double price, int direction)
 }
 
 //+------------------------------------------------------------------+
-//| Check if price is at an EMA level                                |
+//| Check if price is near an EMA level                              |
 //+------------------------------------------------------------------+
 bool CSonicRSR::IsPriceAtEMA(double price, int direction)
 {
     if(!m_useEMALevels) return false;
     
-    for(int i = 0; i < ArraySize(m_emaDynamicLevels); i++) {
-        // Check if price is close to EMA
-        if(MathAbs(price - m_emaDynamicLevels[i].price) <= m_reactionDistance * 2) {
-            // For buy signals, price should be above EMA
-            if(direction > 0 && price > m_emaDynamicLevels[i].price) {
-                return true;
-            }
-            // For sell signals, price should be below EMA
-            else if(direction < 0 && price < m_emaDynamicLevels[i].price) {
-                return true;
-            }
+    // Lấy giá trị EMA200 trên M15
+    double ema200M15[];
+    ArraySetAsSeries(ema200M15, true);
+    
+    int ema200M15Handle = iMA(_Symbol, PERIOD_M15, 200, 0, MODE_EMA, PRICE_CLOSE);
+    if(ema200M15Handle == INVALID_HANDLE) return false;
+    
+    if(CopyBuffer(ema200M15Handle, 0, 0, 1, ema200M15) <= 0) {
+        IndicatorRelease(ema200M15Handle);
+        return false;
+    }
+    
+    IndicatorRelease(ema200M15Handle);
+    
+    // Kiểm tra nếu giá gần EMA200
+    if(MathAbs(price - ema200M15[0]) <= m_reactionDistance * 2) {
+        // Buy signal: giá phải ở trên EMA200
+        if(direction > 0 && price > ema200M15[0]) {
+            return true;
+        }
+        // Sell signal: giá phải ở dưới EMA200
+        else if(direction < 0 && price < ema200M15[0]) {
+            return true;
         }
     }
     
@@ -965,28 +977,26 @@ bool CSonicRSR::IsPriceAtEMA(double price, int direction)
 }
 
 //+------------------------------------------------------------------+
-//| Check if there's a recent price reaction at EMA                  |
+//| Check if price has recently reacted at an EMA level              |
 //+------------------------------------------------------------------+
 bool CSonicRSR::HasEMAReaction(int direction)
 {
-    if(!m_useEMALevels) return false;
-    
-    // Get recent price data
-    double close[];
-    double low[];
-    double high[];
+    // Lấy dữ liệu giá gần đây
+    double close[], low[], high[], open[];
     
     ArraySetAsSeries(close, true);
     ArraySetAsSeries(low, true);
     ArraySetAsSeries(high, true);
+    ArraySetAsSeries(open, true);
     
     if(CopyClose(_Symbol, PERIOD_M15, 0, 10, close) <= 0 ||
        CopyLow(_Symbol, PERIOD_M15, 0, 10, low) <= 0 ||
-       CopyHigh(_Symbol, PERIOD_M15, 0, 10, high) <= 0) {
+       CopyHigh(_Symbol, PERIOD_M15, 0, 10, high) <= 0 ||
+       CopyOpen(_Symbol, PERIOD_M15, 0, 10, open) <= 0) {
         return false;
     }
     
-    // Get EMA values on M15
+    // Lấy giá trị EMA200 M15
     double ema200M15[];
     ArraySetAsSeries(ema200M15, true);
     
@@ -1000,17 +1010,17 @@ bool CSonicRSR::HasEMAReaction(int direction)
     
     IndicatorRelease(ema200M15Handle);
     
-    // Check for reaction at EMA200
+    // Kiểm tra phản ứng tại EMA200
     for(int i = 0; i < 5; i++) {
-        if(direction > 0) {
-            // For buy signals, check if low touched EMA200 and then price bounced up
+        if(direction > 0) {  // Buy signal
+            // Kiểm tra nếu low chạm EMA200 và sau đó giá đóng cửa trên EMA200
             if(MathAbs(low[i] - ema200M15[i]) <= m_reactionDistance * 3 &&
                close[i] > ema200M15[i] && close[i] > open[i]) {
                 return true;
             }
         }
-        else {
-            // For sell signals, check if high touched EMA200 and then price bounced down
+        else {  // Sell signal
+            // Kiểm tra nếu high chạm EMA200 và sau đó giá đóng cửa dưới EMA200
             if(MathAbs(high[i] - ema200M15[i]) <= m_reactionDistance * 3 &&
                close[i] < ema200M15[i] && close[i] < open[i]) {
                 return true;
