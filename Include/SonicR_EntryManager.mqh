@@ -86,6 +86,16 @@ public:
     
     // Utility
     string GetStatusText() const;
+    string GetSignalDescription() const;
+    double CalculateRiskRewardRatio() const;
+    bool IsSpreadAcceptable();
+    
+    // For unit testing
+    void SetEntryPoints(double entry, double sl, double tp) {
+        m_entryPrice = entry;
+        m_stopLoss = sl;
+        m_takeProfit = tp;
+    }
 };
 
 //+------------------------------------------------------------------+
@@ -375,10 +385,39 @@ double CEntryManager::CalculateRiskRewardRatio(double entry, double sl, double t
 //+------------------------------------------------------------------+
 bool CEntryManager::IsSpreadAcceptable()
 {
-    double currentSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-    double maxAllowedSpread = GetMaxAllowedSpread();
+    double currentSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+    double maxAllowedSpread;
     
-    return currentSpread <= maxAllowedSpread;
+    // Điều chỉnh theo cặp tiền
+    if(_Symbol == "EURUSD" || _Symbol == "GBPUSD")
+        maxAllowedSpread = 10.0;  // 1.0 pip với broker 5 chữ số
+    else if(_Symbol == "USDJPY" || _Symbol == "USDCAD")
+        maxAllowedSpread = 12.0;  // 1.2 pip
+    else if(_Symbol == "XAUUSD") // Gold
+        maxAllowedSpread = 50.0;  // 5.0 pip
+    else
+        maxAllowedSpread = 20.0;  // Mặc định
+        
+    // Điều chỉnh thêm theo thời điểm trong ngày
+    int hour = TimeHour(TimeCurrent());
+    if(hour >= 0 && hour < 6)  // Asian session thường spread cao hơn
+        maxAllowedSpread *= 1.5;
+    else if(hour == 12 || hour == 13)  // London-NY overlap có thể spread thấp hơn
+        maxAllowedSpread *= 0.8;
+    
+    // Lấy ngày trong tuần (0=CN, 1=T2, ..., 5=T6)
+    int dayOfWeek = TimeDayOfWeek(TimeCurrent());
+    if(dayOfWeek == 5 && hour >= 19)  // Thứ 6 cuối ngày
+        maxAllowedSpread *= 1.5;  // Cho phép spread cao hơn
+    
+    bool isAcceptable = (currentSpread <= maxAllowedSpread);
+    
+    if(!isAcceptable && m_logger) {
+        m_logger.Warning("Spread quá cao: " + IntegerToString((int)currentSpread) + 
+                       " điểm (tối đa: " + IntegerToString((int)maxAllowedSpread) + ")");
+    }
+    
+    return isAcceptable;
 }
 
 //+------------------------------------------------------------------+

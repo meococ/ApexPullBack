@@ -133,6 +133,22 @@ input int ChallengeDaysRemaining = 30;          // Days Remaining in Challenge
 input double EmergencyProgressThreshold = 30.0; // Emergency Progress Threshold (%)
 input double ConservativeProgressThreshold = 80.0; // Conservative Progress Threshold (%)
 
+// --- Multi-Symbol Trading Settings ---
+input string MultiSymbolSettings = "===== Multi-Symbol Trading =====";
+input bool EnableMultiSymbolTrading = false;    // Enable Multi-Symbol Trading
+input bool Trade_EURUSD = true;                 // Trade EURUSD
+input bool Trade_GBPUSD = true;                 // Trade GBPUSD
+input bool Trade_USDJPY = true;                 // Trade USDJPY
+input bool Trade_AUDUSD = false;                // Trade AUDUSD
+input bool Trade_USDCAD = false;                // Trade USDCAD
+input bool Trade_EURJPY = false;                // Trade EURJPY
+input bool Trade_GBPJPY = false;                // Trade GBPJPY
+input bool Trade_XAUUSD = false;                // Trade XAUUSD
+input bool Trade_US30 = false;                  // Trade US30
+input double TotalRiskLimit = 5.0;              // Total Risk Limit (%)
+input bool SyncEntries = true;                  // Synchronize Entries
+input int MaxActiveSymbols = 3;                 // Maximum Active Symbols
+
 // --- PVSRA Settings ---
 input string PVSRASettings = "===== PVSRA Settings =====";
 input bool UsePVSRA = true;                   // Use PVSRA Analysis
@@ -185,6 +201,15 @@ int g_failedTrades = 0;
 double g_totalProfit = 0.0;
 double g_totalLoss = 0.0;
 datetime g_lastBarTime = 0;
+
+// Multi-Symbol variables
+string g_enabledSymbols[];                      // Array of enabled symbols
+int g_symbolCount = 0;                          // Count of enabled symbols
+MqlRates g_symbolRates[][100];                  // Price data for each symbol
+datetime g_lastBarTimes[];                      // Last bar time for each symbol
+double g_riskUsed = 0.0;                        // Current risk used across all symbols
+bool g_symbolIsProcessing[];                    // Flag if a symbol is currently processing
+int g_tradeCounts[];                            // Count of trades for each symbol
 
 //+------------------------------------------------------------------+
 //| Safe delete template function for proper memory management       |
@@ -408,6 +433,43 @@ int OnInit()
     // Set progress thresholds for adaptive filters
     g_adaptiveFilters.SetProgressThresholds(EmergencyProgressThreshold, ConservativeProgressThreshold);
     
+    // Initialize PVSRA if enabled
+    if(UsePVSRA) {
+        g_pvsra = new CPVSRA(VolumeAvgPeriod, SpreadAvgPeriod, VolumeThreshold, SpreadThreshold, ConfirmationBars);
+        if(g_pvsra == NULL) {
+            g_logger.Error("Failed to initialize PVSRA system");
+            return INIT_FAILED;
+        }
+        
+        g_pvsra.SetLogger(g_logger);
+        g_logger.Info("PVSRA system initialized");
+    }
+    
+    // Initialize multi-symbol trading if enabled
+    if(EnableMultiSymbolTrading) {
+        InitializeEnabledSymbols();
+        
+        // Initialize arrays for symbol rates
+        ArrayResize(g_symbolRates, g_symbolCount);
+        
+        // Pre-load some historical data for each symbol
+        for(int i = 0; i < g_symbolCount; i++) {
+            string symbol = g_enabledSymbols[i];
+            // Load the last 100 bars
+            int copied = CopyRates(symbol, PERIOD_CURRENT, 0, 100, g_symbolRates[i]);
+            if(copied <= 0) {
+                g_logger.Warning("Failed to copy rates for " + symbol + ", error: " + IntegerToString(GetLastError()));
+            } else {
+                g_logger.Debug("Loaded " + IntegerToString(copied) + " bars for " + symbol);
+                
+                // Initialize last bar time
+                g_lastBarTimes[i] = g_symbolRates[i][0].time;
+            }
+        }
+        
+        g_logger.Info("Multi-symbol trading initialized with " + IntegerToString(g_symbolCount) + " symbols");
+    }
+    
     // Update PropFirm settings
     g_propSettings.Update();
     
@@ -494,7 +556,7 @@ string GetDeinitReasonText(int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Expert tick function                                             |
+//| Expert tick function                                              |
 //+------------------------------------------------------------------+
 void OnTick()
 {
@@ -502,6 +564,57 @@ void OnTick()
     if(!g_initialized || g_shutdownRequested) {
         return;
     }
+    
+    // Process the current chart symbol
+    int currentSymbolIndex = -1;
+    for(int i = 0; i < g_symbolCount; i++) {
+        if(g_enabledSymbols[i] == _Symbol) {
+            currentSymbolIndex = i;
+            break;
+        }
+    }
+    
+    // Always process the current chart symbol first
+    if(currentSymbolIndex >= 0) {
+        ProcessCurrentSymbol(currentSymbolIndex);
+    }
+    
+    // Process other symbols if multi-symbol trading is enabled
+    if(EnableMultiSymbolTrading) {
+        // Count active symbols
+        int activeSymbols = 0;
+        for(int i = 0; i < g_symbolCount; i++) {
+            if(g_symbolIsProcessing[i]) activeSymbols++;
+        }
+        
+        // Process each symbol if not exceeding maximum active symbols
+        for(int i = 0; i < g_symbolCount; i++) {
+            // Skip current chart symbol as it's already processed
+            if(i == currentSymbolIndex) continue;
+            
+            // Check if we can process more symbols
+            if(activeSymbols >= MaxActiveSymbols) break;
+            
+            // Process this symbol
+            ProcessSymbol(i);
+            activeSymbols++;
+        }
+    }
+    
+    // Manage global risk across all symbols
+    ManageGlobalRisk();
+}
+
+//+------------------------------------------------------------------+
+//| Process the current chart symbol                                 |
+//+------------------------------------------------------------------+
+void ProcessCurrentSymbol(int symbolIndex)
+{
+    // Check if symbol is valid
+    if(symbolIndex < 0 || symbolIndex >= g_symbolCount) return;
+    
+    // Set flag that we're processing this symbol
+    g_symbolIsProcessing[symbolIndex] = true;
     
     // Check for new bar
     datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
@@ -511,8 +624,21 @@ void OnTick()
         g_lastBarTime = currentBarTime;
         g_logger.Debug("New bar opened at " + TimeToString(currentBarTime));
         
-        // Update market regime on new bar, but not every bar (hourly check)
-        if(TimeCurrent() - g_lastMarketRegimeCheck >= 3600) { // Update every hour
+        // Only update "heavy" components on new bar
+        g_sonicCore.UpdateFull();  // Full update including pattern detection
+        
+        // Update SR system on new bar
+        if(g_srSystem != NULL) {
+            g_srSystem.Update();
+        }
+        
+        // Update PVSRA if enabled
+        if(UsePVSRA && g_pvsra != NULL) {
+            g_pvsra.Update();
+        }
+        
+        // Update market regime hourly
+        if(TimeCurrent() - g_lastMarketRegimeCheck >= 3600) { // Update hourly
             g_marketRegimeFilter.Update(g_sonicCore);
             g_lastMarketRegimeCheck = TimeCurrent();
             
@@ -520,54 +646,119 @@ void OnTick()
             g_logger.Info("Current market regime: " + g_marketRegimeFilter.GetCurrentRegimeAsString());
         }
         
-        // Update PVSRA on new bar
-        if(UsePVSRA) {
-            g_pvsra.Update();
+        // Update adaptive filters on new bar
+        if(UseAdaptiveFilters && g_adaptiveFilters != NULL) {
+            g_adaptiveFilters.Update(g_sonicCore);
+            
+            // Adjust parameters based on market regime
+            double adxThreshold = g_adaptiveFilters.GetADXThreshold(_Symbol);
+            int maxTrades = g_adaptiveFilters.GetMaxTradesForRegime();
+            double riskPercent = g_adaptiveFilters.GetBaseRiskPercent(_Symbol);
+            double minRR = g_adaptiveFilters.GetMinRR();
+            bool useScoutEntries = g_adaptiveFilters.ShouldUseScoutEntries();
+            
+            // Adjust based on PropFirm challenge progress
+            g_adaptiveFilters.AdjustForChallengeProgress(ChallengeDaysRemaining, ChallengeDaysTotal);
+            
+            // Update other components
+            g_riskManager.SetMaxTradesPerDay(maxTrades);
+            g_riskManager.SetRiskPercent(riskPercent);
+            g_entryManager.SetMinRR(minRR);
+            g_entryManager.SetUseScoutEntries(useScoutEntries);
+            
+            // Log updated info
+            static datetime lastAdaptiveLog = 0;
+            if(TimeCurrent() - lastAdaptiveLog >= 3600) {  // Log hourly
+                g_logger.Info("Adaptive filters: " + g_adaptiveFilters.GetCurrentRegimeAsString() + 
+                             ", Risk: " + DoubleToString(riskPercent, 2) + 
+                             ", MaxTrades: " + IntegerToString(maxTrades) +
+                             ", MinRR: " + DoubleToString(minRR, 1));
+                lastAdaptiveLog = TimeCurrent();
+            }
         }
+    } else {
+        // When not a new bar, only do light updates
+        g_sonicCore.UpdateLight();  // Only update price, no pattern analysis
     }
     
-    // Update core components
-    g_sonicCore.Update();
+    // Update components needed for every tick
     g_riskManager.Update();
     g_propSettings.Update();
-    g_exitManager.Update();
+    g_exitManager.Update();  // Manage open positions
     
-    // Update adaptive filters if enabled
-    if(UseAdaptiveFilters) {
-        g_adaptiveFilters.Update(g_sonicCore);
-        
-        // Adjust adaptive filters for challenge progress
-        g_adaptiveFilters.AdjustForChallengeProgress(ChallengeDaysRemaining, ChallengeDaysTotal);
-        
-        // Use adaptive parameters
-        double adxThreshold = g_adaptiveFilters.GetADXThreshold(_Symbol);
-        int maxTrades = g_adaptiveFilters.GetMaxTradesForRegime();
-        double riskPercent = g_adaptiveFilters.GetBaseRiskPercent(_Symbol);
-        
-        // Update risk manager with adaptive parameters
-        g_riskManager.SetMaxTradesPerDay(maxTrades);
-        g_riskManager.SetRiskPercent(riskPercent);
-        
-        // Update entry manager with adaptive parameters
-        g_entryManager.SetMinRR(g_adaptiveFilters.GetMinRR());
-        g_entryManager.SetUseScoutEntries(g_adaptiveFilters.ShouldUseScoutEntries());
-        
-        // Log adaptive filter status occasionally
-        static datetime lastAdaptiveLog = 0;
-        if(TimeCurrent() - lastAdaptiveLog >= 3600) { // Log every hour
-            g_logger.Info("Adaptive Filters: " + g_adaptiveFilters.GetCurrentRegimeAsString() + 
-                         ", Risk: " + DoubleToString(riskPercent, 2) + 
-                         ", MaxTrades: " + IntegerToString(maxTrades));
-            lastAdaptiveLog = TimeCurrent();
+    // Process state machine
+    ProcessStateMachine(isNewBar);
+    
+    // Update dashboard if needed
+    if(g_dashboard != NULL) {
+        g_dashboard.Update();
+    }
+    
+    // Clear flag that we're done processing this symbol
+    g_symbolIsProcessing[symbolIndex] = false;
+}
+
+//+------------------------------------------------------------------+
+//| Manage global risk across all symbols                            |
+//+------------------------------------------------------------------+
+void ManageGlobalRisk()
+{
+    // Reset risk used
+    g_riskUsed = 0.0;
+    
+    // Calculate total risk used
+    for(int i = 0; i < OrdersTotal(); i++) {
+        if(OrderSelect(OrderGetTicket(i))) {
+            // Find symbol index
+            string orderSymbol = OrderGetString(ORDER_SYMBOL);
+            int symbolIndex = -1;
+            for(int j = 0; j < g_symbolCount; j++) {
+                if(g_enabledSymbols[j] == orderSymbol) {
+                    symbolIndex = j;
+                    break;
+                }
+            }
+            
+            if(symbolIndex >= 0) {
+                // Get symbol params
+                SymbolParams* symbolParams = g_adaptiveFilters.GetSymbolParams(orderSymbol);
+                
+                // Add to risk used
+                g_riskUsed += g_riskManager.GetRiskPercent() * symbolParams.riskMultiplier;
+            }
         }
     }
     
-    // Process actions based on state machine
-    ProcessStateMachine(isNewBar);
+    // Add risk from open positions
+    for(int i = 0; i < PositionsTotal(); i++) {
+        if(PositionSelect(PositionGetTicket(i))) {
+            string posSymbol = PositionGetString(POSITION_SYMBOL);
+            int symbolIndex = -1;
+            for(int j = 0; j < g_symbolCount; j++) {
+                if(g_enabledSymbols[j] == posSymbol) {
+                    symbolIndex = j;
+                    break;
+                }
+            }
+            
+            if(symbolIndex >= 0) {
+                // Get symbol params
+                SymbolParams* symbolParams = g_adaptiveFilters.GetSymbolParams(posSymbol);
+                
+                // Add to risk used
+                g_riskUsed += g_riskManager.GetRiskPercent() * symbolParams.riskMultiplier;
+            }
+        }
+    }
     
-    // Update dashboard if active
-    if(g_dashboard != NULL) {
-        g_dashboard.Update();
+    // Log excessive risk
+    if(g_riskUsed > TotalRiskLimit) {
+        static datetime lastRiskWarning = 0;
+        if(TimeCurrent() - lastRiskWarning >= 600) { // Log every 10 minutes
+            g_logger.Warning("Total risk used (" + DoubleToString(g_riskUsed, 2) + 
+                           "%) exceeds limit (" + DoubleToString(TotalRiskLimit, 2) + "%)");
+            lastRiskWarning = TimeCurrent();
+        }
     }
 }
 
@@ -856,4 +1047,192 @@ void InitializeDashboard()
             g_dashboard.Create();
         }
     }
+}
+
+//+------------------------------------------------------------------+
+//| Initialize enabled symbols list                                  |
+//+------------------------------------------------------------------+
+void InitializeEnabledSymbols()
+{
+    // Clear existing symbol list
+    ArrayResize(g_enabledSymbols, 0);
+    g_symbolCount = 0;
+    
+    // Always add the current chart symbol first
+    AddSymbolIfEnabled(_Symbol, true);
+    
+    // Check each input parameter for enabled symbols
+    if(Trade_EURUSD && _Symbol != "EURUSD") AddSymbolIfEnabled("EURUSD", true);
+    if(Trade_GBPUSD && _Symbol != "GBPUSD") AddSymbolIfEnabled("GBPUSD", true);
+    if(Trade_USDJPY && _Symbol != "USDJPY") AddSymbolIfEnabled("USDJPY", true);
+    if(Trade_AUDUSD && _Symbol != "AUDUSD") AddSymbolIfEnabled("AUDUSD", true);
+    if(Trade_USDCAD && _Symbol != "USDCAD") AddSymbolIfEnabled("USDCAD", true);
+    if(Trade_EURJPY && _Symbol != "EURJPY") AddSymbolIfEnabled("EURJPY", true);
+    if(Trade_GBPJPY && _Symbol != "GBPJPY") AddSymbolIfEnabled("GBPJPY", true);
+    if(Trade_XAUUSD && _Symbol != "XAUUSD") AddSymbolIfEnabled("XAUUSD", true);
+    if(Trade_US30 && _Symbol != "US30") AddSymbolIfEnabled("US30", true);
+    
+    // Resize other arrays
+    ArrayResize(g_lastBarTimes, g_symbolCount);
+    ArrayResize(g_symbolIsProcessing, g_symbolCount);
+    ArrayResize(g_tradeCounts, g_symbolCount);
+    
+    // Initialize arrays
+    for(int i = 0; i < g_symbolCount; i++)
+    {
+        g_lastBarTimes[i] = 0;
+        g_symbolIsProcessing[i] = false;
+        g_tradeCounts[i] = 0;
+    }
+    
+    // Log the enabled symbols
+    string symbolList = "Multi-Symbol Trading enabled for: ";
+    for(int i = 0; i < g_symbolCount; i++)
+    {
+        symbolList += g_enabledSymbols[i];
+        if(i < g_symbolCount - 1) symbolList += ", ";
+    }
+    g_logger.Info(symbolList);
+}
+
+//+------------------------------------------------------------------+
+//| Add a symbol to the enabled list if valid                         |
+//+------------------------------------------------------------------+
+void AddSymbolIfEnabled(string symbol, bool checkIfExists = false)
+{
+    // Check if symbol exists in the Market Watch
+    if(!SymbolSelect(symbol, true))
+    {
+        g_logger.Warning("Symbol " + symbol + " not found in Market Watch, skipping");
+        return;
+    }
+    
+    // Check if we already have this symbol (if required)
+    if(checkIfExists)
+    {
+        for(int i = 0; i < g_symbolCount; i++)
+        {
+            if(g_enabledSymbols[i] == symbol)
+            {
+                return; // Symbol already in the list
+            }
+        }
+    }
+    
+    // Add symbol to the list
+    g_symbolCount++;
+    ArrayResize(g_enabledSymbols, g_symbolCount);
+    g_enabledSymbols[g_symbolCount - 1] = symbol;
+}
+
+//+------------------------------------------------------------------+
+//| Process a single symbol                                          |
+//+------------------------------------------------------------------+
+void ProcessSymbol(int symbolIndex)
+{
+    if(symbolIndex < 0 || symbolIndex >= g_symbolCount) return;
+    
+    string symbol = g_enabledSymbols[symbolIndex];
+    g_symbolIsProcessing[symbolIndex] = true;
+    
+    // Check if this is the current chart symbol
+    bool isCurrentSymbol = (symbol == _Symbol);
+    
+    // Get current bar time for this symbol
+    datetime currentBarTime = iTime(symbol, PERIOD_CURRENT, 0);
+    bool isNewBar = (currentBarTime != g_lastBarTimes[symbolIndex]);
+    
+    if(isNewBar)
+    {
+        g_lastBarTimes[symbolIndex] = currentBarTime;
+        g_logger.Debug("New bar for " + symbol + " at " + TimeToString(currentBarTime));
+        
+        // Get symbol-specific parameters
+        SymbolParams* symbolParams = g_adaptiveFilters.GetSymbolParams(symbol);
+        
+        // Check if trading is allowed for this symbol
+        if(!symbolParams.isEnabled)
+        {
+            g_logger.Debug("Trading for " + symbol + " is disabled in symbol parameters");
+            g_symbolIsProcessing[symbolIndex] = false;
+            return;
+        }
+        
+        // Check if maximum daily trades for this symbol reached
+        if(g_tradeCounts[symbolIndex] >= symbolParams.maxTradesPerDay)
+        {
+            g_logger.Debug("Max daily trades reached for " + symbol + ": " + IntegerToString(g_tradeCounts[symbolIndex]));
+            g_symbolIsProcessing[symbolIndex] = false;
+            return;
+        }
+        
+        // Only process further if it's the current chart symbol or multi-symbol trading is enabled
+        if(isCurrentSymbol || EnableMultiSymbolTrading)
+        {
+            // For current chart symbol, use the standard processing in OnTick
+            if(isCurrentSymbol)
+            {
+                // This is handled by the main OnTick function
+            }
+            else
+            {
+                // For other symbols, use a different approach
+                ProcessOtherSymbol(symbolIndex);
+            }
+        }
+    }
+    
+    g_symbolIsProcessing[symbolIndex] = false;
+}
+
+//+------------------------------------------------------------------+
+//| Process a non-chart symbol                                       |
+//+------------------------------------------------------------------+
+void ProcessOtherSymbol(int symbolIndex)
+{
+    if(symbolIndex < 0 || symbolIndex >= g_symbolCount) return;
+    
+    string symbol = g_enabledSymbols[symbolIndex];
+    
+    // Get symbol-specific parameters
+    SymbolParams* symbolParams = g_adaptiveFilters.GetSymbolParams(symbol);
+    
+    // Check spread
+    double currentSpread = SymbolInfoInteger(symbol, SYMBOL_SPREAD) * SymbolInfoDouble(symbol, SYMBOL_POINT);
+    if(currentSpread > symbolParams.spreadMaxPoints * SymbolInfoDouble(symbol, SYMBOL_POINT))
+    {
+        g_logger.Debug(symbol + " spread too high: " + DoubleToString(currentSpread, 5) + 
+                      " > " + DoubleToString(symbolParams.spreadMaxPoints * SymbolInfoDouble(symbol, SYMBOL_POINT), 5));
+        return;
+    }
+    
+    // Check if we have enough risk available
+    double riskForSymbol = g_riskManager.GetRiskPercent() * symbolParams.riskMultiplier;
+    if(g_riskUsed + riskForSymbol > TotalRiskLimit)
+    {
+        g_logger.Debug("Not enough risk available for " + symbol + ". Used: " + 
+                      DoubleToString(g_riskUsed, 2) + "%, Needed: " + DoubleToString(riskForSymbol, 2) + 
+                      "%, Limit: " + DoubleToString(TotalRiskLimit, 2) + "%");
+        return;
+    }
+    
+    // Check correlation if we have open positions
+    if(PositionsTotal() > 0)
+    {
+        // TODO: Implement correlation check
+    }
+    
+    // Process signals for this symbol
+    // This would need to be implemented with symbol-specific versions of your signal processing
+    // For now, we'll just log that we would process it
+    g_logger.Info("Processing signals for " + symbol);
+    
+    // Placeholder for signal processing
+    // In a real implementation, you would:
+    // 1. Fetch data for this symbol
+    // 2. Run your strategy on this data
+    // 3. Execute trades if signals are found
+    
+    // After processing, update your risk used
+    // g_riskUsed += riskForSymbol; // Uncomment when actually implementing trades
 }

@@ -117,6 +117,8 @@ public:
     
     // Update on tick/bar
     void Update();
+    void UpdateFull();
+    void UpdateLight();
     
     // Signal detection methods
     int DetectClassicSetup();
@@ -134,6 +136,9 @@ public:
     bool IsAlignedBullish() const { return m_isAlignedBullish; }
     bool IsAlignedBearish() const { return m_isAlignedBearish; }
     double GetAverageTrueRange() const { return m_atrBuffer[0]; }
+    
+    // Tính ATR Multiplier dựa trên biến động thị trường
+    double GetAdaptiveATRMultiplier(int direction);
     
     // Calculate entry, SL and TP levels for a given signal
     bool CalculateTradeLevels(int direction, double &entry, double &stopLoss, double &takeProfit);
@@ -1201,6 +1206,58 @@ void CSonicRCore::Update()
 }
 
 //+------------------------------------------------------------------+
+//| Update full - cập nhật tất cả phân tích (dùng cho bar mới)       |
+//+------------------------------------------------------------------+
+void CSonicRCore::UpdateFull()
+{
+    // Skip if handles aren't valid
+    if(!AreHandlesValid()) {
+        if(m_logger) m_logger.Error("Cannot update SonicRCore: invalid indicator handles");
+        return;
+    }
+    
+    // Update indicator buffers
+    if(!UpdateBuffers()) {
+        if(m_logger) m_logger.Error("Failed to update indicator buffers");
+        return;
+    }
+    
+    // Update all analysis (CPU intensive parts)
+    CheckDragonTrendAlignment();
+    AnalyzeMultiTimeframeTrend();
+    DetectPullbacks();
+    DetectPricePatterns();  // Phần nặng nhất - chỉ chạy khi có bar mới
+    
+    if(m_logger) m_logger.Debug("SonicRCore full update completed");
+}
+
+//+------------------------------------------------------------------+
+//| Update light - chỉ cập nhật phần cần thiết (cho mỗi tick)        |
+//+------------------------------------------------------------------+
+void CSonicRCore::UpdateLight()
+{
+    // Skip if handles aren't valid
+    if(!AreHandlesValid()) {
+        if(m_logger) m_logger.Error("Cannot update SonicRCore: invalid indicator handles");
+        return;
+    }
+    
+    // Update indicator buffers
+    if(!UpdateBuffers()) {
+        if(m_logger) m_logger.Error("Failed to update indicator buffers");
+        return;
+    }
+    
+    // Chỉ cập nhật phần cần thiết cho mỗi tick
+    CheckDragonTrendAlignment();  // Cập nhật trạng thái căn chỉnh
+    
+    // Bỏ qua các phân tích nặng khác:
+    // - AnalyzeMultiTimeframeTrend()
+    // - DetectPullbacks()
+    // - DetectPricePatterns()
+}
+
+//+------------------------------------------------------------------+
 //| Check if PVSRA confirms the signal direction                     |
 //+------------------------------------------------------------------+
 bool CSonicRCore::IsPVSRAConfirming(int direction) const
@@ -1306,8 +1363,8 @@ bool CSonicRCore::CalculateTradeLevels(int direction, double &entry, double &sto
         return false;
     }
     
-    // Default ATR multiplier for SL
-    double atrMultiplier = 1.5;
+    // Sử dụng ATR Multiplier thích ứng thay vì giá trị cố định
+    double atrMultiplier = GetAdaptiveATRMultiplier(direction);
     
     if(direction > 0) { // Buy
         // Entry at current Ask
@@ -1338,7 +1395,7 @@ bool CSonicRCore::CalculateTradeLevels(int direction, double &entry, double &sto
             stopLoss = swingLow - _Point * 10; // 10 points buffer
         }
         else {
-            // Otherwise use ATR for SL
+            // Otherwise use ATR for SL with adaptive multiplier
             stopLoss = entry - m_atrBuffer[0] * atrMultiplier;
         }
         
@@ -1375,7 +1432,7 @@ bool CSonicRCore::CalculateTradeLevels(int direction, double &entry, double &sto
             stopLoss = swingHigh + _Point * 10; // 10 points buffer
         }
         else {
-            // Otherwise use ATR for SL
+            // Otherwise use ATR for SL with adaptive multiplier
             stopLoss = entry + m_atrBuffer[0] * atrMultiplier;
         }
         
@@ -1388,4 +1445,52 @@ bool CSonicRCore::CalculateTradeLevels(int direction, double &entry, double &sto
     }
     
     return true;
+}
+
+//+------------------------------------------------------------------+
+//| Tính ATR Multiplier dựa trên biến động thị trường                |
+//+------------------------------------------------------------------+
+double CSonicRCore::GetAdaptiveATRMultiplier(int direction)
+{
+    // Đảm bảo m_atrBuffer có dữ liệu hợp lệ
+    if(ArraySize(m_atrBuffer) < 20)
+        return 1.5;  // Giá trị mặc định
+    
+    // Tính toán tỷ lệ biến động
+    double currentATR = m_atrBuffer[0];
+    double avgATR = 0;
+    for(int i = 1; i < 20; i++) {
+        avgATR += m_atrBuffer[i];
+    }
+    avgATR /= 19;
+    
+    double volatilityRatio = currentATR / avgATR;
+    
+    // Tính toán ATR multiplier dựa vào biến động
+    double baseMultiplier;
+    
+    if(volatilityRatio > 1.5)
+        baseMultiplier = 1.2;  // Biến động cao - SL hẹp hơn
+    else if(volatilityRatio < 0.7)
+        baseMultiplier = 1.8;  // Biến động thấp - SL rộng hơn
+    else
+        baseMultiplier = 1.5;  // Mặc định
+    
+    // Điều chỉnh thêm dựa vào xu hướng
+    if(direction > 0) {  // Buy signal
+        if(m_h4Trend > 0 && m_d1Trend > 0)
+            baseMultiplier *= 0.9;  // Xu hướng mạnh - SL hẹp hơn
+    }
+    else if(direction < 0) {  // Sell signal
+        if(m_h4Trend < 0 && m_d1Trend < 0)
+            baseMultiplier *= 0.9;  // Xu hướng mạnh - SL hẹp hơn
+    }
+    
+    // Log thông tin nếu cần
+    if(m_logger) {
+        m_logger.Debug("ATR Multiplier thích ứng: " + DoubleToString(baseMultiplier, 2) + 
+                     " (Volatility: " + DoubleToString(volatilityRatio, 2) + ")");
+    }
+    
+    return baseMultiplier;
 }

@@ -40,6 +40,7 @@ private:
     bool m_usePivotPoints;      // Use pivot points
     bool m_useRoundNumbers;     // Use round numbers
     bool m_useEMALevels;        // Use EMA levels as dynamic S/R
+    bool m_usePVSRA;            // Use PVSRA for confirmation
     
     int m_lookbackPeriod;       // Lookback period for historical levels
     double m_levelMergeDistance; // Distance to merge close levels
@@ -92,11 +93,15 @@ public:
     bool IsPriceAtEMA(double price, int direction);
     bool HasEMAReaction(int direction);
     
+    // PVSRA method
+    bool IsPVSRAConfirming(int direction) const;
+    
     // Settings
     void SetUseSwingPoints(bool use) { m_useSwingPoints = use; }
     void SetUsePivotPoints(bool use) { m_usePivotPoints = use; }
     void SetUseRoundNumbers(bool use) { m_useRoundNumbers = use; }
     void SetUseEMALevels(bool use) { m_useEMALevels = use; }
+    void SetUsePVSRA(bool use) { m_usePVSRA = use; }
     
     void SetLookbackPeriod(int period) { m_lookbackPeriod = period; }
     void SetLevelMergeDistance(double distance) { m_levelMergeDistance = distance; }
@@ -121,6 +126,7 @@ CSonicRSR::CSonicRSR()
     m_usePivotPoints = true;
     m_useRoundNumbers = true;
     m_useEMALevels = true;
+    m_usePVSRA = true;
     
     m_lookbackPeriod = 50;
     m_levelMergeDistance = 0.0;  // Will be set in Initialize
@@ -850,18 +856,29 @@ bool CSonicRSR::ConfirmSignal(int signal)
     // Kiểm tra phản ứng giá tại EMA
     bool emaReaction = HasEMAReaction(signal);
     
-    // Xác nhận nếu thỏa mãn một trong các điều kiện
-    bool isConfirmed = atSR || atEMA || emaReaction;
+    // Kiểm tra xác nhận từ PVSRA nếu được bật
+    bool pvsraConfirm = true; // Mặc định là true nếu PVSRA không được sử dụng
+    if(m_usePVSRA) {
+        pvsraConfirm = IsPVSRAConfirming(signal);
+    }
+    
+    // Xác nhận nếu thỏa mãn một trong các điều kiện S/R và PVSRA nếu được bật
+    bool isConfirmed = (atSR || atEMA || emaReaction) && pvsraConfirm;
     
     if(m_logger) {
         if(isConfirmed) {
             m_logger.Info("Tín hiệu được xác nhận bởi S/R: " + 
                         (atSR ? "Tại S/R" : "") + 
                         (atEMA ? " Tại EMA" : "") + 
-                        (emaReaction ? " Phản ứng tại EMA" : ""));
+                        (emaReaction ? " Phản ứng tại EMA" : "") +
+                        (m_usePVSRA && pvsraConfirm ? " PVSRA xác nhận" : ""));
         }
         else {
-            m_logger.Debug("Tín hiệu không được xác nhận bởi S/R");
+            string reason = "";
+            if(!atSR && !atEMA && !emaReaction) reason += " (Không phát hiện S/R)";
+            if(m_usePVSRA && !pvsraConfirm) reason += " (PVSRA không xác nhận)";
+            
+            m_logger.Debug("Tín hiệu không được xác nhận bởi S/R" + reason);
         }
     }
     
@@ -1032,6 +1049,65 @@ bool CSonicRSR::HasEMAReaction(int direction)
 }
 
 //+------------------------------------------------------------------+
+//| PVSRA method                                                    |
+//+------------------------------------------------------------------+
+bool CSonicRSR::IsPVSRAConfirming(int direction) const
+{
+    // Lấy dữ liệu khối lượng và giá
+    long volume[];
+    double close[], open[], high[], low[];
+    
+    ArraySetAsSeries(volume, true);
+    ArraySetAsSeries(close, true);
+    ArraySetAsSeries(open, true);
+    ArraySetAsSeries(high, true);
+    ArraySetAsSeries(low, true);
+    
+    if(CopyTickVolume(_Symbol, PERIOD_CURRENT, 0, 20, volume) <= 0 ||
+       CopyClose(_Symbol, PERIOD_CURRENT, 0, 20, close) <= 0 ||
+       CopyOpen(_Symbol, PERIOD_CURRENT, 0, 20, open) <= 0 ||
+       CopyHigh(_Symbol, PERIOD_CURRENT, 0, 20, high) <= 0 ||
+       CopyLow(_Symbol, PERIOD_CURRENT, 0, 20, low) <= 0) {
+        return false;
+    }
+    
+    // Tính khối lượng trung bình (loại trừ nến hiện tại)
+    long avgVolume = 0;
+    for(int i = 1; i < 20; i++) {
+        avgVolume += volume[i];
+    }
+    avgVolume /= 19;
+    
+    // Xác định loại nến
+    bool isBullish = close[0] > open[0];
+    bool isBearish = close[0] < open[0];
+    double bodySize = MathAbs(close[0] - open[0]);
+    double highLowRange = high[0] - low[0];
+    double bodyRatio = highLowRange > 0 ? bodySize / highLowRange : 0;
+    
+    // Phân loại khối lượng
+    bool isHighVolume = volume[0] > avgVolume * 1.5;
+    bool isAverageVolume = volume[0] >= avgVolume * 0.8 && volume[0] <= avgVolume * 1.5;
+    bool isLowVolume = volume[0] < avgVolume * 0.8;
+    
+    // Phân tích PVSRA đơn giản
+    if(direction > 0) {  // Buy signal
+        // Xác nhận nếu nến tăng có khối lượng cao hoặc nến giảm có khối lượng thấp
+        if((isBullish && isHighVolume) || (isBearish && isLowVolume && bodyRatio < 0.6)) {
+            return true;
+        }
+    }
+    else if(direction < 0) {  // Sell signal
+        // Xác nhận nếu nến giảm có khối lượng cao hoặc nến tăng có khối lượng thấp
+        if((isBearish && isHighVolume) || (isBullish && isLowVolume && bodyRatio < 0.6)) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
 //| Get status text for diagnostics                                  |
 //+------------------------------------------------------------------+
 string CSonicRSR::GetStatusText() const
@@ -1047,8 +1123,23 @@ string CSonicRSR::GetStatusText() const
     status += "Round Number Levels: " + IntegerToString(ArraySize(m_roundNumberLevels)) + "\n";
     status += "EMA Levels: " + IntegerToString(ArraySize(m_emaDynamicLevels)) + "\n";
     
+    // Settings status
+    status += "\nSettings:\n";
+    status += "Use Swing Points: " + (m_useSwingPoints ? "Yes" : "No") + "\n";
+    status += "Use Pivot Points: " + (m_usePivotPoints ? "Yes" : "No") + "\n";
+    status += "Use Round Numbers: " + (m_useRoundNumbers ? "Yes" : "No") + "\n";
+    status += "Use EMA Levels: " + (m_useEMALevels ? "Yes" : "No") + "\n";
+    status += "Use PVSRA Confirmation: " + (m_usePVSRA ? "Yes" : "No") + "\n";
+    
     int nearbyLevels = CountNearbyLevels(currentPrice, m_reactionDistance * 5);
+    status += "\nCurrent Analysis:\n";
     status += "Nearby Levels: " + IntegerToString(nearbyLevels) + "\n";
+    
+    // Add PVSRA status for both directions
+    if(m_usePVSRA) {
+        status += "PVSRA Buy Signal: " + (IsPVSRAConfirming(1) ? "Confirmed" : "Not Confirmed") + "\n";
+        status += "PVSRA Sell Signal: " + (IsPVSRAConfirming(-1) ? "Confirmed" : "Not Confirmed") + "\n";
+    }
     
     // Find nearest levels
     double nearestAbove = 0, nearestBelow = 0;

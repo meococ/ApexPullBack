@@ -69,12 +69,23 @@ private:
         double adxMultiplier;    // Multiplier for ADX threshold
         double volMultiplier;    // Multiplier for volatility
         double riskMultiplier;   // Multiplier for risk
+        
+        // Thêm tham số đặc thù cho từng cặp tiền
+        double minTradeDistance; // Khoảng cách tối thiểu giữa các lệnh (điểm)
+        double spreadMaxPoints;  // Spread tối đa cho phép (điểm)
+        int slippage;            // Slippage tối đa cho phép (điểm)
+        double correlationFactor;// Hệ số tương quan với cặp tiền chính
+        bool isEnabled;          // Cặp tiền này có được bật không
+        int maxTradesPerDay;     // Số lệnh tối đa mỗi ngày cho cặp này
+        double lotSizeMultiplier;// Hệ số nhân lot size cho cặp này
+        double minRRRatio;       // Tỷ lệ RR tối thiểu cho cặp này
     };
     
     SymbolParams m_symbolParams[];
     
     // Helper methods
     void InitializeDefaultParams();
+    void InitializeSymbolParams();
     void DetectMarketRegime(CSonicRCore* core);
     void AdjustParamsForRegime();
     void AdjustParamsForSymbol(string symbol);
@@ -118,6 +129,9 @@ public:
         m_emergencyThreshold = emergencyThreshold;
         m_conservativeThreshold = conservativeThreshold;
     }
+    
+    // Get symbol specific parameters
+    SymbolParams* GetSymbolParams(const string symbol);
 };
 
 //+------------------------------------------------------------------+
@@ -137,62 +151,7 @@ CAdaptiveFilters::CAdaptiveFilters()
     InitializeDefaultParams();
     
     // Initialize symbol parameters
-    ArrayResize(m_symbolParams, 10);
-    
-    // Major Forex pairs
-    m_symbolParams[0].symbol = "EURUSD";
-    m_symbolParams[0].adxMultiplier = 1.0;
-    m_symbolParams[0].volMultiplier = 1.0;
-    m_symbolParams[0].riskMultiplier = 1.0;
-    
-    m_symbolParams[1].symbol = "GBPUSD";
-    m_symbolParams[1].adxMultiplier = 1.0;
-    m_symbolParams[1].volMultiplier = 1.1;
-    m_symbolParams[1].riskMultiplier = 0.9;
-    
-    m_symbolParams[2].symbol = "USDJPY";
-    m_symbolParams[2].adxMultiplier = 1.1;
-    m_symbolParams[2].volMultiplier = 1.0;
-    m_symbolParams[2].riskMultiplier = 0.9;
-    
-    m_symbolParams[3].symbol = "AUDUSD";
-    m_symbolParams[3].adxMultiplier = 1.0;
-    m_symbolParams[3].volMultiplier = 1.2;
-    m_symbolParams[3].riskMultiplier = 0.9;
-    
-    m_symbolParams[4].symbol = "USDCAD";
-    m_symbolParams[4].adxMultiplier = 1.1;
-    m_symbolParams[4].volMultiplier = 1.0;
-    m_symbolParams[4].riskMultiplier = 0.9;
-    
-    // Cross pairs
-    m_symbolParams[5].symbol = "EURJPY";
-    m_symbolParams[5].adxMultiplier = 1.2;
-    m_symbolParams[5].volMultiplier = 1.2;
-    m_symbolParams[5].riskMultiplier = 0.8;
-    
-    m_symbolParams[6].symbol = "GBPJPY";
-    m_symbolParams[6].adxMultiplier = 1.3;
-    m_symbolParams[6].volMultiplier = 1.3;
-    m_symbolParams[6].riskMultiplier = 0.7;
-    
-    // Metals
-    m_symbolParams[7].symbol = "XAUUSD";
-    m_symbolParams[7].adxMultiplier = 1.2;
-    m_symbolParams[7].volMultiplier = 1.3;
-    m_symbolParams[7].riskMultiplier = 0.7;
-    
-    // Indices
-    m_symbolParams[8].symbol = "US30";
-    m_symbolParams[8].adxMultiplier = 1.1;
-    m_symbolParams[8].volMultiplier = 1.2;
-    m_symbolParams[8].riskMultiplier = 0.8;
-    
-    // Default for all others
-    m_symbolParams[9].symbol = "DEFAULT";
-    m_symbolParams[9].adxMultiplier = 1.0;
-    m_symbolParams[9].volMultiplier = 1.0;
-    m_symbolParams[9].riskMultiplier = 0.8;
+    InitializeSymbolParams();
     
     // Challenge progress
     m_remainingDays = 30;
@@ -270,6 +229,174 @@ void CAdaptiveFilters::InitializeDefaultParams()
     
     // Set current parameters to default moderate trend
     m_currentParams = m_paramsModTrend;
+}
+
+//+------------------------------------------------------------------+
+//| Get symbol specific parameters                                    |
+//+------------------------------------------------------------------+
+SymbolParams* CAdaptiveFilters::GetSymbolParams(const string symbol)
+{
+    // Search for the symbol in our params array
+    for(int i = 0; i < ArraySize(m_symbolParams); i++)
+    {
+        if(m_symbolParams[i].symbol == symbol)
+        {
+            return &m_symbolParams[i];
+        }
+    }
+    
+    // If not found, return default parameters
+    int defaultIndex = ArraySize(m_symbolParams) - 1; // Last element should be DEFAULT
+    if(m_logger != NULL)
+    {
+        m_logger.Log(LOG_INFO, StringFormat("Symbol %s not found in parameter list, using DEFAULT", symbol));
+    }
+    
+    return &m_symbolParams[defaultIndex];
+}
+
+//+------------------------------------------------------------------+
+//| Initialize symbol-specific parameters                            |
+//+------------------------------------------------------------------+
+void CAdaptiveFilters::InitializeSymbolParams()
+{
+    // Resize array to include all major pairs and a default entry
+    ArrayResize(m_symbolParams, 10);
+    
+    // Major Forex pairs
+    m_symbolParams[0].symbol = "EURUSD";
+    m_symbolParams[0].adxMultiplier = 1.0;
+    m_symbolParams[0].volMultiplier = 1.0;
+    m_symbolParams[0].riskMultiplier = 1.0;
+    m_symbolParams[0].minTradeDistance = 10.0;  // 1 pip for 5-digit brokers
+    m_symbolParams[0].spreadMaxPoints = 10.0;   // Max 1 pip spread 
+    m_symbolParams[0].slippage = 5;             // 0.5 pip slippage
+    m_symbolParams[0].correlationFactor = 1.0;  // Base pair
+    m_symbolParams[0].isEnabled = true;         // Enabled by default
+    m_symbolParams[0].maxTradesPerDay = 3;      // 3 trades per day
+    m_symbolParams[0].lotSizeMultiplier = 1.0;  // Standard lot sizing
+    m_symbolParams[0].minRRRatio = 1.5;         // Minimum 1.5 R:R
+    
+    m_symbolParams[1].symbol = "GBPUSD";
+    m_symbolParams[1].adxMultiplier = 1.0;
+    m_symbolParams[1].volMultiplier = 1.1;
+    m_symbolParams[1].riskMultiplier = 0.9;
+    m_symbolParams[1].minTradeDistance = 10.0;  // 1 pip for 5-digit brokers
+    m_symbolParams[1].spreadMaxPoints = 12.0;   // Max 1.2 pip spread
+    m_symbolParams[1].slippage = 6;             // 0.6 pip slippage
+    m_symbolParams[1].correlationFactor = 0.7;  // Correlation with EURUSD
+    m_symbolParams[1].isEnabled = true;         // Enabled by default
+    m_symbolParams[1].maxTradesPerDay = 2;      // 2 trades per day
+    m_symbolParams[1].lotSizeMultiplier = 0.9;  // 90% lot sizing
+    m_symbolParams[1].minRRRatio = 1.8;         // Minimum 1.8 R:R
+    
+    m_symbolParams[2].symbol = "USDJPY";
+    m_symbolParams[2].adxMultiplier = 1.1;
+    m_symbolParams[2].volMultiplier = 1.0;
+    m_symbolParams[2].riskMultiplier = 0.9;
+    m_symbolParams[2].minTradeDistance = 10.0;  // 1 pip for 3-digit brokers
+    m_symbolParams[2].spreadMaxPoints = 12.0;   // Max 1.2 pip spread
+    m_symbolParams[2].slippage = 6;             // 0.6 pip slippage
+    m_symbolParams[2].correlationFactor = 0.3;  // Low correlation with EURUSD
+    m_symbolParams[2].isEnabled = true;         // Enabled by default
+    m_symbolParams[2].maxTradesPerDay = 2;      // 2 trades per day
+    m_symbolParams[2].lotSizeMultiplier = 0.9;  // 90% lot sizing
+    m_symbolParams[2].minRRRatio = 1.8;         // Minimum 1.8 R:R
+    
+    m_symbolParams[3].symbol = "AUDUSD";
+    m_symbolParams[3].adxMultiplier = 1.0;
+    m_symbolParams[3].volMultiplier = 1.2;
+    m_symbolParams[3].riskMultiplier = 0.9;
+    m_symbolParams[3].minTradeDistance = 10.0;  // 1 pip for 5-digit brokers
+    m_symbolParams[3].spreadMaxPoints = 15.0;   // Max 1.5 pip spread
+    m_symbolParams[3].slippage = 6;             // 0.6 pip slippage
+    m_symbolParams[3].correlationFactor = 0.6;  // Medium correlation with EURUSD
+    m_symbolParams[3].isEnabled = true;         // Enabled by default
+    m_symbolParams[3].maxTradesPerDay = 2;      // 2 trades per day
+    m_symbolParams[3].lotSizeMultiplier = 0.9;  // 90% lot sizing
+    m_symbolParams[3].minRRRatio = 1.8;         // Minimum 1.8 R:R
+    
+    m_symbolParams[4].symbol = "USDCAD";
+    m_symbolParams[4].adxMultiplier = 1.1;
+    m_symbolParams[4].volMultiplier = 1.0;
+    m_symbolParams[4].riskMultiplier = 0.9;
+    m_symbolParams[4].minTradeDistance = 10.0;  // 1 pip for 5-digit brokers
+    m_symbolParams[4].spreadMaxPoints = 15.0;   // Max 1.5 pip spread
+    m_symbolParams[4].slippage = 6;             // 0.6 pip slippage
+    m_symbolParams[4].correlationFactor = 0.5;  // Medium correlation with EURUSD
+    m_symbolParams[4].isEnabled = true;         // Enabled by default
+    m_symbolParams[4].maxTradesPerDay = 2;      // 2 trades per day
+    m_symbolParams[4].lotSizeMultiplier = 0.9;  // 90% lot sizing
+    m_symbolParams[4].minRRRatio = 1.8;         // Minimum 1.8 R:R
+    
+    // Cross pairs
+    m_symbolParams[5].symbol = "EURJPY";
+    m_symbolParams[5].adxMultiplier = 1.2;
+    m_symbolParams[5].volMultiplier = 1.2;
+    m_symbolParams[5].riskMultiplier = 0.8;
+    m_symbolParams[5].minTradeDistance = 15.0;  // 1.5 pip for 3-digit brokers
+    m_symbolParams[5].spreadMaxPoints = 20.0;   // Max 2 pip spread
+    m_symbolParams[5].slippage = 8;             // 0.8 pip slippage
+    m_symbolParams[5].correlationFactor = 0.8;  // High correlation with EURUSD
+    m_symbolParams[5].isEnabled = true;         // Enabled by default
+    m_symbolParams[5].maxTradesPerDay = 1;      // 1 trade per day
+    m_symbolParams[5].lotSizeMultiplier = 0.8;  // 80% lot sizing
+    m_symbolParams[5].minRRRatio = 2.0;         // Minimum 2.0 R:R
+    
+    m_symbolParams[6].symbol = "GBPJPY";
+    m_symbolParams[6].adxMultiplier = 1.3;
+    m_symbolParams[6].volMultiplier = 1.3;
+    m_symbolParams[6].riskMultiplier = 0.7;
+    m_symbolParams[6].minTradeDistance = 15.0;  // 1.5 pip for 3-digit brokers
+    m_symbolParams[6].spreadMaxPoints = 25.0;   // Max 2.5 pip spread
+    m_symbolParams[6].slippage = 10;            // 1.0 pip slippage
+    m_symbolParams[6].correlationFactor = 0.6;  // Medium correlation with EURUSD
+    m_symbolParams[6].isEnabled = true;         // Enabled by default
+    m_symbolParams[6].maxTradesPerDay = 1;      // 1 trade per day
+    m_symbolParams[6].lotSizeMultiplier = 0.7;  // 70% lot sizing
+    m_symbolParams[6].minRRRatio = 2.2;         // Minimum 2.2 R:R
+    
+    // Metals
+    m_symbolParams[7].symbol = "XAUUSD";
+    m_symbolParams[7].adxMultiplier = 1.2;
+    m_symbolParams[7].volMultiplier = 1.3;
+    m_symbolParams[7].riskMultiplier = 0.7;
+    m_symbolParams[7].minTradeDistance = 50.0;  // 5 pip for Gold
+    m_symbolParams[7].spreadMaxPoints = 50.0;   // Max 5 pip spread
+    m_symbolParams[7].slippage = 20;            // 2.0 pip slippage
+    m_symbolParams[7].correlationFactor = 0.4;  // Medium-low correlation with EURUSD
+    m_symbolParams[7].isEnabled = true;         // Enabled by default
+    m_symbolParams[7].maxTradesPerDay = 1;      // 1 trade per day
+    m_symbolParams[7].lotSizeMultiplier = 0.5;  // 50% lot sizing due to higher volatility
+    m_symbolParams[7].minRRRatio = 2.5;         // Minimum 2.5 R:R
+    
+    // Indices
+    m_symbolParams[8].symbol = "US30";
+    m_symbolParams[8].adxMultiplier = 1.1;
+    m_symbolParams[8].volMultiplier = 1.2;
+    m_symbolParams[8].riskMultiplier = 0.8;
+    m_symbolParams[8].minTradeDistance = 20.0;  // 2 point distance for US30
+    m_symbolParams[8].spreadMaxPoints = 30.0;   // Max 3 point spread
+    m_symbolParams[8].slippage = 10;            // 1 point slippage
+    m_symbolParams[8].correlationFactor = 0.3;  // Low correlation with EURUSD
+    m_symbolParams[8].isEnabled = true;         // Enabled by default
+    m_symbolParams[8].maxTradesPerDay = 1;      // 1 trade per day
+    m_symbolParams[8].lotSizeMultiplier = 0.6;  // 60% lot sizing
+    m_symbolParams[8].minRRRatio = 2.0;         // Minimum 2.0 R:R
+    
+    // Default for all others
+    m_symbolParams[9].symbol = "DEFAULT";
+    m_symbolParams[9].adxMultiplier = 1.0;
+    m_symbolParams[9].volMultiplier = 1.0;
+    m_symbolParams[9].riskMultiplier = 0.8;
+    m_symbolParams[9].minTradeDistance = 15.0;  // Default distance
+    m_symbolParams[9].spreadMaxPoints = 20.0;   // Default max spread
+    m_symbolParams[9].slippage = 8;             // Default slippage
+    m_symbolParams[9].correlationFactor = 0.5;  // Default correlation
+    m_symbolParams[9].isEnabled = true;         // Default enabled
+    m_symbolParams[9].maxTradesPerDay = 1;      // Default max trades
+    m_symbolParams[9].lotSizeMultiplier = 0.8;  // Default lot multiplier
+    m_symbolParams[9].minRRRatio = 2.0;         // Default min R:R
 }
 
 //+------------------------------------------------------------------+
