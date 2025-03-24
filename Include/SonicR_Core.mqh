@@ -5,16 +5,18 @@
 #property copyright "SonicR Trading Systems"
 #property link      "https://sonicr.com"
 
+// Thư viện MT5 tiêu chuẩn
 #include <Arrays\ArrayDouble.mqh>
 #include <Arrays\ArrayString.mqh>
 #include <Arrays\ArrayInt.mqh>
 #include <Arrays\ArrayObj.mqh>
 
-// Include required files
-#include "SonicR_Logger.mqh"
-
 // Forward declarations
 class CLogger;
+class CPVSRA;
+
+// Include required files
+#include "SonicR_Logger.mqh"
 
 // Class to store price patterns
 class CPricePattern

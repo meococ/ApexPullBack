@@ -5,7 +5,16 @@
 #property copyright "SonicR Trading Systems"
 #property link      "https://sonicr.com"
 
+// Thư viện MT5 tiêu chuẩn
 #include <Trade\Trade.mqh>
+
+// Forward declarations
+class CLogger;
+class CSonicRCore;
+class CRiskManager;
+class CSonicRSR;
+
+// Include dependencies
 #include "SonicR_Logger.mqh"
 #include "SonicR_Core.mqh"
 #include "SonicR_RiskManager.mqh"
