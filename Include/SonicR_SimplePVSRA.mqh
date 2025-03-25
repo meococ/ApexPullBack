@@ -182,4 +182,14 @@ int OnCalculate(const int rates_total,
         
         // Calculate volume ratio
         double volume_ratio = 0;
-        if(avg_
+        if(avg_volume > 0) {
+            volume_ratio = volume_buffer[i] / avg_volume;
+        }
+        g_volumeRatio[i] = volume_ratio;
+        
+        // Rest of calculation code
+        // ...
+    }
+    
+    return(rates_total);
+}

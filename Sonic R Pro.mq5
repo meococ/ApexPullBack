@@ -9,7 +9,7 @@
 #property description "SonicR PropFirm EA 2.0 - Advanced PropFirm challenge trading system"
 
 // Include necessary files
-#include <Trade\Trade.mqh>
+#include <Trade/Trade.mqh>
 
 // Các thành phần cơ sở hạ tầng
 #include "Include/SonicR_Logger.mqh"  // Logger nên được include đầu tiên
@@ -228,6 +228,9 @@ datetime g_lastBarTime = 0;
 string g_enabledSymbols[];
 int g_symbolCount = 0;
 datetime g_lastBarTimes[];
+bool g_symbolIsProcessing[];   // Trạng thái xử lý của mỗi cặp tiền
+int g_tradeCounts[];           // Số lệnh cho mỗi cặp tiền
+double g_riskUsed = 0.0;       // Tổng rủi ro đang sử dụng
 
 //+------------------------------------------------------------------+
 //| Safe delete template function for proper memory management       |
@@ -251,6 +254,11 @@ int OnInit()
     }
     
     Print("Initializing SonicR PropFirm EA v2.00...");
+    
+    // Khởi tạo các mảng toàn cục
+    ArrayResize(g_symbolIsProcessing, 0);
+    ArrayResize(g_tradeCounts, 0);
+    g_riskUsed = 0.0;
     
     // Khởi tạo Logger trước (để có thể ghi log quá trình khởi tạo)
     g_logger = new CLogger(EAName, MagicNumber, EnableDetailedLogging, SaveLogsToFile);
@@ -735,7 +743,7 @@ void ManageGlobalRisk()
             
             if(symbolIndex >= 0) {
                 // Get symbol params
-                SymbolParams* symbolParams = g_adaptiveFilters.GetSymbolParams(orderSymbol);
+                CAdaptiveFilters::SymbolParams symbolParams = g_adaptiveFilters.GetSymbolParams(orderSymbol);
                 
                 // Add to risk used
                 g_riskUsed += g_riskManager.GetRiskPercent() * symbolParams.riskMultiplier;
@@ -757,7 +765,7 @@ void ManageGlobalRisk()
             
             if(symbolIndex >= 0) {
                 // Get symbol params
-                SymbolParams* symbolParams = g_adaptiveFilters.GetSymbolParams(posSymbol);
+                CAdaptiveFilters::SymbolParams symbolParams = g_adaptiveFilters.GetSymbolParams(posSymbol);
                 
                 // Add to risk used
                 g_riskUsed += g_riskManager.GetRiskPercent() * symbolParams.riskMultiplier;
@@ -809,8 +817,13 @@ void ProcessStateMachine(bool isNewBar)
                         // Confirm signal with PVSRA if enabled
                         bool pvsraConfirmed = true; // Default to true if not using PVSRA
                         if(UsePVSRA) {
-                            pvsraConfirmed = g_sonicCore.IsPVSRAConfirming(signal);
-                            g_logger.Info("PVSRA confirmation: " + (pvsraConfirmed ? "YES" : "NO"));
+                            // Kiểm tra NULL trước khi sử dụng
+                            if(g_sonicCore == NULL) {
+                                g_logger.Error("SonicCore is NULL when checking PVSRA confirmation");
+                            } else {
+                                pvsraConfirmed = g_sonicCore.IsPVSRAConfirming(signal);
+                                g_logger.Info("PVSRA confirmation: " + (pvsraConfirmed ? "YES" : "NO"));
+                            }
                         }
                         
                         // Both systems must confirm
@@ -1137,7 +1150,7 @@ void ProcessSymbol(int symbolIndex)
         g_logger.Debug("New bar for " + symbol + " at " + TimeToString(currentBarTime));
         
         // Get symbol-specific parameters
-        SymbolParams* symbolParams = g_adaptiveFilters.GetSymbolParams(symbol);
+        CAdaptiveFilters::SymbolParams symbolParams = g_adaptiveFilters.GetSymbolParams(symbol);
         
         // Check if trading is allowed for this symbol
         if(!symbolParams.isEnabled)
@@ -1184,7 +1197,7 @@ void ProcessOtherSymbol(int symbolIndex)
     string symbol = g_enabledSymbols[symbolIndex];
     
     // Get symbol-specific parameters
-    SymbolParams* symbolParams = g_adaptiveFilters.GetSymbolParams(symbol);
+    CAdaptiveFilters::SymbolParams symbolParams = g_adaptiveFilters.GetSymbolParams(symbol);
     
     // Check spread
     double currentSpread = SymbolInfoInteger(symbol, SYMBOL_SPREAD) * SymbolInfoDouble(symbol, SYMBOL_POINT);
@@ -1196,6 +1209,11 @@ void ProcessOtherSymbol(int symbolIndex)
     }
     
     // Check if we have enough risk available
+    if(g_riskManager == NULL) {
+        g_logger.Error("RiskManager is NULL");
+        return;
+    }
+    
     double riskForSymbol = g_riskManager.GetRiskPercent() * symbolParams.riskMultiplier;
     if(g_riskUsed + riskForSymbol > TotalRiskLimit)
     {

@@ -6,10 +6,10 @@
 #property link      "https://sonicr.com"
 
 // Thư viện MT5 tiêu chuẩn
-#include <Arrays\ArrayDouble.mqh>
-#include <Arrays\ArrayString.mqh>
-#include <Arrays\ArrayInt.mqh>
-#include <Arrays\ArrayObj.mqh>
+#include <Arrays/ArrayDouble.mqh>
+#include <Arrays/ArrayString.mqh>
+#include <Arrays/ArrayInt.mqh>
+#include <Arrays/ArrayObj.mqh>
 
 // Forward declarations
 class CLogger;
@@ -1264,9 +1264,7 @@ void CSonicRCore::UpdateLight()
 //+------------------------------------------------------------------+
 bool CSonicRCore::IsPVSRAConfirming(int direction) const
 {
-    // Cần truy cập đến đối tượng PVSRA toàn cục
-    extern CPVSRA* g_pvsra;
-    
+    // Sử dụng biến toàn cục trực tiếp
     if(g_pvsra == NULL) {
         return false;
     }

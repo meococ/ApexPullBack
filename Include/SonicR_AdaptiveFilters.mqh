@@ -63,6 +63,7 @@ private:
     double m_emergencyThreshold; // Emergency threshold (default 30%)
     double m_conservativeThreshold; // Conservative threshold (default 80%)
     
+public:
     // Symbol-specific parameters
     struct SymbolParams {
         string symbol;
@@ -81,6 +82,7 @@ private:
         double minRRRatio;       // Tỷ lệ RR tối thiểu cho cặp này
     };
     
+private:
     SymbolParams m_symbolParams[];
     
     // Helper methods
@@ -131,7 +133,7 @@ public:
     }
     
     // Get symbol specific parameters
-    SymbolParams* GetSymbolParams(const string symbol);
+    SymbolParams GetSymbolParams(const string symbol);
 };
 
 //+------------------------------------------------------------------+
@@ -234,14 +236,13 @@ void CAdaptiveFilters::InitializeDefaultParams()
 //+------------------------------------------------------------------+
 //| Get symbol specific parameters                                    |
 //+------------------------------------------------------------------+
-SymbolParams* CAdaptiveFilters::GetSymbolParams(const string symbol)
+CAdaptiveFilters::SymbolParams CAdaptiveFilters::GetSymbolParams(const string symbol)
 {
-    // Search for the symbol in our params array
     for(int i = 0; i < ArraySize(m_symbolParams); i++)
     {
         if(m_symbolParams[i].symbol == symbol)
         {
-            return &m_symbolParams[i];
+            return m_symbolParams[i];
         }
     }
     
@@ -252,7 +253,7 @@ SymbolParams* CAdaptiveFilters::GetSymbolParams(const string symbol)
         m_logger.Log(LOG_INFO, StringFormat("Symbol %s not found in parameter list, using DEFAULT", symbol));
     }
     
-    return &m_symbolParams[defaultIndex];
+    return m_symbolParams[defaultIndex];
 }
 
 //+------------------------------------------------------------------+

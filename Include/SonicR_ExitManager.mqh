@@ -5,7 +5,7 @@
 #property copyright "SonicR Trading Systems"
 #property link      "https://sonicr.com"
 
-#include <Trade\Trade.mqh>
+#include <Trade/Trade.mqh>
 #include "SonicR_Logger.mqh"
 
 // Exit manager class for handling trade exits

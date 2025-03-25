@@ -74,6 +74,14 @@ private:
                         const int x, const int y, const int width, const int height, 
                         const color fillColor, const color bgColor);
     
+    // Helper methods for object management
+    void CreateRect(const string name, const int x, const int y, const int width, const int height, 
+                   const color bgColor, const color borderColor);
+    void CreateLabel(const string name, const string text, const int x, const int y, 
+                    const color textColor, const int fontSize = 0, const string fontFace = "");
+    void UpdateLabel(const string name, const string text);
+    void DeleteAllObjects();
+    
 public:
     // Constructor
     CDashboard();
@@ -81,10 +89,17 @@ public:
     // Destructor
     ~CDashboard();
     
+    // Initialization
+    bool Init(CAdaptiveFilters *adaptiveFilters, CPVSRA *pvsra, const string dashboardTitle);
+    
     // Main methods
     void Create();
     void Update();
     void Remove();
+    void Draw();
+    
+    // Handle chart events
+    void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam);
     
     // Set dependencies
     void SetLogger(CLogger* logger) { m_logger = logger; }
@@ -101,9 +116,6 @@ public:
     void SetFontSize(const int fontSize) { m_fontSize = fontSize; }
     void SetFontName(const string fontName) { m_fontName = fontName; }
     void SetShowDetailedStats(const bool showDetailedStats) { m_showDetailedStats = showDetailedStats; }
-    
-    // Handle chart events
-    void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam);
 };
 
 //+------------------------------------------------------------------+
@@ -293,6 +305,28 @@ void CDashboard::Remove()
     DeleteAllObjects();
     
     if(m_logger) m_logger.Info("Dashboard removed");
+}
+
+//+------------------------------------------------------------------+
+//| Initialize the dashboard                                         |
+//+------------------------------------------------------------------+
+bool CDashboard::Init(CAdaptiveFilters *adaptiveFilters, CPVSRA *pvsra, const string dashboardTitle)
+{
+    // Set dependencies
+    m_adaptiveFilters = adaptiveFilters;
+    m_pvsra = pvsra;
+    
+    // Set dashboard title
+    m_titleName = dashboardTitle;
+    
+    // Check if dependencies are properly set
+    if(m_adaptiveFilters == NULL || m_pvsra == NULL) {
+        if(m_logger) m_logger.Error("Dashboard initialization failed: dependencies not set");
+        return false;
+    }
+    
+    if(m_logger) m_logger.Info("Dashboard initialized successfully");
+    return true;
 }
 
 //+------------------------------------------------------------------+
@@ -720,23 +754,29 @@ void CDashboard::DrawProgressBar(const string name, const double value, const do
 }
 
 //+------------------------------------------------------------------+
-//| Create a rectangle object                                        |
+//| Delete all dashboard objects                                      |
 //+------------------------------------------------------------------+
-void CDashboard::CreateRect(string name, int x, int y, int width, int height, 
-                          color bgColor, color borderColor)
+void CDashboard::DeleteAllObjects()
 {
-    // Create or find the object
+    ObjectsDeleteAll(0, m_prefixName);
+}
+
+//+------------------------------------------------------------------+
+//| Create a rectangle object                                         |
+//+------------------------------------------------------------------+
+void CDashboard::CreateRect(const string name, const int x, const int y, const int width, const int height, 
+                           const color bgColor, const color borderColor)
+{
     if(ObjectFind(0, name) < 0) {
         ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
     }
     
-    // Set properties
     ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
     ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
     ObjectSetInteger(0, name, OBJPROP_XSIZE, width);
     ObjectSetInteger(0, name, OBJPROP_YSIZE, height);
-    ObjectSetInteger(0, name, OBJPROP_COLOR, borderColor);
     ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bgColor);
+    ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, borderColor);
     ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
     ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
     ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -749,34 +789,38 @@ void CDashboard::CreateRect(string name, int x, int y, int width, int height,
 }
 
 //+------------------------------------------------------------------+
-//| Create a label object                                            |
+//| Create a text label                                               |
 //+------------------------------------------------------------------+
-void CDashboard::CreateLabel(string name, string text, int x, int y, 
-                           color clr, int size = 0, string font = "")
+void CDashboard::CreateLabel(const string name, const string text, const int x, const int y, 
+                            const color textColor, const int fontSize = 0, const string fontFace = "")
 {
-    int fontSize = (size > 0) ? size : m_fontSize;
-    string fontName = (font != "") ? font : m_fontName;
-    
-    // Create or find the object
     if(ObjectFind(0, name) < 0) {
         ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
     }
     
-    // Set properties
-    ObjectSetString(0, name, OBJPROP_TEXT, text);
-    ObjectSetString(0, name, OBJPROP_FONT, fontName);
-    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
-    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
     ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
     ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+    ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
+    
+    int actualFontSize = (fontSize > 0) ? fontSize : m_fontSize;
+    string actualFontFace = (fontFace != "") ? fontFace : m_fontName;
+    
+    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, actualFontSize);
+    ObjectSetString(0, name, OBJPROP_FONT, actualFontFace);
+    ObjectSetString(0, name, OBJPROP_TEXT, text);
     ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
     ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+    ObjectSetInteger(0, name, OBJPROP_BACK, false);
+    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+    ObjectSetInteger(0, name, OBJPROP_ZORDER, 1);
 }
 
 //+------------------------------------------------------------------+
-//| Update a label object's text                                      |
+//| Update an existing text label                                     |
 //+------------------------------------------------------------------+
-void CDashboard::UpdateLabel(string name, string text)
+void CDashboard::UpdateLabel(const string name, const string text)
 {
     if(ObjectFind(0, name) >= 0) {
         ObjectSetString(0, name, OBJPROP_TEXT, text);
@@ -784,119 +828,32 @@ void CDashboard::UpdateLabel(string name, string text)
 }
 
 //+------------------------------------------------------------------+
-//| Delete all dashboard objects                                      |
-//+------------------------------------------------------------------+
-void CDashboard::DeleteAllObjects()
-{
-    ObjectsDeleteAll(0, m_prefixName);
-}
-
-//+------------------------------------------------------------------+
-//| Draw dashboard                                                   |
+//| Draw the dashboard                                               |
 //+------------------------------------------------------------------+
 void CDashboard::Draw()
 {
-    // ... existing drawing code ...
-    
-    // Draw Performance section
-    // ... existing code ...
-    
-    // Draw Market Info section
-    // ... existing code ...
-    
-    // Draw Adaptive Filters section (new)
-    if(m_adaptiveFilters != NULL) {
-        int y = 220; // Adjust based on your layout
-        
-        // Section header
-        DrawLabel("SonicR_Dash_AdaptiveHeader", "ADAPTIVE FILTERS", 10, y, clrWhite, 9, "Arial Bold");
-        y += 20;
-        
-        // Market regime info
-        DrawLabel("SonicR_Dash_Regime", "Regime: " + m_adaptiveFilters.GetCurrentRegimeAsString(), 
-                 15, y, clrYellow, 8, "Arial");
-        y += 15;
-        
-        // Trend info
-        string trendDir = "";
-        int direction = m_adaptiveFilters.GetTrendDirection();
-        if(direction > 0) trendDir = "Up";
-        else if(direction < 0) trendDir = "Down";
-        else trendDir = "Sideways";
-        
-        DrawLabel("SonicR_Dash_Trend", "Trend: " + trendDir + " (" + 
-                 DoubleToString(m_adaptiveFilters.GetTrendStrength(), 1) + ")", 
-                 15, y, clrYellow, 8, "Arial");
-        y += 15;
-        
-        // Volatility 
-        DrawLabel("SonicR_Dash_Vol", "Volatility: " + 
-                 DoubleToString(m_adaptiveFilters.GetVolatilityRatio(), 2), 
-                 15, y, clrYellow, 8, "Arial");
-        y += 15;
-        
-        // Parameters
-        DrawLabel("SonicR_Dash_Risk", "Risk %: " + 
-                 DoubleToString(m_adaptiveFilters.GetBaseRiskPercent(_Symbol), 2), 
-                 15, y, clrAqua, 8, "Arial");
-        y += 15;
-        
-        DrawLabel("SonicR_Dash_RR", "Min R:R: " + 
-                 DoubleToString(m_adaptiveFilters.GetMinRR(), 1), 
-                 15, y, clrAqua, 8, "Arial");
-        y += 15;
-        
-        DrawLabel("SonicR_Dash_MaxTrades", "Max Trades: " + 
-                 IntegerToString(m_adaptiveFilters.GetMaxTradesForRegime()), 
-                 15, y, clrAqua, 8, "Arial");
-        y += 15;
-        
-        DrawLabel("SonicR_Dash_Scout", "Scout Entries: " + 
-                 (m_adaptiveFilters.ShouldUseScoutEntries() ? "Yes" : "No"), 
-                 15, y, clrAqua, 8, "Arial");
+    // Check if dependencies are set
+    if(m_adaptiveFilters == NULL || m_pvsra == NULL) {
+        if(m_logger) m_logger.Error("Cannot draw dashboard: dependencies not set");
+        return;
     }
     
-    // Draw PVSRA section
-    if(m_pvsra != NULL) {
-        int y = 320; // Adjust based on your layout
-        
-        // Section header
-        DrawLabel("SonicR_Dash_PVSRAHeader", "PVSRA ANALYSIS", 10, y, clrWhite, 9, "Arial Bold");
-        y += 20;
-        
-        // Current bar type
-        string barType = "Neutral";
-        int currentType = m_pvsra.GetBarType(0);
-        if(currentType > 0) barType = "Bullish";
-        else if(currentType < 0) barType = "Bearish";
-        
-        DrawLabel("SonicR_Dash_BarType", "Bar Type: " + barType, 
-                 15, y, clrYellow, 8, "Arial");
-        y += 15;
-        
-        // Power values
-        string bullPower = DoubleToString(m_pvsra.GetBullPower(0), 1);
-        string bearPower = DoubleToString(m_pvsra.GetBearPower(0), 1);
-        
-        DrawLabel("SonicR_Dash_Power", "Power: Bull=" + bullPower + " / Bear=" + bearPower, 
-                 15, y, clrYellow, 8, "Arial");
-        y += 15;
-        
-        // Confirmation status
-        DrawLabel("SonicR_Dash_BullConfirm", "Bull Confirm: " + 
-                 (m_pvsra.IsBullishConfirmation() ? "YES" : "NO"), 
-                 15, y, m_pvsra.IsBullishConfirmation() ? clrGreen : clrGray, 8, "Arial");
-        y += 15;
-        
-        DrawLabel("SonicR_Dash_BearConfirm", "Bear Confirm: " + 
-                 (m_pvsra.IsBearishConfirmation() ? "YES" : "NO"), 
-                 15, y, m_pvsra.IsBearishConfirmation() ? clrRed : clrGray, 8, "Arial");
-        y += 15;
-        
-        // Divergence
-        DrawLabel("SonicR_Dash_Divergence", "Divergence: " + 
-                 (m_pvsra.IsBullishDivergence() ? "Bullish" : 
-                 (m_pvsra.IsBearishDivergence() ? "Bearish" : "None")), 
-                 15, y, clrAqua, 8, "Arial");
-    }
+    // Clean up existing objects
+    DeleteAllObjects();
+    
+    // Create the main panel and sections
+    CreatePanel();
+    CreateHeader();
+    CreatePropFirmSection();
+    CreateSignalSection();
+    CreateRiskSection();
+    CreateAdaptiveFilterSection();
+    CreatePVSRASection();
+    CreateMarketRegimeSection();
+    CreateTradeStatsSection();
+    
+    // Force immediate update
+    Update();
+    
+    if(m_logger) m_logger.Info("Dashboard drawn");
 }

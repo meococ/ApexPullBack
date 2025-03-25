@@ -6,7 +6,7 @@
 #property link      "https://sonicr.com"
 
 // Thư viện MT5 tiêu chuẩn
-#include <Trade\Trade.mqh>
+#include <Trade/Trade.mqh>
 
 // Forward declarations
 class CLogger;
@@ -28,6 +28,7 @@ private:
     CSonicRCore* m_core;
     CRiskManager* m_riskManager;
     CTrade* m_trade;
+    CSonicRSR* m_srSystem;
     
     // Signal properties
     int m_currentSignal;           // Current signal (1=Buy, -1=Sell, 0=None)
@@ -92,6 +93,7 @@ public:
     void SetRiskManager(CRiskManager* riskManager) { m_riskManager = riskManager; }
     void SetTrade(CTrade* trade) { m_trade = trade; }
     void SetLogger(CLogger* logger) { m_logger = logger; }
+    void SetSRSystem(CSonicRSR* srSystem) { m_srSystem = srSystem; }
     
     // Utility
     string GetStatusText() const;
@@ -118,6 +120,7 @@ CEntryManager::CEntryManager(CSonicRCore* core,
     m_core = core;
     m_riskManager = riskManager;
     m_trade = trade;
+    m_srSystem = NULL;  // Khởi tạo giá trị mặc định
     
     // Initialize signal properties
     m_currentSignal = 0;
@@ -229,6 +232,12 @@ bool CEntryManager::ValidateSignal(int signal)
     
     if(signal < 0 && !m_core.IsAlignedBearish()) {
         if(m_logger) m_logger.Debug("SELL signal rejected: Dragon-Trend not aligned bearish");
+        return false;
+    }
+    
+    // Kiểm tra NULL trước khi sử dụng
+    if(m_core == NULL) {
+        if(m_logger) m_logger.Error("Cannot check PVSRA: Core is NULL");
         return false;
     }
     

@@ -7,30 +7,48 @@
 
 #include "SonicR_Logger.mqh"
 
+// Forward declarations cho các class được sử dụng
+class CRiskManager;
+class CAdaptiveFilters;
+class CSessionFilter;
+class CPVSRA;
+class CSonicRCore;
+class CEntryManager;
+class CExitManager;
+
+// Khai báo extern ở mức độ file (toàn cục)
+extern CRiskManager* g_riskManager;
+extern CAdaptiveFilters* g_adaptiveFilters;
+extern CSessionFilter* g_sessionFilter;
+extern CPVSRA* g_pvsra;
+extern CSonicRCore* g_sonicCore;
+extern CEntryManager* g_entryManager;
+extern CExitManager* g_exitManager;
+
+// PropFirm types
+enum ENUM_PROP_FIRM
+{
+    PROP_FIRM_FTMO,        // FTMO
+    PROP_FIRM_THE5ERS,     // The5ers
+    PROP_FIRM_E8,          // E8 Funding
+    PROP_FIRM_MFF,         // MyForexFunds
+    PROP_FIRM_CUSTOM       // Custom Settings
+};
+
+// Challenge phases
+enum ENUM_CHALLENGE_PHASE
+{
+    PHASE_CHALLENGE,       // Challenge Phase
+    PHASE_VERIFICATION,    // Verification Phase
+    PHASE_FUNDED           // Funded Account
+};
+
 // PropFirm settings class for challenge management
 class CPropSettings
 {
 private:
     // Logger
     CLogger* m_logger;
-    
-    // PropFirm types
-    enum ENUM_PROP_FIRM
-    {
-        PROP_FIRM_FTMO,        // FTMO
-        PROP_FIRM_THE5ERS,     // The5ers
-        PROP_FIRM_E8,          // E8 Funding
-        PROP_FIRM_MFF,         // MyForexFunds
-        PROP_FIRM_CUSTOM       // Custom Settings
-    };
-    
-    // Challenge phases
-    enum ENUM_CHALLENGE_PHASE
-    {
-        PHASE_CHALLENGE,       // Challenge Phase
-        PHASE_VERIFICATION,    // Verification Phase
-        PHASE_FUNDED           // Funded Account
-    };
     
     // PropFirm settings
     ENUM_PROP_FIRM m_propFirm;             // Current PropFirm
@@ -556,13 +574,6 @@ void CPropSettings::OptimizeForPropFirm()
 void CPropSettings::OptimizeForFTMO()
 {
     // FTMO strategy: Balance between win rate and profit factor
-    extern CRiskManager* g_riskManager;
-    extern CAdaptiveFilters* g_adaptiveFilters;
-    extern CSessionFilter* g_sessionFilter;
-    extern CPVSRA* g_pvsra;
-    extern CSonicRCore* g_sonicCore;
-    extern CEntryManager* g_entryManager;
-    extern CExitManager* g_exitManager;
     
     // Risk parameters
     if(g_riskManager != NULL) {
@@ -632,13 +643,6 @@ void CPropSettings::OptimizeForFTMO()
 void CPropSettings::OptimizeForThe5ers()
 {
     // The5ers strategy: Ultra conservative
-    extern CRiskManager* g_riskManager;
-    extern CAdaptiveFilters* g_adaptiveFilters;
-    extern CSessionFilter* g_sessionFilter;
-    extern CPVSRA* g_pvsra;
-    extern CSonicRCore* g_sonicCore;
-    extern CEntryManager* g_entryManager;
-    extern CExitManager* g_exitManager;
     
     // Risk parameters - The5ers has stricter drawdown requirements
     if(g_riskManager != NULL) {
@@ -704,13 +708,6 @@ void CPropSettings::OptimizeForThe5ers()
 void CPropSettings::OptimizeForMFF()
 {
     // MFF strategy: More balanced, slightly higher risk
-    extern CRiskManager* g_riskManager;
-    extern CAdaptiveFilters* g_adaptiveFilters;
-    extern CSessionFilter* g_sessionFilter;
-    extern CPVSRA* g_pvsra;
-    extern CSonicRCore* g_sonicCore;
-    extern CEntryManager* g_entryManager;
-    extern CExitManager* g_exitManager;
     
     // Risk parameters - MFF has more relaxed drawdown limits
     if(g_riskManager != NULL) {
@@ -776,13 +773,6 @@ void CPropSettings::OptimizeForMFF()
 void CPropSettings::OptimizeForE8()
 {
     // E8 Funding strategy: Balanced approach with moderate risk
-    extern CRiskManager* g_riskManager;
-    extern CAdaptiveFilters* g_adaptiveFilters;
-    extern CSessionFilter* g_sessionFilter;
-    extern CPVSRA* g_pvsra;
-    extern CSonicRCore* g_sonicCore;
-    extern CEntryManager* g_entryManager;
-    extern CExitManager* g_exitManager;
     
     // Risk parameters - Using E8 specific settings
     if(g_riskManager != NULL) {
