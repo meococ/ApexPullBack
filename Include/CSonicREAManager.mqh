@@ -6,20 +6,26 @@
 #property version   "3.0"
 #property strict
 
+// Include MQL5 Standard Library
+#include <stdlib.mqh>      // For string conversions, NULL
+#include <Trade\Trade.mqh> // For CTrade, AccountInfo..., SymbolInfo...
+#include <Object.mqh>     // For CObject, MqlDateTime, TimeToString etc.
+#include <Charts\ChartObjects.mqh> // For chart objects and events
+
 // Include core functionality
-#include "Common/Constants.mqh"
-#include "Common/Enums.mqh"
-#include "Common/Structs.mqh"
+#include "Constants.mqh"
+#include "Enums.mqh"
+#include "Structs.mqh"
 
 // Include component modules
-#include "Components/CIndicatorManager.mqh"
-#include "Components/CSRManager.mqh"
-#include "Components/CTradeManager.mqh"
-#include "Components/CRiskManager.mqh"
-#include "Components/CFilterManager.mqh"
-#include "Components/CSession.mqh"
-#include "Components/CLogger.mqh"
-#include "Components/CDashboard.mqh"
+#include "CIndicatorManager.mqh"
+#include "CSRManager.mqh"
+#include "CTradeManager.mqh"
+#include "CRiskManager.mqh"
+#include "CFilterManager.mqh"
+#include "CSession.mqh"
+#include "CLogger.mqh"
+#include "CDashboard.mqh"
 
 //+------------------------------------------------------------------+
 //| Main EA Manager Class                                            |
@@ -76,6 +82,7 @@ private:
     int m_ema89Period;
     int m_ema200Period;
     int m_adxPeriod;
+    double m_adxThreshold;
     int m_macdFastPeriod;
     int m_macdSlowPeriod;
     int m_macdSignalPeriod;
@@ -89,7 +96,6 @@ private:
     bool m_useSessionFilter;
     int m_gmtOffset;
     bool m_useADXFilter;
-    double m_adxThreshold;
     bool m_usePropFirmHoursFilter;
     
     // UI Settings
@@ -109,182 +115,8 @@ private:
     
     // Private methods for internal logic
     
-    // Checks if trading conditions are favorable
-    bool CanTrade() {
-        // Check if EA is paused
-        if (m_isPaused) {
-            m_logger.Debug("EA is paused, no trading allowed");
-            return false;
-        }
-        
-        // Check if in emergency mode
-        if (m_isEmergencyMode) {
-            m_logger.Warning("EA is in emergency mode, trading with reduced risk");
-            // We don't return false here, just let RiskManager reduce the risk
-        }
-        
-        // Let the filter manager check all filters
-        if (!m_filterManager.IsMarketConditionFavorable()) {
-            // FilterManager will log the specific reasons
-            return false;
-        }
-        
-        // Check if risk limits allow new trades
-        if (!m_riskManager.CanOpenNewTrade()) {
-            // RiskManager will log the specific reasons
-            return false;
-        }
-        
-        // All checks passed
-        return true;
-    }
-    
-    // Process signals and execute trades if conditions are favorable
-    void ProcessSignals() {
-        // Skip if no signals
-        if (!m_indicators.IsBuySignalActive() && !m_indicators.IsSellSignalActive()) {
-            return;
-        }
-        
-        // Check if we can trade
-        if (!CanTrade()) {
-            m_logger.Info("Trading conditions not met, skipping signals");
-            return;
-        }
-        
-        // Process buy signal
-        if (m_indicators.IsBuySignalActive()) {
-            m_logger.Info("Buy signal detected, executing order...");
-            
-            // Calculate entry parameters
-            double entryPrice = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
-            double stopLoss = m_indicators.CalculateBuyStopLoss();
-            
-            // Calculate lot size based on risk
-            double lotSize = m_riskManager.CalculateLotSize(entryPrice, stopLoss);
-            
-            if (lotSize <= 0) {
-                m_logger.Warning("Invalid lot size calculated, skipping buy order");
-                return;
-            }
-            
-            // Execute the order
-            if (m_tradeManager.ExecuteBuyOrder(entryPrice, stopLoss, lotSize)) {
-                m_logger.Info("Buy order executed successfully");
-            }
-        }
-        
-        // Process sell signal
-        if (m_indicators.IsSellSignalActive()) {
-            m_logger.Info("Sell signal detected, executing order...");
-            
-            // Calculate entry parameters
-            double entryPrice = SymbolInfoDouble(m_symbol, SYMBOL_BID);
-            double stopLoss = m_indicators.CalculateSellStopLoss();
-            
-            // Calculate lot size based on risk
-            double lotSize = m_riskManager.CalculateLotSize(entryPrice, stopLoss);
-            
-            if (lotSize <= 0) {
-                m_logger.Warning("Invalid lot size calculated, skipping sell order");
-                return;
-            }
-            
-            // Execute the order
-            if (m_tradeManager.ExecuteSellOrder(entryPrice, stopLoss, lotSize)) {
-                m_logger.Info("Sell order executed successfully");
-            }
-        }
-    }
-    
-public:
-    // Constructor & Destructor
-    CSonicREAManager(string symbol = NULL, ENUM_TIMEFRAMES timeframe = PERIOD_H1) {
-        // Initialize member variables
-        m_symbol = (symbol == NULL || symbol == "") ? Symbol() : symbol;
-        m_timeframe = timeframe;
-        m_magicNumber = 0;  // Will be set later
-        
-        // Initialize component pointers
-        m_indicators = NULL;
-        m_srManager = NULL;
-        m_tradeManager = NULL;
-        m_riskManager = NULL;
-        m_filterManager = NULL;
-        m_session = NULL;
-        m_logger = NULL;
-        m_dashboard = NULL;
-        
-        // Set state to defaults
-        m_initialized = false;
-        m_isPaused = false;
-        m_isEmergencyMode = false;
-        
-        // Initialize settings to default values
-        // PropFirm
-        m_propFirmType = PROP_FIRM_FTMO;
-        m_challengePhase = PHASE_CHALLENGE;
-        
-        // Risk
-        m_riskPercent = 1.0;
-        m_maxDailyDrawdown = 5.0;
-        m_maxTotalDrawdown = 10.0;
-        m_maxDailyTrades = 3;
-        m_maxConcurrentTrades = 2;
-        m_portfolioMaxRisk = 5.0;
-        m_maxCorrelationThreshold = 0.7;
-        
-        // Order
-        m_partialClosePercent = 0.6;
-        m_breakEvenLevel = 0.8;
-        m_trailingActivationR = 1.2;
-        m_takeProfitMultiplier1 = 1.2;
-        m_maxRetryAttempts = 3;
-        m_retryDelayMs = 500;
-        
-        // SuperTrend
-        m_superTrendPeriod = 10;
-        m_superTrendMultiplier = 3.0;
-        
-        // Strategy
-        m_ema34Period = 34;
-        m_ema89Period = 89;
-        m_ema200Period = 200;
-        m_adxPeriod = 14;
-        m_macdFastPeriod = 12;
-        m_macdSlowPeriod = 26;
-        m_macdSignalPeriod = 9;
-        m_atrPeriod = 14;
-        m_requiredConfluenceScore = 2;
-        
-        // Market Filters
-        m_useNewsFilter = true;
-        m_newsBefore = 60;
-        m_newsAfter = 30;
-        m_useSessionFilter = true;
-        m_gmtOffset = 2;
-        m_useADXFilter = true;
-        m_adxThreshold = 22.0;
-        m_usePropFirmHoursFilter = true;
-        
-        // UI
-        m_enableDashboard = true;
-        m_dashboardX = 20;
-        m_dashboardY = 20;
-        m_bullishColor = clrGreen;
-        m_bearishColor = clrRed;
-        m_neutralColor = clrGray;
-        
-        // Logging
-        m_enableDetailedLogging = true;
-        m_saveDailyReports = true;
-        m_enableEmailAlerts = false;
-        m_enablePushNotifications = false;
-        m_logLevel = 2; // INFO
-    }
-    
-    ~CSonicREAManager() {
-        // Clean up components to prevent memory leaks
+    // Clean up components when initialization fails
+    void CleanupComponents() {
         if (m_indicators != NULL) {
             delete m_indicators;
             m_indicators = NULL;
@@ -315,15 +147,236 @@ public:
             m_session = NULL;
         }
         
-        if (m_logger != NULL) {
-            delete m_logger;
-            m_logger = NULL;
-        }
-        
         if (m_dashboard != NULL) {
             delete m_dashboard;
             m_dashboard = NULL;
         }
+        
+        // Logger should be deleted last as other components might try to log during cleanup
+        if (m_logger != NULL) {
+            delete m_logger;
+            m_logger = NULL;
+        }
+    }
+    
+    // Checks if trading conditions are favorable
+    bool CanTrade() {
+        // Check if EA is paused
+        if (m_isPaused) {
+            if (m_logger != NULL) {
+                m_logger->Debug("EA is paused, no trading allowed");
+            }
+            return false;
+        }
+        
+        // Check if in emergency mode
+        if (m_isEmergencyMode) {
+            if (m_logger != NULL) {
+                m_logger->Warning("EA is in emergency mode, trading with reduced risk");
+            }
+            // We don't return false here, just let RiskManager reduce the risk
+        }
+        
+        // Let the filter manager check all filters
+        if (m_filterManager != NULL && !m_filterManager->IsMarketConditionFavorable()) {
+            // FilterManager will log the specific reasons
+            return false;
+        }
+        
+        // Check if risk limits allow new trades
+        if (m_riskManager != NULL && !m_riskManager->CanOpenNewTrade()) {
+            // RiskManager will log the specific reasons and already checks portfolio risk
+            return false;
+        }
+        
+        // All checks passed
+        return true;
+    }
+    
+    // Process signals and execute trades if conditions are favorable
+    void ProcessSignals() {
+        // Skip if indicators manager isn't initialized
+        if (m_indicators == NULL) return;
+        
+        // Skip if no signals
+        if (!m_indicators->IsBuySignalActive() && !m_indicators->IsSellSignalActive()) {
+            return;
+        }
+        
+        // Check if we can trade
+        if (!CanTrade()) {
+            if (m_logger != NULL) {
+                m_logger->Info("Trading conditions not met, skipping signals");
+            }
+            return;
+        }
+        
+        // Process buy signal
+        if (m_indicators->IsBuySignalActive()) {
+            if (m_logger != NULL) {
+                m_logger->Info("Buy signal detected, executing order...");
+            }
+            
+            // Calculate entry parameters
+            double entryPrice = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
+            double stopLoss = m_indicators->CalculateBuyStopLoss();
+            
+            // Get adjusted risk % *before* calculating lot size
+            double adjustedRiskPercent = m_riskManager != NULL ? m_riskManager->GetAdjustedRiskPercent() : m_riskPercent;
+
+            // Calculate lot size based on risk
+            double lotSize = m_riskManager != NULL ? m_riskManager->CalculateLotSize(entryPrice, stopLoss) : 0.01;
+            
+            if (lotSize <= 0) {
+                if (m_logger != NULL) {
+                    m_logger->Warning("Invalid lot size calculated, skipping buy order");
+                }
+                return;
+            }
+            
+            // Execute the order
+            if (m_tradeManager != NULL && m_tradeManager->ExecuteBuyOrder(entryPrice, stopLoss, lotSize)) {
+                if (m_logger != NULL) {
+                    m_logger->Info("Buy order executed successfully");
+                }
+                
+                // Track the new trade in risk manager
+                if (m_riskManager != NULL) {
+                    m_riskManager->TrackNewTrade();
+                    // Add the used risk percentage to portfolio risk
+                    m_riskManager->AddPortfolioRisk(adjustedRiskPercent);
+                }
+            }
+        }
+        
+        // Process sell signal
+        if (m_indicators->IsSellSignalActive()) {
+            if (m_logger != NULL) {
+                m_logger->Info("Sell signal detected, executing order...");
+            }
+            
+            // Calculate entry parameters
+            double entryPrice = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+            double stopLoss = m_indicators->CalculateSellStopLoss();
+            
+            // Get adjusted risk % *before* calculating lot size
+            double adjustedRiskPercent = m_riskManager != NULL ? m_riskManager->GetAdjustedRiskPercent() : m_riskPercent;
+
+            // Calculate lot size based on risk
+            double lotSize = m_riskManager != NULL ? m_riskManager->CalculateLotSize(entryPrice, stopLoss) : 0.01;
+            
+            if (lotSize <= 0) {
+                if (m_logger != NULL) {
+                    m_logger->Warning("Invalid lot size calculated, skipping sell order");
+                }
+                return;
+            }
+            
+            // Execute the order
+            if (m_tradeManager != NULL && m_tradeManager->ExecuteSellOrder(entryPrice, stopLoss, lotSize)) {
+                if (m_logger != NULL) {
+                    m_logger->Info("Sell order executed successfully");
+                }
+                
+                // Track the new trade in risk manager
+                if (m_riskManager != NULL) {
+                    m_riskManager->TrackNewTrade();
+                    // Add the used risk percentage to portfolio risk
+                    m_riskManager->AddPortfolioRisk(adjustedRiskPercent);
+                }
+            }
+        }
+    }
+    
+public:
+    // Constructor & Destructor
+    CSonicREAManager(string symbol = NULL, ENUM_TIMEFRAMES timeframe = PERIOD_H1) {
+        // Initialize member variables
+        m_symbol = (symbol == NULL || symbol == "") ? Symbol() : symbol;
+        m_timeframe = timeframe;
+        m_magicNumber = DEFAULT_MAGIC_NUMBER;  // Set default, can be changed
+        
+        // Initialize component pointers
+        m_indicators = NULL;
+        m_srManager = NULL;
+        m_tradeManager = NULL;
+        m_riskManager = NULL;
+        m_filterManager = NULL;
+        m_session = NULL;
+        m_logger = NULL;
+        m_dashboard = NULL;
+        
+        // Set state to defaults
+        m_initialized = false;
+        m_isPaused = false;
+        m_isEmergencyMode = false;
+        
+        // Initialize settings to default values
+        // PropFirm
+        m_propFirmType = PROP_FIRM_FTMO;
+        m_challengePhase = PHASE_CHALLENGE;
+        
+        // Risk
+        m_riskPercent = DEFAULT_RISK_PERCENT;
+        m_maxDailyDrawdown = DEFAULT_MAX_DAILY_DD;
+        m_maxTotalDrawdown = DEFAULT_MAX_TOTAL_DD;
+        m_maxDailyTrades = DEFAULT_MAX_DAILY_TRADES;
+        m_maxConcurrentTrades = DEFAULT_MAX_CONCURRENT;
+        m_portfolioMaxRisk = 5.0;
+        m_maxCorrelationThreshold = 0.7;
+        
+        // Order
+        m_partialClosePercent = DEFAULT_PARTIAL_CLOSE;
+        m_breakEvenLevel = DEFAULT_BE_LEVEL;
+        m_trailingActivationR = DEFAULT_TRAILING_LEVEL;
+        m_takeProfitMultiplier1 = DEFAULT_TP1_MULTIPLIER;
+        m_maxRetryAttempts = DEFAULT_MAX_RETRY;
+        m_retryDelayMs = DEFAULT_RETRY_DELAY;
+        
+        // SuperTrend
+        m_superTrendPeriod = DEFAULT_SUPERTREND_PERIOD;
+        m_superTrendMultiplier = DEFAULT_SUPERTREND_MULT;
+        
+        // Strategy
+        m_ema34Period = DEFAULT_EMA34_PERIOD;
+        m_ema89Period = DEFAULT_EMA89_PERIOD;
+        m_ema200Period = DEFAULT_EMA200_PERIOD;
+        m_adxPeriod = DEFAULT_ADX_PERIOD;
+        m_adxThreshold = DEFAULT_ADX_THRESHOLD;
+        m_macdFastPeriod = DEFAULT_MACD_FAST;
+        m_macdSlowPeriod = DEFAULT_MACD_SLOW;
+        m_macdSignalPeriod = DEFAULT_MACD_SIGNAL;
+        m_atrPeriod = DEFAULT_ATR_PERIOD;
+        m_requiredConfluenceScore = 2;
+        
+        // Market Filters
+        m_useNewsFilter = true;
+        m_newsBefore = DEFAULT_NEWS_BEFORE;
+        m_newsAfter = DEFAULT_NEWS_AFTER;
+        m_useSessionFilter = true;
+        m_gmtOffset = DEFAULT_GMT_OFFSET;
+        m_useADXFilter = true;
+        m_usePropFirmHoursFilter = true;
+        
+        // UI
+        m_enableDashboard = true;
+        m_dashboardX = DASHBOARD_X;
+        m_dashboardY = DASHBOARD_Y;
+        m_bullishColor = clrGreen;
+        m_bearishColor = clrRed;
+        m_neutralColor = clrGray;
+        
+        // Logging
+        m_enableDetailedLogging = true;
+        m_saveDailyReports = true;
+        m_enableEmailAlerts = false;
+        m_enablePushNotifications = false;
+        m_logLevel = 2; // INFO
+    }
+    
+    ~CSonicREAManager() {
+        // Clean up components to prevent memory leaks
+        CleanupComponents();
     }
     
     // Initialize the EA and all components
@@ -341,173 +394,189 @@ public:
         }
         
         // Initialize logger with settings
-        if (!m_logger.Initialize(
+        if (!m_logger->Initialize(
                 m_enableDetailedLogging,  
-                m_logLevel,
+                (ENUM_LOG_LEVEL)m_logLevel,
                 m_enableEmailAlerts,
                 m_enablePushNotifications)) {
             Print("ERROR: Failed to initialize Logger");
+            delete m_logger;  // Clean up the logger
+            m_logger = NULL;
             return false;
         }
         
-        m_logger.Info("Initializing SonicR PropFirm EA v3.0");
+        m_logger->Info("Initializing SonicR PropFirm EA v3.0");
         
         // Initialize session manager
-        m_logger.Debug("Creating Session Manager");
+        m_logger->Debug("Creating Session Manager");
         m_session = new CSession(m_gmtOffset);
         if (m_session == NULL) {
-            m_logger.Error("Failed to create Session Manager");
+            m_logger->Error("Failed to create Session Manager");
+            CleanupComponents();  // Clean up all components
             return false;
         }
-        m_session.SetUseSessionFilter(m_useSessionFilter);
-        m_logger.Debug("Session Manager created successfully");
+        m_session->SetUseSessionFilter(m_useSessionFilter);
+        m_logger->Debug("Session Manager created successfully");
         
         // Initialize SR Manager
-        m_logger.Debug("Creating SR Manager");
+        m_logger->Debug("Creating SR Manager");
         m_srManager = new CSRManager(m_symbol, m_timeframe);
         if (m_srManager == NULL) {
-            m_logger.Error("Failed to create SR Manager");
+            m_logger->Error("Failed to create SR Manager");
+            CleanupComponents();
             return false;
         }
-        if (!m_srManager.Initialize()) {
-            m_logger.Error("Failed to initialize SR Manager");
+        if (!m_srManager->Initialize()) {
+            m_logger->Error("Failed to initialize SR Manager");
+            CleanupComponents();
             return false;
         }
-        m_logger.Debug("SR Manager initialized successfully");
+        m_logger->Debug("SR Manager initialized successfully");
         
         // Initialize indicator manager
-        m_logger.Debug("Creating Indicator Manager");
+        m_logger->Debug("Creating Indicator Manager");
         m_indicators = new CIndicatorManager(m_symbol, m_timeframe);
         if (m_indicators == NULL) {
-            m_logger.Error("Failed to create Indicator Manager");
+            m_logger->Error("Failed to create Indicator Manager");
+            CleanupComponents();
             return false;
         }
         
         // Configure indicator manager with settings
-        m_indicators.SetEMAPeriods(m_ema34Period, m_ema89Period, m_ema200Period);
-        m_indicators.SetADXPeriod(m_adxPeriod);
-        m_indicators.SetMACDParameters(m_macdFastPeriod, m_macdSlowPeriod, m_macdSignalPeriod);
-        m_indicators.SetATRPeriod(m_atrPeriod);
-        m_indicators.SetRequiredConfluenceScore(m_requiredConfluenceScore);
-        m_indicators.SetSRManager(m_srManager); // Connect to SR Manager
+        m_indicators->SetEMAPeriods(m_ema34Period, m_ema89Period, m_ema200Period);
+        m_indicators->SetADXPeriod(m_adxPeriod);
+        m_indicators->SetMACDParameters(m_macdFastPeriod, m_macdSlowPeriod, m_macdSignalPeriod);
+        m_indicators->SetATRPeriod(m_atrPeriod);
+        m_indicators->SetRequiredConfluenceScore(m_requiredConfluenceScore);
+        m_indicators->SetSRManager(m_srManager); // Connect to SR Manager
         
         // Initialize indicator manager
-        if (!m_indicators.Initialize()) {
-            m_logger.Error("Failed to initialize Indicator Manager");
+        if (!m_indicators->Initialize()) {
+            m_logger->Error("Failed to initialize Indicator Manager");
+            CleanupComponents();
             return false;
         }
-        m_logger.Debug("Indicator Manager initialized successfully");
+        m_logger->Debug("Indicator Manager initialized successfully");
         
         // Initialize risk manager
-        m_logger.Debug("Creating Risk Manager");
+        m_logger->Debug("Creating Risk Manager");
         m_riskManager = new CRiskManager();
         if (m_riskManager == NULL) {
-            m_logger.Error("Failed to create Risk Manager");
+            m_logger->Error("Failed to create Risk Manager");
+            CleanupComponents();
             return false;
         }
         
         // Configure risk manager with settings
-        m_riskManager.SetRiskPercent(m_riskPercent);
-        m_riskManager.SetMaxDailyDrawdown(m_maxDailyDrawdown);
-        m_riskManager.SetMaxTotalDrawdown(m_maxTotalDrawdown);
-        m_riskManager.SetMaxDailyTrades(m_maxDailyTrades);
-        m_riskManager.SetMaxConcurrentTrades(m_maxConcurrentTrades);
-        m_riskManager.SetPortfolioMaxRisk(m_portfolioMaxRisk);
-        m_riskManager.SetMaxCorrelationThreshold(m_maxCorrelationThreshold);
-        m_riskManager.SetPropFirmSettings(m_propFirmType, m_challengePhase);
-        m_riskManager.SetLogger(m_logger); // Connect to Logger
+        m_riskManager->SetRiskPercent(m_riskPercent);
+        m_riskManager->SetMaxDailyDrawdown(m_maxDailyDrawdown);
+        m_riskManager->SetMaxTotalDrawdown(m_maxTotalDrawdown);
+        m_riskManager->SetMaxDailyTrades(m_maxDailyTrades);
+        m_riskManager->SetMaxConcurrentTrades(m_maxConcurrentTrades);
+        m_riskManager->SetPortfolioMaxRisk(m_portfolioMaxRisk);
+        m_riskManager->SetMaxCorrelationThreshold(m_maxCorrelationThreshold);
+        m_riskManager->SetPropFirmSettings(m_propFirmType, m_challengePhase);
+        m_riskManager->SetLogger(m_logger); // Connect to Logger
         
         // Initialize risk manager
-        if (!m_riskManager.Initialize()) {
-            m_logger.Error("Failed to initialize Risk Manager");
+        if (!m_riskManager->Initialize()) {
+            m_logger->Error("Failed to initialize Risk Manager");
+            CleanupComponents();
             return false;
         }
-        m_logger.Debug("Risk Manager initialized successfully");
+        m_logger->Debug("Risk Manager initialized successfully");
         
         // Initialize trade manager
-        m_logger.Debug("Creating Trade Manager");
+        m_logger->Debug("Creating Trade Manager");
         m_tradeManager = new CTradeManager(m_symbol, m_magicNumber);
         if (m_tradeManager == NULL) {
-            m_logger.Error("Failed to create Trade Manager");
+            m_logger->Error("Failed to create Trade Manager");
+            CleanupComponents();
             return false;
         }
         
         // Configure trade manager with settings
-        m_tradeManager.SetPartialClosePercent(m_partialClosePercent);
-        m_tradeManager.SetBreakEvenLevel(m_breakEvenLevel);
-        m_tradeManager.SetTrailingActivationR(m_trailingActivationR);
-        m_tradeManager.SetTakeProfitMultiplier(m_takeProfitMultiplier1);
-        m_tradeManager.SetMaxRetryAttempts(m_maxRetryAttempts);
-        m_tradeManager.SetRetryDelayMs(m_retryDelayMs);
-        m_tradeManager.SetSuperTrendParameters(m_superTrendPeriod, m_superTrendMultiplier);
-        m_tradeManager.SetLogger(m_logger); // Connect to Logger
+        m_tradeManager->SetPartialClosePercent(m_partialClosePercent);
+        m_tradeManager->SetBreakEvenLevel(m_breakEvenLevel);
+        m_tradeManager->SetTrailingActivationR(m_trailingActivationR);
+        m_tradeManager->SetTakeProfitMultiplier(m_takeProfitMultiplier1);
+        m_tradeManager->SetMaxRetryAttempts(m_maxRetryAttempts);
+        m_tradeManager->SetRetryDelayMs(m_retryDelayMs);
+        m_tradeManager->SetSuperTrendParameters(m_superTrendPeriod, m_superTrendMultiplier);
+        m_tradeManager->SetLogger(m_logger); // Connect to Logger
         
         // Initialize trade manager
-        if (!m_tradeManager.Initialize()) {
-            m_logger.Error("Failed to initialize Trade Manager");
+        if (!m_tradeManager->Initialize()) {
+            m_logger->Error("Failed to initialize Trade Manager");
+            CleanupComponents();
             return false;
         }
-        m_logger.Debug("Trade Manager initialized successfully");
+        m_logger->Debug("Trade Manager initialized successfully");
         
         // Initialize filter manager
-        m_logger.Debug("Creating Filter Manager");
+        m_logger->Debug("Creating Filter Manager");
         m_filterManager = new CFilterManager();
         if (m_filterManager == NULL) {
-            m_logger.Error("Failed to create Filter Manager");
+            m_logger->Error("Failed to create Filter Manager");
+            CleanupComponents();
             return false;
         }
         
         // Configure filter manager
-        m_filterManager.SetNewsFilter(m_useNewsFilter, m_newsBefore, m_newsAfter);
-        m_filterManager.SetADXFilter(m_useADXFilter, m_adxThreshold);
-        m_filterManager.SetPropFirmHoursFilter(m_usePropFirmHoursFilter);
-        m_filterManager.SetPropFirmSettings(m_propFirmType, m_challengePhase);
-        m_filterManager.SetIndicatorManager(m_indicators); // Connect to Indicators
-        m_filterManager.SetSession(m_session); // Connect to Session
-        m_filterManager.SetLogger(m_logger); // Connect to Logger
+        m_filterManager->SetNewsFilter(m_useNewsFilter, m_newsBefore, m_newsAfter);
+        m_filterManager->SetADXFilter(m_useADXFilter, m_adxThreshold);
+        m_filterManager->SetPropFirmHoursFilter(m_usePropFirmHoursFilter);
+        m_filterManager->SetPropFirmSettings(m_propFirmType, m_challengePhase);
+        m_filterManager->SetSymbol(m_symbol);
+        m_filterManager->SetIndicatorManager(m_indicators); // Connect to Indicators
+        m_filterManager->SetSession(m_session); // Connect to Session
+        m_filterManager->SetLogger(m_logger); // Connect to Logger
         
         // Initialize filter manager
-        if (!m_filterManager.Initialize()) {
-            m_logger.Error("Failed to initialize Filter Manager");
+        if (!m_filterManager->Initialize()) {
+            m_logger->Error("Failed to initialize Filter Manager");
+            CleanupComponents();
             return false;
         }
-        m_logger.Debug("Filter Manager initialized successfully");
+        m_logger->Debug("Filter Manager initialized successfully");
         
         // Initialize dashboard if enabled
         if (m_enableDashboard) {
-            m_logger.Debug("Creating Dashboard");
+            m_logger->Debug("Creating Dashboard");
             m_dashboard = new CDashboard();
             if (m_dashboard == NULL) {
-                m_logger.Warning("Failed to create Dashboard, continuing without visual display");
+                m_logger->Warning("Failed to create Dashboard, continuing without visual display");
             } else {
                 // Configure dashboard
-                m_dashboard.SetPosition(m_dashboardX, m_dashboardY);
-                m_dashboard.SetColors(m_bullishColor, m_bearishColor, m_neutralColor);
-                m_dashboard.SetLogger(m_logger); // Connect to Logger
+                m_dashboard->SetPosition(m_dashboardX, m_dashboardY);
+                m_dashboard->SetColors(m_bullishColor, m_bearishColor, m_neutralColor);
+                m_dashboard->SetLogger(m_logger); // Connect to Logger
                 
                 // Set data providers
-                m_dashboard.SetIndicatorManager(m_indicators);
-                m_dashboard.SetTradeManager(m_tradeManager);
-                m_dashboard.SetRiskManager(m_riskManager);
-                m_dashboard.SetFilterManager(m_filterManager);
+                m_dashboard->SetIndicatorManager(m_indicators);
+                m_dashboard->SetTradeManager(m_tradeManager);
+                m_dashboard->SetRiskManager(m_riskManager);
+                m_dashboard->SetFilterManager(m_filterManager);
                 
                 // Initialize dashboard
-                if (!m_dashboard.Initialize()) {
-                    m_logger.Warning("Failed to initialize Dashboard, continuing without visual display");
+                if (!m_dashboard->Initialize()) {
+                    m_logger->Warning("Failed to initialize Dashboard, continuing without visual display");
                     delete m_dashboard;
                     m_dashboard = NULL;
                 } else {
-                    m_logger.Debug("Dashboard initialized successfully");
+                    m_logger->Debug("Dashboard initialized successfully");
                 }
             }
         }
         
         // Sync with existing trades for the current symbol
-        m_tradeManager.SyncExistingTrades();
+        if (m_tradeManager != NULL) {
+            m_tradeManager->SyncExistingTrades();
+        }
         
         // All components initialized successfully
         m_initialized = true;
-        m_logger.Info("SonicR PropFirm EA v3.0 initialized successfully");
+        m_logger->Info("SonicR PropFirm EA v3.0 initialized successfully");
         
         return true;
     }
@@ -520,7 +589,7 @@ public:
         // Skip processing if paused except for dashboard updates
         if (m_isPaused) {
             if (m_dashboard != NULL) {
-                m_dashboard.Update();
+                m_dashboard->Update();
             }
             return;
         }
@@ -531,13 +600,15 @@ public:
         
         // Only manage trades every 15 seconds or on new bar
         if (currentTime - lastManageTime >= 15) {
-            m_tradeManager.ManageOpenTrades();
+            if (m_tradeManager != NULL) {
+                m_tradeManager->ManageOpenTrades();
+            }
             lastManageTime = currentTime;
         }
         
         // Update dashboard if enabled
         if (m_dashboard != NULL) {
-            m_dashboard.Update();
+            m_dashboard->Update();
         }
     }
     
@@ -550,72 +621,90 @@ public:
         if (m_isPaused) return;
         
         // Log new bar
-        m_logger.Debug("Processing new bar: " + TimeToString(iTime(m_symbol, m_timeframe, 0)));
+        if (m_logger != NULL) {
+            m_logger->Debug("Processing new bar: " + TimeToString(iTime(m_symbol, m_timeframe, 0)));
+        }
         
         // Update SR Manager
-        if (!m_srManager.Update()) {
-            m_logger.Error("Failed to update SR Manager, skipping this bar");
-            return;
+        if (m_srManager != NULL) {
+            if (!m_srManager->Update()) {
+                if (m_logger != NULL) {
+                    m_logger->Error("Failed to update SR Manager, skipping this bar");
+                }
+                return;
+            }
         }
         
         // Update indicators
-        if (!m_indicators.Update()) {
-            m_logger.Error("Failed to update indicators, skipping this bar");
-            return;
+        if (m_indicators != NULL) {
+            if (!m_indicators->Update()) {
+                if (m_logger != NULL) {
+                    m_logger->Error("Failed to update indicators, skipping this bar");
+                }
+                return;
+            }
+            
+            // Check for new entry signals
+            m_indicators->CheckEntrySignals();
         }
         
         // Update risk metrics
-        m_riskManager.UpdateMetrics();
-        
-        // Check for new entry signals
-        m_indicators.CheckEntrySignals();
+        if (m_riskManager != NULL) {
+            m_riskManager->UpdateMetrics();
+        }
         
         // Process signals if any
         ProcessSignals();
         
         // Reset emergency mode if conditions are favorable
-        if (m_isEmergencyMode && m_riskManager.CanResetEmergencyMode()) {
+        if (m_isEmergencyMode && m_riskManager != NULL && m_riskManager->CanResetEmergencyMode()) {
             m_isEmergencyMode = false;
-            m_logger.Info("Emergency mode deactivated, normal trading resumed");
+            if (m_logger != NULL) {
+                m_logger->Info("Emergency mode deactivated, normal trading resumed");
+            }
         }
     }
     
-    // Process timer event
+    // Process timer event (called every second)
     void ProcessTimer() {
-        // Skip if not initialized
-        if (!m_initialized) return;
-        
-        // Update filters
-        m_filterManager.Update();
-        
-        // Update dashboard if enabled
-        if (m_dashboard != NULL) {
-            m_dashboard.Update();
+        // Update risk metrics frequently for accurate drawdown monitoring
+        if (m_riskManager != NULL) {
+            m_riskManager->UpdateMetrics();
+            
+            // Check for emergency mode trigger after updating metrics
+            if (!m_isEmergencyMode && m_riskManager->IsTotalDrawdownExceeded()) {
+                ActivateEmergencyMode();
+            }
+            // Optionally, add logic to auto-deactivate emergency mode if conditions improve
+            else if (m_isEmergencyMode && m_riskManager->CanResetEmergencyMode()) {
+                // DeactivateEmergencyMode(); // Decide if this should be automatic
+            }
         }
         
-        // Check if we need to reset daily metrics
-        static datetime lastResetCheck = 0;
+        // Update dashboard periodically
+        if (m_dashboard != NULL && m_enableDashboard) {
+            m_dashboard->Update();
+        }
+        
+        // Perform other less frequent periodic tasks (e.g., every minute)
+        static datetime lastMinuteCheck = 0;
         datetime currentTime = TimeCurrent();
         
-        if (currentTime - lastResetCheck > 60) { // Check every minute
-            // Reset daily metrics if day has changed
-            if (m_riskManager.ShouldResetDailyMetrics()) {
-                m_riskManager.ResetDailyMetrics();
-                
-                // Save daily report if enabled
-                if (m_saveDailyReports) {
-                    m_logger.SaveDailyReport();
+        if (currentTime - lastMinuteCheck >= 60) {
+            // Update filter data (e.g., news)
+            if (m_filterManager != NULL) {
+                m_filterManager->Update();
+            }
+            
+            // Reset daily metrics if needed
+            if (m_riskManager != NULL && m_riskManager->ShouldResetDailyMetrics()) {
+                m_riskManager->ResetDailyMetrics();
+                if (m_logger != NULL) {
+                    m_logger->SaveDailyReport(); // Save report at day reset
                 }
             }
             
-            lastResetCheck = currentTime;
-        }
-        
-        // Periodically sync trades
-        static datetime lastSyncTime = 0;
-        if (currentTime - lastSyncTime > 300) { // Every 5 minutes
-            m_tradeManager.SyncExistingTrades();
-            lastSyncTime = currentTime;
+            lastMinuteCheck = currentTime;
         }
     }
     
@@ -626,26 +715,29 @@ public:
         
         // Process dashboard events if enabled
         if (m_dashboard != NULL && id == CHARTEVENT_OBJECT_CLICK) {
-            return m_dashboard.ProcessEvents(id, lparam, dparam, sparam);
+            return m_dashboard->ProcessEvents(id, lparam, dparam, sparam);
         }
         
         return false;
     }
     
-    // Deinitialize EA
+    // Deinitialize EA - enhanced to perform more cleanup
     void Deinitialize() {
         // Skip if not initialized
         if (!m_initialized) return;
         
         // Save final reports if enabled
         if (m_saveDailyReports && m_logger != NULL) {
-            m_logger.SaveDailyReport();
+            m_logger->SaveDailyReport();
         }
         
         // Log termination
         if (m_logger != NULL) {
-            m_logger.Info("SonicR PropFirm EA v3.0 terminated");
+            m_logger->Info("SonicR PropFirm EA v3.0 terminated");
         }
+        
+        // Reset initialization flag
+        m_initialized = false;
     }
     
     //--- Setter methods for configurations
@@ -785,7 +877,9 @@ public:
     void Pause() {
         if (!m_isPaused) {
             m_isPaused = true;
-            m_logger.Info("EA paused");
+            if (m_logger != NULL) {
+                m_logger->Info("EA paused");
+            }
         }
     }
     
@@ -793,21 +887,27 @@ public:
     void Resume() {
         if (m_isPaused) {
             m_isPaused = false;
-            m_logger.Info("EA resumed");
+            if (m_logger != NULL) {
+                m_logger->Info("EA resumed");
+            }
         }
     }
     
     // Toggle pause state
     void TogglePause() {
         m_isPaused = !m_isPaused;
-        m_logger.Info(m_isPaused ? "EA paused" : "EA resumed");
+        if (m_logger != NULL) {
+            m_logger->Info(m_isPaused ? "EA paused" : "EA resumed");
+        }
     }
     
     // Activate emergency mode
     void ActivateEmergencyMode() {
         if (!m_isEmergencyMode) {
             m_isEmergencyMode = true;
-            m_logger.Warning("Emergency mode activated");
+            if (m_logger != NULL) {
+                m_logger->Warning("Emergency mode activated");
+            }
         }
     }
     
@@ -815,7 +915,9 @@ public:
     void DeactivateEmergencyMode() {
         if (m_isEmergencyMode) {
             m_isEmergencyMode = false;
-            m_logger.Info("Emergency mode deactivated");
+            if (m_logger != NULL) {
+                m_logger->Info("Emergency mode deactivated");
+            }
         }
     }
     
@@ -833,17 +935,17 @@ public:
     
     // Get current profit
     double GetCurrentProfit() const {
-        return m_riskManager != NULL ? m_riskManager.GetCurrentProfit() : 0.0;
+        return m_riskManager != NULL ? m_riskManager->GetCurrentProfit() : 0.0;
     }
     
     // Get current drawdown
     double GetCurrentDrawdown() const {
-        return m_riskManager != NULL ? m_riskManager.GetCurrentDrawdown() : 0.0;
+        return m_riskManager != NULL ? m_riskManager->GetCurrentDrawdown() : 0.0;
     }
     
     // Get open positions count
     int GetOpenPositionsCount() const {
-        return m_tradeManager != NULL ? m_tradeManager.GetOpenTradesCount() : 0;
+        return m_tradeManager != NULL ? m_tradeManager->GetOpenTradesCount() : 0;
     }
     
     // Get EA status summary
@@ -858,17 +960,18 @@ public:
         
         // Add risk metrics if available
         if (m_riskManager != NULL) {
-            status += "Current DD: " + DoubleToString(m_riskManager.GetCurrentDrawdown(), 2) + "%\n";
-            status += "Daily DD: " + DoubleToString(m_riskManager.GetDailyDrawdown(), 2) + "%\n";
+            status += "Current DD: " + DoubleToString(m_riskManager->GetCurrentDrawdown(), 2) + "%\n";
+            status += "Daily DD: " + DoubleToString(m_riskManager->GetDailyDrawdown(), 2) + "%\n";
             status += "Open Trades: " + IntegerToString(GetOpenPositionsCount()) + "\n";
-            status += "Daily Trades: " + IntegerToString(m_riskManager.GetDailyTradesCount()) + "\n";
+            status += "Daily Trades: " + IntegerToString(m_riskManager->GetDailyTradesCount()) + "\n";
         }
         
         // Add market state if available
         if (m_indicators != NULL) {
-            status += "Trend: " + (m_indicators.IsBullishTrend() ? "Bullish" : 
-                                  (m_indicators.IsBearishTrend() ? "Bearish" : "Neutral")) + "\n";
-            status += "ADX: " + DoubleToString(m_indicators.GetADXValue(), 1) + "\n";
+            MarketState market = m_indicators->GetMarketState();
+            status += "Trend: " + (m_indicators->IsBullishTrend() ? "Bullish" : 
+                                  (m_indicators->IsBearishTrend() ? "Bearish" : "Neutral")) + "\n";
+            status += "ADX: " + DoubleToString(m_indicators->GetADXValue(), 1) + "\n";
         }
         
         return status;

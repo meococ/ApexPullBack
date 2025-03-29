@@ -49,9 +49,11 @@ private:
     datetime m_lastDayChecked;          // Last day checked for reset
     datetime m_lastWeekChecked;         // Last week checked for reset
     datetime m_lastMonthChecked;        // Last month checked for reset
+    datetime m_lastUpdateTime;          // Last time metrics were updated
     
     // Symbol correlations
     CorrelationInfo m_correlations[];   // Array of correlation info
+    int m_maxCorrelationCache;          // Maximum size of correlation cache
     
     // Logger
     CLogger* m_logger;                  // Logger reference
@@ -255,7 +257,7 @@ private:
         return false;
     }
     
-    // Check if week changed
+    // Check if week changed - IMPROVED VERSION
     bool IsWeekChanged() {
         datetime currentTime = TimeCurrent();
         
@@ -269,14 +271,28 @@ private:
         TimeToStruct(m_lastWeekChecked, lastDate);
         TimeToStruct(currentTime, currentDate);
         
-        // Calculate week number
-        int lastWeek = (lastDate.day - 1) / 7 + 1;
-        int currentWeek = (currentDate.day - 1) / 7 + 1;
+        // Get day of week (1 = Monday, 7 = Sunday)
+        int lastDOW = lastDate.day_of_week == 0 ? 7 : lastDate.day_of_week;
+        int currentDOW = currentDate.day_of_week == 0 ? 7 : currentDate.day_of_week;
         
-        // Check if week changed
-        if (lastWeek != currentWeek || 
-            lastDate.mon != currentDate.mon || 
-            lastDate.year != currentDate.year) {
+        // Calculate week number based on ISO week definition
+        // Monday is the first day of the week
+        bool isNewWeek = false;
+        
+        // New week starts on Monday
+        if (currentDOW == 1 && lastDOW != 1) {
+            isNewWeek = true;
+        }
+        // Or when month changes
+        else if (lastDate.mon != currentDate.mon) {
+            isNewWeek = true;
+        }
+        // Or when year changes
+        else if (lastDate.year != currentDate.year) {
+            isNewWeek = true;
+        }
+        
+        if (isNewWeek) {
             m_lastWeekChecked = currentTime;
             return true;
         }
@@ -366,14 +382,36 @@ private:
         // Calculate correlation coefficient
         double correlation = sum_xy / MathSqrt(sum_x2 * sum_y2);
         
-        // Store result in cache
-        int size = ArraySize(m_correlations);
-        ArrayResize(m_correlations, size + 1);
-        m_correlations[size].symbol1 = symbol1;
-        m_correlations[size].symbol2 = symbol2;
-        m_correlations[size].correlation = correlation;
-        m_correlations[size].period = period;
-        m_correlations[size].calculationTime = TimeCurrent();
+        // Manage correlation cache size
+        if (ArraySize(m_correlations) >= m_maxCorrelationCache) {
+            // Find oldest correlation entry and replace it
+            int oldestIndex = 0;
+            datetime oldestTime = TimeCurrent();
+            
+            for (int i = 0; i < ArraySize(m_correlations); i++) {
+                if (m_correlations[i].calculationTime < oldestTime) {
+                    oldestTime = m_correlations[i].calculationTime;
+                    oldestIndex = i;
+                }
+            }
+            
+            // Replace oldest entry
+            m_correlations[oldestIndex].symbol1 = symbol1;
+            m_correlations[oldestIndex].symbol2 = symbol2;
+            m_correlations[oldestIndex].correlation = correlation;
+            m_correlations[oldestIndex].period = period;
+            m_correlations[oldestIndex].calculationTime = TimeCurrent();
+        }
+        else {
+            // Add new entry
+            int size = ArraySize(m_correlations);
+            ArrayResize(m_correlations, size + 1);
+            m_correlations[size].symbol1 = symbol1;
+            m_correlations[size].symbol2 = symbol2;
+            m_correlations[size].correlation = correlation;
+            m_correlations[size].period = period;
+            m_correlations[size].calculationTime = TimeCurrent();
+        }
         
         return correlation;
     }
@@ -439,6 +477,55 @@ private:
         return adjustedRisk;
     }
     
+    // Clean up old correlation data to prevent memory leaks
+    void CleanCorrelationCache() {
+        // If cache is smaller than max size, no cleaning needed
+        if (ArraySize(m_correlations) < m_maxCorrelationCache) {
+            return;
+        }
+        
+        // Find entries older than 24 hours
+        datetime currentTime = TimeCurrent();
+        datetime oldThreshold = currentTime - 24*3600; // 24 hours ago
+        
+        // Count valid entries
+        int validCount = 0;
+        for (int i = 0; i < ArraySize(m_correlations); i++) {
+            if (m_correlations[i].calculationTime >= oldThreshold) {
+                validCount++;
+            }
+        }
+        
+        // If all entries are recent, no cleaning needed
+        if (validCount == ArraySize(m_correlations)) {
+            return;
+        }
+        
+        // Create a new array with only recent entries
+        CorrelationInfo tempArray[];
+        ArrayResize(tempArray, validCount);
+        
+        int index = 0;
+        for (int i = 0; i < ArraySize(m_correlations); i++) {
+            if (m_correlations[i].calculationTime >= oldThreshold) {
+                tempArray[index++] = m_correlations[i];
+            }
+        }
+        
+        // Replace old array with new one
+        ArrayFree(m_correlations);
+        ArrayResize(m_correlations, validCount);
+        for (int i = 0; i < validCount; i++) {
+            m_correlations[i] = tempArray[i];
+        }
+        
+        if (m_logger != NULL) {
+            m_logger.Debug("Cleaned correlation cache: removed " + 
+                          IntegerToString(ArraySize(m_correlations) - validCount) + 
+                          " old entries");
+        }
+    }
+    
 public:
     // Constructor
     CRiskManager() {
@@ -471,6 +558,10 @@ public:
         m_lastDayChecked = 0;
         m_lastWeekChecked = 0;
         m_lastMonthChecked = 0;
+        m_lastUpdateTime = 0;
+        
+        // Set correlation cache limit
+        m_maxCorrelationCache = 100;
         
         // Logger
         m_logger = NULL;
@@ -490,6 +581,9 @@ public:
         // Configure PropFirm rules
         ConfigurePropFirmRules();
         
+        // Set last update time
+        m_lastUpdateTime = TimeCurrent();
+        
         // Log initialization
         if (m_logger != NULL) {
             m_logger.Info("RiskManager initialized with " + 
@@ -498,6 +592,7 @@ public:
                          "%, Max Total DD: " + DoubleToString(m_maxTotalDrawdown, 2) + "%");
             m_logger.Info("Max Daily Trades: " + IntegerToString(m_maxDailyTrades) + 
                          ", Max Concurrent: " + IntegerToString(m_maxConcurrentTrades));
+            m_logger.Info("Portfolio Max Risk: " + DoubleToString(m_portfolioMaxRisk, 2) + "%");
         }
         
         return true;
@@ -555,8 +650,19 @@ public:
         return lotSize;
     }
     
-    // Update risk metrics
+    // Update risk metrics - ENHANCED FOR MORE FREQUENT CALLS
     void UpdateMetrics() {
+        // Get current time
+        datetime currentTime = TimeCurrent();
+        
+        // Skip if update is too frequent (limit to once per second)
+        if (currentTime - m_lastUpdateTime < 1) {
+            return;
+        }
+        
+        // Update last update time
+        m_lastUpdateTime = currentTime;
+        
         // Get current equity
         m_currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
         
@@ -583,11 +689,66 @@ public:
         if (IsWeekChanged()) {
             // Reset weekly metrics
             m_startWeekEquity = m_currentEquity;
+            
+            if (m_logger != NULL) {
+                m_logger.Info("Weekly metrics reset. New start equity: " + 
+                             DoubleToString(m_startWeekEquity, 2));
+            }
         }
         
         if (IsMonthChanged()) {
             // Reset monthly metrics
             m_startMonthEquity = m_currentEquity;
+            
+            if (m_logger != NULL) {
+                m_logger.Info("Monthly metrics reset. New start equity: " + 
+                             DoubleToString(m_startMonthEquity, 2));
+            }
+        }
+        
+        // Check for emergency conditions
+        CheckEmergencyConditions();
+        
+        // Clean correlation cache periodically (once per hour)
+        static datetime lastCacheCleanTime = 0;
+        if (currentTime - lastCacheCleanTime > 3600) {
+            CleanCorrelationCache();
+            lastCacheCleanTime = currentTime;
+        }
+    }
+    
+    // Check for emergency conditions
+    void CheckEmergencyConditions() {
+        bool emergencyDetected = false;
+        
+        // Check daily drawdown approaching limit
+        if (m_dailyDrawdown > m_maxDailyDrawdown * 0.85) {
+            emergencyDetected = true;
+            if (m_logger != NULL) {
+                m_logger.Warning("EMERGENCY ALERT: Daily drawdown (" + 
+                               DoubleToString(m_dailyDrawdown, 2) + 
+                               "%) approaching limit (" + 
+                               DoubleToString(m_maxDailyDrawdown, 2) + "%)");
+            }
+        }
+        
+        // Check total drawdown approaching limit
+        if (m_totalDrawdown > m_maxTotalDrawdown * 0.85) {
+            emergencyDetected = true;
+            if (m_logger != NULL) {
+                m_logger.Warning("EMERGENCY ALERT: Total drawdown (" + 
+                               DoubleToString(m_totalDrawdown, 2) + 
+                               "%) approaching limit (" + 
+                               DoubleToString(m_maxTotalDrawdown, 2) + "%)");
+            }
+        }
+        
+        if (emergencyDetected) {
+            // Notify CSonicREAManager to activate Emergency Mode
+            extern CSonicREAManager* g_manager; // External reference to main manager
+            if (g_manager != NULL) {
+                g_manager.ActivateEmergencyMode();
+            }
         }
     }
     
@@ -612,11 +773,17 @@ public:
     
     // Check if max daily drawdown is exceeded
     bool IsDailyDrawdownExceeded() {
+        // Ensure metrics are current
+        UpdateMetrics();
+        
         return m_dailyDrawdown >= m_maxDailyDrawdown;
     }
     
     // Check if max total drawdown is exceeded
     bool IsTotalDrawdownExceeded() {
+        // Ensure metrics are current
+        UpdateMetrics();
+        
         return m_totalDrawdown >= m_maxTotalDrawdown;
     }
     
@@ -654,6 +821,9 @@ public:
     
     // Check if we can open a new trade based on all risk constraints
     bool CanOpenNewTrade() {
+        // Ensure metrics are current
+        UpdateMetrics();
+        
         // 1. Check drawdown limits
         if (IsDailyDrawdownExceeded()) {
             if (m_logger != NULL) {
@@ -719,6 +889,41 @@ public:
         }
     }
     
+    // Update portfolio risk - NEW METHOD
+    void UpdatePortfolioRisk(double riskChange) {
+        // Update portfolio risk
+        m_portfolioRisk += riskChange;
+        
+        // Ensure it doesn't go below zero
+        if (m_portfolioRisk < 0) {
+            m_portfolioRisk = 0;
+        }
+        
+        if (m_logger != NULL) {
+            m_logger.Info("Portfolio risk updated: " + DoubleToString(m_portfolioRisk, 2) + 
+                        "% (" + (riskChange >= 0 ? "+" : "") + DoubleToString(riskChange, 2) + "%)");
+        }
+        
+        // Check if approaching limit
+        if (m_portfolioRisk >= m_portfolioMaxRisk * 0.8) {
+            if (m_logger != NULL) {
+                m_logger.Warning("Portfolio risk approaching limit: " + 
+                              DoubleToString(m_portfolioRisk, 2) + "% of " + 
+                              DoubleToString(m_portfolioMaxRisk, 2) + "%");
+            }
+        }
+    }
+    
+    // Reset portfolio risk - for testing or emergency reset
+    void ResetPortfolioRisk() {
+        double oldRisk = m_portfolioRisk;
+        m_portfolioRisk = 0;
+        
+        if (m_logger != NULL) {
+            m_logger.Warning("Portfolio risk reset from " + DoubleToString(oldRisk, 2) + "% to 0%");
+        }
+    }
+    
     // Track trade result
     void TrackTradeResult(bool isWin) {
         if (isWin) {
@@ -737,6 +942,9 @@ public:
     
     // Check if emergency mode can be reset
     bool CanResetEmergencyMode() {
+        // Ensure metrics are current
+        UpdateMetrics();
+        
         // If drawdown has reduced significantly
         if (m_totalDrawdown < m_maxTotalDrawdown * 0.5 &&
             m_dailyDrawdown < m_maxDailyDrawdown * 0.5) {
@@ -792,9 +1000,19 @@ public:
         ConfigurePropFirmRules();
     }
     
+    // Set correlation cache size
+    void SetCorrelationCacheSize(int size) {
+        m_maxCorrelationCache = MathMax(10, size);
+    }
+    
     // Set logger reference
     void SetLogger(CLogger* logger) {
         m_logger = logger;
+    }
+    
+    // Set consecutive losses (for testing)
+    void SetConsecutiveLosses(int losses) {
+        m_consecutiveLosses = MathMax(0, losses);
     }
     
     //--- Getters
@@ -817,6 +1035,16 @@ public:
     // Get daily trades count
     int GetDailyTradesCount() const {
         return m_dailyTradesCount;
+    }
+    
+    // Get current portfolio risk
+    double GetPortfolioRisk() const {
+        return m_portfolioRisk;
+    }
+    
+    // Get consecutive losses
+    int GetConsecutiveLosses() const {
+        return m_consecutiveLosses;
     }
     
     // Get PropFirm rules
