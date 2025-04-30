@@ -1,0 +1,22 @@
+# MQL5 compiled files
+*.ex5
+*.ex4
+
+# MQL5 logs and reports
+*.log
+Logs/
+logs/
+Reports/
+reports/
+
+# MQL5 temp files
+*.mqh.bak
+*.mq5.bak
+*.mq4.bak
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
