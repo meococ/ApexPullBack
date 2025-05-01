@@ -9,6 +9,8 @@
 
 #include <Trade/Trade.mqh>
 #include <Trade/PositionInfo.mqh>
+#include <Trade/DealInfo.mqh>
+#include <Trade/OrderInfo.mqh>
 #include <Arrays/ArrayObj.mqh>
 #include "Logger.mqh"
 #include "CommonStructs.mqh"
@@ -94,6 +96,13 @@ private:
    int                  m_RsiPeriod;             // RSI period
    int                  m_HandleRSI;             // RSI indicator handle
 
+   // Signal tracking and logging
+   int                  m_SuccessfulSignals;     // Number of successful signals
+   int                  m_FailedSignals;         // Number of failed signals
+   ENUM_LOG_LEVEL       m_LogLevel;              // Current logging verbosity level
+   bool                 m_EnableDetailedLogs;    // Whether to enable detailed signal logging
+   int                  m_SignalLogHandle;       // File handle for signal log (if used)
+   
    //--- Private methods ---
    
    // Initialization and cleanup
@@ -268,6 +277,13 @@ CTradeManager::CTradeManager(void)
    
    // Initialize the targets array
    m_Targets.Clear();
+   
+   // Initialize signal tracking
+   m_SuccessfulSignals = 0;
+   m_FailedSignals = 0;
+   m_LogLevel = LOG_LEVEL_INFO;
+   m_EnableDetailedLogs = false;
+   m_SignalLogHandle = INVALID_HANDLE;
 }
 
 //+------------------------------------------------------------------+
@@ -726,7 +742,8 @@ void CTradeManager::ManagePartialClose(int targetIndex, double currentPrice, boo
       }
       else if (closeVolume >= currentVolume) {
          // Close full position if partial would be >= current volume
-         if (PositionClose(ticket)) {
+         if (PositionClose(ticket))
+         {
             m_Logger.LogInfo(StringFormat(
                "TP1 Hit (#%llu): Closed full position %.2f lots", 
                ticket, currentVolume
@@ -1004,7 +1021,7 @@ void CTradeManager::ManageStrongTrendTrailing(ulong ticket, bool isLong, double 
    }
    
    // Calculate new stop loss
-   double desiredSL = isLong ?
+   double desiredSL = isLong ? 
                      currentPrice - adjustedMul * atr :
                      currentPrice + adjustedMul * atr;
    
@@ -1121,16 +1138,14 @@ void CTradeManager::ManageVolatileTrailing(ulong ticket, bool isLong, double cur
    double atrTrailDistance = atr * atrMultiplier;
    
    // Calculate new stop loss
-   double newStopLoss = isLong ?
-                       currentPrice - atrTrailDistance :
-                       currentPrice + atrTrailDistance;
-                       
+   double newStopLoss = isLong ? currentPrice - atrTrailDistance : currentPrice + atrTrailDistance;
+   
    // Check if we should set breakeven instead
    int idx = FindTargetInfoByTicket(ticket);
    if (idx >= 0) {
       TargetInfo* target = m_Targets.At(idx);
       if (target != NULL && target.risk_points > 0) {
-         double currentProfitPoints = isLong ?
+         double currentProfitPoints = isLong ? 
                                     (currentPrice - entryPrice) / _Point : 
                                     (entryPrice - currentPrice) / _Point;
                                     
@@ -1193,7 +1208,7 @@ void CTradeManager::ManageRangingTrailing(ulong ticket, bool isLong, double curr
    if (idx >= 0) {
       TargetInfo* target = m_Targets.At(idx);
       if (target != NULL && target.risk_points > 0) {
-         double currentProfitPoints = isLong ?
+         double currentProfitPoints = isLong ? 
                                     (currentPrice - entryPrice) / _Point : 
                                     (entryPrice - currentPrice) / _Point;
                                     
@@ -1218,10 +1233,8 @@ void CTradeManager::ManageRangingTrailing(ulong ticket, bool isLong, double curr
    double atrTrailDistance = atr * atrMultiplier;
    
    // Calculate new stop loss
-   double newStopLoss = isLong ?
-                       currentPrice - atrTrailDistance :
-                       currentPrice + atrTrailDistance;
-                       
+   double newStopLoss = isLong ? currentPrice - atrTrailDistance : currentPrice + atrTrailDistance;
+   
    // Apply update if new stop is better than current
    bool shouldUpdate = false;
    
@@ -1688,6 +1701,7 @@ bool CTradeManager::AdjustAdaptiveTrailingStop(ulong ticket, bool isLong, double
    
    // Try to get ADX from MarketMonitor first
    if (m_MarketMonitor != NULL) {
+      // Use trend EMA as an approximation for ADX strength
       adxValue = m_MarketMonitor.GetEMATrend(); // Approximate ADX with trend EMA
    } else {
       // Fall back to direct ADX calculation if needed
@@ -2452,4 +2466,231 @@ bool CTradeManager::PositionClosePartial(ulong ticket, double volume)
    ));
    
    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Process trade transaction                                        |
+//+------------------------------------------------------------------+
+void CTradeManager::ProcessTradeTransaction(const MqlTradeTransaction& trans,
+                                           const MqlTradeRequest& request,
+                                           const MqlTradeResult& result)
+{
+   // Log the transaction type
+   string transactionType = EnumToString(trans.type);
+   m_Logger.LogDebug("Processing transaction: " + transactionType);
+   
+   // Handle different transaction types
+   switch(trans.type)
+   {
+      case TRADE_TRANSACTION_ORDER_ADD:
+         m_Logger.LogInfo("Order added: Order #" + IntegerToString(trans.order) + ", Symbol: " + trans.symbol);
+         break;
+         
+      case TRADE_TRANSACTION_ORDER_DELETE:
+         m_Logger.LogInfo("Order deleted: Order #" + IntegerToString(trans.order) + ", Symbol: " + trans.symbol);
+         break;
+         
+      case TRADE_TRANSACTION_ORDER_UPDATE:
+         m_Logger.LogInfo("Order updated: Order #" + IntegerToString(trans.order) + ", Symbol: " + trans.symbol);
+         break;
+         
+      case TRADE_TRANSACTION_DEAL_ADD:
+         // Handle new deals (position opening or closing)
+         if(trans.symbol == m_Symbol)
+         {
+            // Get deal information
+            ulong dealTicket = trans.deal;
+            
+            // Select the deal from history
+            if(!HistorySelect(0, TimeCurrent()) || !HistoryDealSelect(dealTicket)) break;
+            
+            // Check if it's our magic number
+            long dealMagic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+            if(dealMagic != m_MagicNumber) break;
+            
+            // Get deal properties
+            ENUM_DEAL_ENTRY dealEntry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+            ENUM_DEAL_TYPE dealType = (ENUM_DEAL_TYPE)HistoryDealGetInteger(dealTicket, DEAL_TYPE);
+            double dealVolume = HistoryDealGetDouble(dealTicket, DEAL_VOLUME);
+            double dealPrice = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
+            
+            // Position opening
+            if(dealEntry == DEAL_ENTRY_IN)
+            {
+               m_Logger.LogInfo("New position opened: Deal #" + IntegerToString(dealTicket) + 
+                              ", Type: " + EnumToString(dealType) + 
+                              ", Volume: " + DoubleToString(dealVolume, 2) + 
+                              ", Price: " + DoubleToString(dealPrice, m_Digits));
+               
+               // Update statistics for new position
+               m_TotalTrades++;
+            }
+            // Position closing
+            else if(dealEntry == DEAL_ENTRY_OUT)
+            {
+               // Retrieve deal information to calculate profit/loss
+               HistorySelect(0, TimeCurrent());
+               
+               if(HistoryDealSelect(dealTicket))
+               {
+                  double dealProfit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+                  
+                  // Update trade statistics
+                  if(dealProfit > 0)
+                  {
+                     m_WinningTrades++;
+                     m_ConsecutiveWins++;
+                     m_ConsecutiveLosses = 0;
+                     m_TotalProfit += dealProfit;
+                     
+                     if(dealProfit > m_LargestWin)
+                        m_LargestWin = dealProfit;
+                        
+                     if(m_ConsecutiveWins > m_MaxConsecutiveWins)
+                        m_MaxConsecutiveWins = m_ConsecutiveWins;
+                     
+                     m_Logger.LogInfo("Position closed with profit: " + DoubleToString(dealProfit, 2));
+                  }
+                  else if(dealProfit < 0)
+                  {
+                     m_LosingTrades++;
+                     m_ConsecutiveLosses++;
+                     m_ConsecutiveWins = 0;
+                     m_TotalLoss += MathAbs(dealProfit);
+                     
+                     if(MathAbs(dealProfit) > m_LargestLoss)
+                        m_LargestLoss = MathAbs(dealProfit);
+                        
+                     if(m_ConsecutiveLosses > m_MaxConsecutiveLosses)
+                        m_MaxConsecutiveLosses = m_ConsecutiveLosses;
+                     
+                     m_Logger.LogInfo("Position closed with loss: " + DoubleToString(dealProfit, 2));
+                  }
+                  else
+                  {
+                     m_Logger.LogInfo("Position closed at breakeven");
+                  }
+               }
+            }
+         }
+         break;
+         
+      case TRADE_TRANSACTION_DEAL_UPDATE:
+         m_Logger.LogDebug("Deal updated: Deal #" + IntegerToString(trans.deal));
+         break;
+         
+      case TRADE_TRANSACTION_HISTORY_ADD:
+         m_Logger.LogDebug("Historical order added: Order #" + IntegerToString(trans.order));
+         break;
+         
+      case TRADE_TRANSACTION_HISTORY_UPDATE:
+         m_Logger.LogDebug("Historical order updated: Order #" + IntegerToString(trans.order));
+         break;
+         
+      case TRADE_TRANSACTION_POSITION:
+         m_Logger.LogDebug("Position changed: Position #" + IntegerToString(trans.position));
+         break;
+         
+      case TRADE_TRANSACTION_REQUEST:
+         // This type is received when a trade request has been processed by the server
+         if(result.retcode == TRADE_RETCODE_DONE)
+         {
+            m_Logger.LogInfo("Trade request successfully completed: Action " + EnumToString(request.action));
+         }
+         else
+         {
+            m_Logger.LogWarning("Trade request failed: " + EnumToString((ENUM_TRADE_REQUEST_ACTIONS)result.retcode));
+         }
+         break;
+         
+      default:
+         m_Logger.LogDebug("Other transaction: Type " + transactionType);
+         break;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Close all pending orders for this EA's magic number and symbol   |
+//+------------------------------------------------------------------+
+bool CTradeManager::CloseAllPendingOrders()
+{
+   bool success = true;
+   
+   // Count from last to first to avoid index shifting problems when removing orders
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      // Use OrderGetTicket to get the ticket by position index
+      ulong ticket = OrderGetTicket(i);
+      if(ticket == 0) continue;
+         
+      // Check if the order belongs to our EA (same magic number and symbol)
+      if(OrderGetString(ORDER_SYMBOL) == m_Symbol && OrderGetInteger(ORDER_MAGIC) == m_MagicNumber)
+      {
+         // Delete the pending order
+         if(!m_Trade.OrderDelete(ticket))
+         {
+            m_Logger.LogError("Failed to delete order #" + IntegerToString(ticket) + ": " + 
+                             IntegerToString(m_Trade.ResultRetcode()) + " - " + 
+                             m_Trade.ResultComment());
+            success = false;
+         }
+         else
+         {
+            m_Logger.LogInfo("Successfully deleted pending order #" + IntegerToString(ticket));
+         }
+      }
+   }
+   
+   return success;
+}
+
+//+------------------------------------------------------------------+
+//| Feedback signal result for machine learning/statistics           |
+//+------------------------------------------------------------------+
+void CTradeManager::FeedbackSignalResult(SignalInfo &signal, bool success, ulong ticket, string failReason)
+{
+   // Exit if logging is not enabled
+   if(m_LogLevel < LOG_LEVEL_INFO) return;
+   
+   // Create log entry with signal details and result
+   string signalDesc = signal.ToString();
+   string result = success ? "EXECUTED" : "FAILED";
+   string message = StringFormat("Signal feedback: %s - Result: %s", signalDesc, result);
+   
+   // Add ticket information if available
+   if(ticket > 0) {
+      message += StringFormat(", Ticket: %llu", ticket);
+   }
+   
+   // Add failure reason if provided
+   if(!success && failReason != "") {
+      message += ", Reason: " + failReason;
+   }
+   
+   // Log the complete feedback
+   m_Logger.LogInfo(message);
+   
+   // Update statistics (could be expanded in the future)
+   if(success) {
+      m_SuccessfulSignals++;
+   } else {
+      m_FailedSignals++;
+   }
+   
+   // Store signal data for potential machine learning/analysis
+   // This could be expanded to store to a CSV file or database
+   datetime currentTime = TimeCurrent();
+   string logEntry = StringFormat("%s,%s,%s,%s,%llu,%s", 
+                                TimeToString(currentTime),
+                                signal.symbol,
+                                signal.isLong ? "BUY" : "SELL",
+                                EnumToString(signal.scenario),
+                                ticket,
+                                success ? "SUCCESS" : "FAIL:" + failReason);
+   
+   // Store in history - can be extended to write to file
+   if(m_EnableDetailedLogs) {
+      // Here you could implement file writing logic
+      // FileWrite(m_SignalLogHandle, logEntry);
+   }
 }
