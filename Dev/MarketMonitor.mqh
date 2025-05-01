@@ -213,28 +213,14 @@ public:
    void                 SetLiquidityGrabParameters(double minWickRatio, double minVolumeRatio);
    void                 SetBreakoutParameters(double minSize);
    
+   // Public methods for accessing indicator data
+   double GetATR() const { return m_Cache.atr_entry; }
+   double GetAverageATR() const { return m_Cache.atr_entry; } // Alias for compatibility
+   
    // Main updating method
    bool                 Update();
    
-   // Light update method for more frequent updates without heavy calculations
-   void                 LightUpdate()
-   {
-      // Update only essential data without recalculating heavy indicators
-      // This method is called more frequently than the full update
-      
-      // Fetch latest price data
-      double currentPrice = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
-      
-      // Maybe update very basic indicators
-      // But avoid expensive calculations
-      
-      if (m_Logger != NULL && m_Logger.IsDebugEnabled()) {
-         m_Logger.LogInfo("Light market update performed");
-      }
-   }
-   
    // Signal generation methods
-   bool                 CheckEntrySignal(SignalInfo &signal);
    ENUM_TRADE_SIGNAL    GenerateSignals(double &entryPrice, double &stopLoss, double &takeProfit, 
                                         ENUM_ENTRY_SCENARIO &scenario);
    
@@ -255,7 +241,6 @@ public:
    ENUM_MARKET_REGIME   GetMarketState() const { return m_MarketRegime; }
    bool                 IsTrendUp() const { return m_IsTrendUp; }
    bool                 IsTrendDown() const { return m_IsTrendDown; }
-   double               GetATR() const { return m_Cache.atr_entry; }
    double               GetEMAFast() const { return m_Cache.ema_fast_entry; }
    double               GetEMATrend() const { return m_Cache.ema_trend_entry; }
    double               GetVolatilityFactor() const;
@@ -263,6 +248,12 @@ public:
    double               GetLowestLowSinceBar(int startBar, int lookback = 20);
    bool                 GetLastSignal(SignalInfo &signal);
    CLogger*             GetLogger() const { return m_Logger; }
+   
+   // Light update method for more frequent updates without heavy calculations
+   void                 LightUpdate();
+   
+   // Check for entry signals and fill signal info
+   bool                 CheckEntrySignal(SignalInfo &signal);
 };
 
 //+------------------------------------------------------------------+
@@ -1017,6 +1008,8 @@ bool CMarketMonitor::CheckEntrySignal(SignalInfo &signal)
 {
    // Reset signal info
    ZeroMemory(signal);
+   signal.symbol = m_Symbol;
+   signal.signalTime = TimeCurrent();
    
    // Determine default signal direction based on trend
    bool tryLong = m_IsTrendUp || (!m_IsTrendDown && m_Cache.ema_fast_entry > m_Cache.ema_trend_entry);
@@ -1028,12 +1021,8 @@ bool CMarketMonitor::CheckEntrySignal(SignalInfo &signal)
       return false;
    }
    
-   // Variables to track best signal
-   double bestQuality = 0;
-   bool foundSignal = false;
-   
-   // Try all signal types and keep the highest quality one
-   // This avoids having duplicate code for long/short in each detection method
+   // Tạm disable pattern detection phức tạp
+   // Tập trung vào các signal cơ bản và tin cậy hơn
    
    //--- 1. Try Pullback signals
    if ((tryLong || tryShort) && (m_MarketRegime == REGIME_STRONG_TREND || m_MarketRegime == REGIME_WEAK_TREND)) {
@@ -1043,232 +1032,69 @@ bool CMarketMonitor::CheckEntrySignal(SignalInfo &signal)
       
       // Try long pullback
       if (tryLong && AnalyzePullback(true, depth, speed, strength, entryPrice, stopLevel, description)) {
-         double quality = 0.5 + (strength * 0.3) + (speed * 0.2);
+         signal.isValid = true;
+         signal.isLong = true;
+         signal.entryPrice = entryPrice;
+         signal.stopLoss = stopLevel;
+         signal.takeProfit = entryPrice + ((entryPrice - stopLevel) * 2); // Simple 1:2 RR for now
+         signal.scenario = SCENARIO_BULLISH_PULLBACK;
+         signal.quality = 0.5 + (strength * 0.3) + (speed * 0.2);
+         signal.description = description;
          
-         if (quality > bestQuality) {
-            signal.isLong = true;
-            signal.entryPrice = entryPrice;
-            signal.stopLoss = stopLevel;
-            signal.takeProfit = entryPrice + ((entryPrice - stopLevel) * 2); // Simple 1:2 RR for now
-            signal.scenario = SCENARIO_BULLISH_PULLBACK;
-            signal.quality = quality;
-            signal.description = description;
-            bestQuality = quality;
-            foundSignal = true;
-         }
+         m_LastSignal = signal;
+         
+         m_Logger.LogInfo(StringFormat("[%s] %s signal detected: %s (Quality: %.2f)", 
+                                     m_Symbol,
+                                     signal.isLong ? "Long" : "Short",
+                                     signal.description,
+                                     signal.quality));
+         return true;
       }
       
       // Try short pullback
       if (tryShort && AnalyzePullback(false, depth, speed, strength, entryPrice, stopLevel, description)) {
-         double quality = 0.5 + (strength * 0.3) + (speed * 0.2);
+         signal.isValid = true;
+         signal.isLong = false;
+         signal.entryPrice = entryPrice;
+         signal.stopLoss = stopLevel;
+         signal.takeProfit = entryPrice - ((stopLevel - entryPrice) * 2); // Simple 1:2 RR for now
+         signal.scenario = SCENARIO_BEARISH_PULLBACK;
+         signal.quality = 0.5 + (strength * 0.3) + (speed * 0.2);
+         signal.description = description;
          
-         if (quality > bestQuality) {
-            signal.isLong = false;
-            signal.entryPrice = entryPrice;
-            signal.stopLoss = stopLevel;
-            signal.takeProfit = entryPrice - ((stopLevel - entryPrice) * 2); // Simple 1:2 RR for now
-            signal.scenario = SCENARIO_BEARISH_PULLBACK;
-            signal.quality = quality;
-            signal.description = description;
-            bestQuality = quality;
-            foundSignal = true;
-         }
+         m_LastSignal = signal;
+         
+         m_Logger.LogInfo(StringFormat("[%s] %s signal detected: %s (Quality: %.2f)", 
+                                     m_Symbol,
+                                     signal.isLong ? "Long" : "Short",
+                                     signal.description,
+                                     signal.quality));
+         return true;
       }
    }
    
-   //--- 2. Try Fibonacci Pullback signals
-   if ((tryLong || tryShort) && (m_MarketRegime != REGIME_VOLATILE)) {
-      double entryLevels[];
-      double quality;
-      
-      // Try long Fibonacci pullback
-      if (tryLong && DetectFibonacciPullback(true, entryLevels, quality)) {
-         if (quality > bestQuality) {
-            signal.isLong = true;
-            signal.entryPrice = m_Cache.close; // Current price
-            signal.stopLoss = entryLevels[0] - (m_Cache.atr_entry * 0.5); // Below the lowest fib level
-            signal.takeProfit = entryLevels[4] + (m_Cache.atr_entry * 0.5); // Above the highest fib level
-            signal.scenario = SCENARIO_FIBONACCI_PULLBACK;
-            signal.quality = quality;
-            signal.description = "Fibonacci Pullback (Bullish)";
-            bestQuality = quality;
-            foundSignal = true;
-         }
-      }
-      
-      // Try short Fibonacci pullback
-      if (tryShort && DetectFibonacciPullback(false, entryLevels, quality)) {
-         if (quality > bestQuality) {
-            signal.isLong = false;
-            signal.entryPrice = m_Cache.close; // Current price
-            signal.stopLoss = entryLevels[0] + (m_Cache.atr_entry * 0.5); // Above the highest fib level
-            signal.takeProfit = entryLevels[4] - (m_Cache.atr_entry * 0.5); // Below the lowest fib level
-            signal.scenario = SCENARIO_FIBONACCI_PULLBACK;
-            signal.quality = quality;
-            signal.description = "Fibonacci Pullback (Bearish)";
-            bestQuality = quality;
-            foundSignal = true;
-         }
-      }
-   }
+   return false;  // No valid signal found
+}
+
+//+------------------------------------------------------------------+
+//| Lightweight update to reduce CPU usage                           |
+//+------------------------------------------------------------------+
+void CMarketMonitor::LightUpdate()
+{
+   // Chỉ cập nhật dữ liệu giá thiết yếu, không recalculate chỉ báo nặng
    
-   //--- 3. Try Harmonic Pattern signals
-   if ((tryLong || tryShort)) {
-      double entryLevel, stopLevel, quality;
-      string patternName;
-      
-      // Try long harmonic pattern
-      if (tryLong && DetectHarmonicPatterns(true, entryLevel, stopLevel, quality, patternName)) {
-         if (quality > bestQuality) {
-            signal.isLong = true;
-            signal.entryPrice = entryLevel;
-            signal.stopLoss = stopLevel;
-            signal.takeProfit = entryLevel + ((entryLevel - stopLevel) * 2.5); // Generous RR for harmonic
-            signal.scenario = SCENARIO_HARMONIC_PATTERN;
-            signal.quality = quality;
-            signal.description = "Harmonic Pattern: " + patternName + " (Bullish)";
-            bestQuality = quality;
-            foundSignal = true;
-         }
-      }
-      
-      // Try short harmonic pattern
-      if (tryShort && DetectHarmonicPatterns(false, entryLevel, stopLevel, quality, patternName)) {
-         if (quality > bestQuality) {
-            signal.isLong = false;
-            signal.entryPrice = entryLevel;
-            signal.stopLoss = stopLevel;
-            signal.takeProfit = entryLevel - ((stopLevel - entryLevel) * 2.5); // Generous RR for harmonic
-            signal.scenario = SCENARIO_HARMONIC_PATTERN;
-            signal.quality = quality;
-            signal.description = "Harmonic Pattern: " + patternName + " (Bearish)";
-            bestQuality = quality;
-            foundSignal = true;
-         }
-      }
-   }
+   // Lấy giá mới nhất
+   double currentPrice = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
    
-   //--- 4. Try Momentum Shift signals
-   if ((tryLong || tryShort)) {
-      double entryPrice, stopLevel, quality;
-      string description;
-      
-      // Try long momentum shift
-      if (tryLong && DetectMomentumShift(true, entryPrice, stopLevel, quality, description)) {
-         if (quality > bestQuality) {
-            signal.isLong = true;
-            signal.entryPrice = entryPrice;
-            signal.stopLoss = stopLevel;
-            signal.takeProfit = entryPrice + ((entryPrice - stopLevel) * 2); // Simple 1:2 RR for now
-            signal.scenario = SCENARIO_MOMENTUM_SHIFT;
-            signal.quality = quality;
-            signal.description = description;
-            bestQuality = quality;
-            foundSignal = true;
-         }
-      }
-      
-      // Try short momentum shift
-      if (tryShort && DetectMomentumShift(false, entryPrice, stopLevel, quality, description)) {
-         if (quality > bestQuality) {
-            signal.isLong = false;
-            signal.entryPrice = entryPrice;
-            signal.stopLoss = stopLevel;
-            signal.takeProfit = entryPrice - ((stopLevel - entryPrice) * 2); // Simple 1:2 RR for now
-            signal.scenario = SCENARIO_MOMENTUM_SHIFT;
-            signal.quality = quality;
-            signal.description = description;
-            bestQuality = quality;
-            foundSignal = true;
-         }
-      }
-   }
+   // Cập nhật cache giá hiện tại
+   m_Cache.close = currentPrice;
+   m_Cache.open = SymbolInfoDouble(m_Symbol, SYMBOL_ASK);
    
-   //--- 5. Try Liquidity Grab signals
-   if ((tryLong || tryShort) && m_MarketRegime != REGIME_RANGING) {
-      double entryPrice, stopLevel, quality;
-      string description;
-      
-      // Try long liquidity grab
-      if (tryLong && DetectLiquidityGrab(true, entryPrice, stopLevel, quality, description)) {
-         if (quality > bestQuality) {
-            signal.isLong = true;
-            signal.entryPrice = entryPrice;
-            signal.stopLoss = stopLevel;
-            signal.takeProfit = entryPrice + ((entryPrice - stopLevel) * 2); // Simple 1:2 RR for now
-            signal.scenario = SCENARIO_LIQUIDITY_GRAB;
-            signal.quality = quality;
-            signal.description = description;
-            bestQuality = quality;
-            foundSignal = true;
-         }
-      }
-      
-      // Try short liquidity grab
-      if (tryShort && DetectLiquidityGrab(false, entryPrice, stopLevel, quality, description)) {
-         if (quality > bestQuality) {
-            signal.isLong = false;
-            signal.entryPrice = entryPrice;
-            signal.stopLoss = stopLevel;
-            signal.takeProfit = entryPrice - ((stopLevel - entryPrice) * 2); // Simple 1:2 RR for now
-            signal.scenario = SCENARIO_LIQUIDITY_GRAB;
-            signal.quality = quality;
-            signal.description = description;
-            bestQuality = quality;
-            foundSignal = true;
-         }
-      }
-   }
+   // Không cập nhật các chỉ báo nested timeframe để tiết kiệm hiệu suất
    
-   //--- 6. Try Breakout Failure signals
-   if ((tryLong || tryShort)) {
-      double entryPrice, stopLevel, quality;
-      string description;
-      
-      // Try long breakout failure
-      if (tryLong && DetectBreakoutFailure(true, entryPrice, stopLevel, quality, description)) {
-         if (quality > bestQuality) {
-            signal.isLong = true;
-            signal.entryPrice = entryPrice;
-            signal.stopLoss = stopLevel;
-            signal.takeProfit = entryPrice + ((entryPrice - stopLevel) * 1.5); // Conservative RR for failures
-            signal.scenario = SCENARIO_BREAKOUT_FAILURE;
-            signal.quality = quality;
-            signal.description = description;
-            bestQuality = quality;
-            foundSignal = true;
-         }
-      }
-      
-      // Try short breakout failure
-      if (tryShort && DetectBreakoutFailure(false, entryPrice, stopLevel, quality, description)) {
-         if (quality > bestQuality) {
-            signal.isLong = false;
-            signal.entryPrice = entryPrice;
-            signal.stopLoss = stopLevel;
-            signal.takeProfit = entryPrice - ((stopLevel - entryPrice) * 1.5); // Conservative RR for failures
-            signal.scenario = SCENARIO_BREAKOUT_FAILURE;
-            signal.quality = quality;
-            signal.description = description;
-            bestQuality = quality;
-            foundSignal = true;
-         }
-      }
+   if (m_Logger != NULL && m_Logger.IsDebugEnabled()) {
+      m_Logger.LogDebug("Light market update performed");
    }
-   
-   // Store the last signal if found
-   if (foundSignal) {
-      m_LastSignal = signal;
-      
-      // Log signal detection
-      m_Logger.LogInfo(StringFormat("[%s] %s signal detected: %s (Quality: %.2f)", 
-                                  m_Symbol,
-                                  signal.isLong ? "Long" : "Short",
-                                  signal.description,
-                                  signal.quality));
-   }
-   
-   return foundSignal;
 }
 
 //+------------------------------------------------------------------+
@@ -1926,14 +1752,16 @@ bool CMarketMonitor::DetectHarmonicPatterns(bool isUptrend, double &entryLevel, 
    double FIB_3_618 = 3.618;
    
    // Lấy dữ liệu giá
-   double high[], low[], close[];
+   double high[], low[], close[], open[];
    ArraySetAsSeries(high, true);
    ArraySetAsSeries(low, true);
    ArraySetAsSeries(close, true);
+   ArraySetAsSeries(open, true);
    
    if (CopyHigh(m_Symbol, m_EntryTimeframe, 0, 100, high) <= 0 ||
        CopyLow(m_Symbol, m_EntryTimeframe, 0, 100, low) <= 0 ||
-       CopyClose(m_Symbol, m_EntryTimeframe, 0, 100, close) <= 0) {
+       CopyClose(m_Symbol, m_EntryTimeframe, 0, 100, close) <= 0 ||
+       CopyOpen(m_Symbol, m_EntryTimeframe, 0, 100, open) <= 0) {
       if (m_Logger != NULL) {
          m_Logger.LogError("Không thể sao chép dữ liệu giá cho phân tích Harmonic Patterns");
       }
@@ -2055,12 +1883,76 @@ bool CMarketMonitor::DetectHarmonicPatterns(bool isUptrend, double &entryLevel, 
       patternQuality += 0.05;
    }
    
-   // Thưởng điểm nếu mẫu hoàn thiện gần đây
-   if (pivotHighBar[4] <= 3 || pivotLowBar[4] <= 3) {
+   // Bonus for precision
+   patternQuality += (1.0 - (MathAbs(ratioXAD - FIB_1_000) / TOLERANCE)) * 0.1;
+   
+   // Bonus if Fib retracement aligns with higher timeframe
+   if (m_UseMultiTimeframe) {
+      bool higherTFUptrend = (m_Cache.ema_fast_higher > m_Cache.ema_trend_higher);
+      if (isUptrend == higherTFUptrend) {
+         patternQuality += 0.1; // Alignment bonus
+      }
+   }
+   
+   // Check for price action confirmation
+   bool hasPriceAction = false;
+   
+   if (isUptrend) {
+      // Check for bullish reversal candle (e.g., hammer, bullish engulfing, etc.)
+      double bodySize = MathAbs(close[1] - open[1]);
+      double lowerWick = MathMin(close[1], open[1]) - low[1];
+      
+      // Hammer (lower wick at least 2x body)
+      bool isHammer = (lowerWick > bodySize * 2 && close[1] > open[1]);
+      
+      // Bullish Engulfing
+      bool isEngulfing = (close[1] > open[1] && close[2] < open[2] && 
+                        open[1] < close[2] && close[1] > open[2]);
+      
+      // Bullish Pin Bar (lower wick at least 2/3 of total candle length)
+      bool isPinBar = (lowerWick > (high[1] - low[1]) * 0.66);
+      
+      hasPriceAction = isHammer || isEngulfing || isPinBar;
+      
+      // Check if bouncing up from fib level
+      bool isBouncingUp = (close[0] > close[1] && close[1] > close[2]);
+      
+      if (isBouncingUp) {
+         hasPriceAction = true;
+         patternQuality += 0.05;
+      }
+   } else {
+      // Check for bearish reversal candle (e.g., shooting star, bearish engulfing, etc.)
+      double bodySize = MathAbs(close[1] - open[1]);
+      double upperWick = high[1] - MathMax(close[1], open[1]);
+      
+      // Shooting Star (upper wick at least 2x body)
+      bool isShootingStar = (upperWick > bodySize * 2 && close[1] < open[1]);
+      
+      // Bearish Engulfing
+      bool isEngulfing = (close[1] < open[1] && close[2] > open[2] && 
+                        open[1] > close[2] && close[1] < open[2]);
+      
+      // Bearish Pin Bar (upper wick at least 2/3 of total candle length)
+      bool isPinBar = (upperWick > (high[1] - low[1]) * 0.66);
+      
+      hasPriceAction = isShootingStar || isEngulfing || isPinBar;
+      
+      // Check if bouncing down from fib level
+      bool isBouncingDown = (close[0] < close[1] && close[1] < close[2]);
+      
+      if (isBouncingDown) {
+         hasPriceAction = true;
+         patternQuality += 0.05;
+      }
+   }
+   
+   // Bonus for price action confirmation
+   if (hasPriceAction) {
       patternQuality += 0.1;
    }
    
-   // Giới hạn chất lượng trong phạm vi [0,1]
+   // Limit quality to [0,1] range
    qualityScore = MathMin(patternQuality, 1.0);
    
    // Thiết lập tên mẫu

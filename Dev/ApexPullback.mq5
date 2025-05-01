@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|   ApexPullback MASTER EA v10.5 - Professional Edition            |
+//|   ApexPullback MASTER EA v10.6 - Professional Edition            |
 //|   Advanced Multi-Market EMA 34/89 Strategy System               |
 //|                                                                 |
 //|   Core Features:                                                |
@@ -27,10 +27,10 @@ int      g_DayTrades = 0;           // Number of trades today
 bool     g_IsInitialized = false;   // Flag indicating EA initialization
 CLogger* g_Logger = NULL;           // Global logger object
 
-// Core module objects
-CMarketMonitor* Market = NULL;      // Market monitor module
-CTradeManager*  TradeMan = NULL;    // Trade management module
-CRiskManager*   RiskMan = NULL;     // Risk management module
+// Core module objects - Chuyển từ con trỏ sang stack để tối ưu hóa
+CMarketMonitor Market;              // Market monitor module
+CTradeManager  TradeMan;            // Trade management module
+CRiskManager   RiskMan;             // Risk management module
 
 // News event storage
 NewsEvent g_UpcomingNews[];         // Array of upcoming news events
@@ -61,6 +61,9 @@ string  GetScenarioName(ENUM_ENTRY_SCENARIO scenario);
 void    AdjustParametersByPreset();
 void    ManageAlerts(string message, bool isImportant);
 void    CheckNewTradeOpportunities();
+void    SaveBacktestResultsToCSV(double winRate, double profitFactor, 
+                                double maxDrawdown, double netProfit, 
+                                double totalTrades, double customScore);
 
 //+------------------------------------------------------------------+
 //| Return timeframe as string description                           |
@@ -86,7 +89,7 @@ string TimeframeToString(int tf)
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print("ApexPullback EA v10.5 - Initializing on ", _Symbol);
+   Print("ApexPullback EA v10.6 - Initializing on ", _Symbol);
 
    // Set initial daily metrics
    MqlDateTime time;
@@ -127,7 +130,7 @@ int OnInit()
    }
 
    // Log successful initialization
-   string initMsg = StringFormat("ApexPullback EA v10.5 initialized successfully on %s, Timeframe: %s",
+   string initMsg = StringFormat("ApexPullback EA v10.6 initialized successfully on %s, Timeframe: %s",
                               _Symbol, TimeframeToString((int)EntryTimeframe));
    LogMessage(initMsg, true);
 
@@ -145,7 +148,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    // Log deinitialization reason
-   LogMessage("ApexPullback EA v10.5 shutting down. Reason: " + GetDeinitReasonText(reason), true);
+   LogMessage("ApexPullback EA v10.6 shutting down. Reason: " + GetDeinitReasonText(reason), true);
 
    // Clean up dashboard objects
    if (DisplayDashboard) {
@@ -157,25 +160,9 @@ void OnDeinit(const int reason)
       SavePerformanceStats();
    }
 
-   // Free memory used by modules
-   if (Market != NULL) {
-      delete Market;
-      Market = NULL;
-      LogMessage("Market Monitor released.", false);
-   }
+   // Module objects are now on stack, so no need to delete them
    
-   if (TradeMan != NULL) {
-      delete TradeMan;
-      TradeMan = NULL;
-      LogMessage("Trade Manager released.", false);
-   }
-   
-   if (RiskMan != NULL) {
-      delete RiskMan;
-      RiskMan = NULL;
-      LogMessage("Risk Manager released.", false);
-   }
-   
+   // Clean up logger
    if (g_Logger != NULL) {
       delete g_Logger;
       g_Logger = NULL;
@@ -183,7 +170,7 @@ void OnDeinit(const int reason)
    }
 
    g_IsInitialized = false;
-   Print("ApexPullback EA v10.5 shutdown complete.");
+   Print("ApexPullback EA v10.6 shutdown complete.");
 }
 
 //+------------------------------------------------------------------+
@@ -207,15 +194,10 @@ void OnTick()
    UpdateDailyStats();  // Process day changes and reset counters/equity
 
    // 4. Check Risk Limits (Prop Firm Mode)
-   if (PropMode && g_DayTrades >= MaxDayTrades) {
+   if (PropMode && g_DayTrades >= MaxTradesPerDay) {
       if ((TimeCurrent() % 300) == 0)  // Log periodically
-         LogMessage("Daily trade limit reached: " + IntegerToString(g_DayTrades) + "/" + IntegerToString(MaxDayTrades), false);
+         LogMessage("Daily trade limit reached: " + IntegerToString(g_DayTrades) + "/" + IntegerToString(MaxTradesPerDay), false);
       return;
-   }
-   
-   if (RiskMan == NULL) { 
-      LogMessage("ERROR: Risk Manager is NULL in OnTick!", true); 
-      return; 
    }
    
    if (RiskMan.IsMaxLossReached()) {
@@ -225,11 +207,6 @@ void OnTick()
    }
 
    // 5. Update Market Data & Analysis
-   if (Market == NULL) { 
-      LogMessage("ERROR: Market Monitor is NULL in OnTick!", true); 
-      return; 
-   }
-   
    // Only perform deep market analysis on new bars or significant price changes
    static datetime lastAnalysisTime = 0;
    static double lastAnalysisPrice = 0;
@@ -253,11 +230,6 @@ void OnTick()
    }
 
    // 6. Manage Open Positions
-   if (TradeMan == NULL) { 
-      LogMessage("ERROR: Trade Manager is NULL in OnTick!", true); 
-      return; 
-   }
-   
    TradeMan.ManageOpenPositions(Market.GetMarketState());  // Pass market state for adaptive trailing
 
    // 7. Check for New Trade Opportunities
@@ -282,8 +254,6 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
                        const MqlTradeRequest& request,
                        const MqlTradeResult& result)
 {
-   if (TradeMan == NULL || RiskMan == NULL) return;  // Safety check
-
    // Let the Trade Manager process the transaction first (e.g., update internal state)
    TradeMan.ProcessTradeTransaction(trans, request, result);
 
@@ -323,25 +293,18 @@ bool InitializeModules()
    bool success = true;
 
    // --- Initialize Market Monitor ---
-   Market = new CMarketMonitor();
-   if (Market == NULL) {
-      Print("ERROR: Could not allocate memory for Market Monitor.");
-      return false;
-   }
-   
    if (!Market.Initialize(_Symbol, EntryTimeframe, EMAf, EMAt,
-                        UseMultiTimeframe, HigherTimeframe,
-                        UseNestedTimeframe, NestedTimeframe,
-                        EnableMarketRegimeFilter)) {
+                       UseMultiTimeframe, HigherTimeframe,
+                       UseNestedTimeframe, NestedTimeframe,
+                       EnableMarketRegimeFilter)) {
       Print("ERROR: Could not initialize Market Monitor parameters.");
-      delete Market; Market = NULL;  // Cleanup on failure
       success = false;
    } else {
       LogMessage("Market Monitor initialized.", false);
    }
    
    // Initialize logger settings for MarketMonitor
-   if (Market != NULL && Market.GetLogger() != NULL) {
+   if (Market.GetLogger() != NULL) {
       if (!Market.GetLogger().Initialize(EnableDetailedLogs, EnableCsvLog, CsvLogFilename,
              EnableTelegramNotify, TelegramBotToken, TelegramChatID, TelegramImportantOnly)) {
          Print("Warning: Could not initialize MarketMonitor logger settings.");
@@ -349,28 +312,18 @@ bool InitializeModules()
    }
 
    // --- Initialize Trade Manager ---
-   TradeMan = new CTradeManager();
-   if (TradeMan == NULL) {
-      Print("ERROR: Could not allocate memory for Trade Manager.");
-      if (Market != NULL) delete Market; Market = NULL;  // Cleanup previous
-      return false;
-   }
-   
-   // Pass necessary parameters
    if (!TradeMan.Initialize(_Symbol, Comment_Prefix, (int)StringToInteger(_Symbol),
-                          Market,
-                          TrailingMode, TrailingAtrMultiplier, UseAdaptiveTrailing,
-                          BreakEven_R, UseMultipleTargets, TP1_Percent, TP2_Percent, TP3_Percent)) {
+                         &Market,
+                         TrailingMode, TrailingAtrMultiplier, UseAdaptiveTrailing,
+                         BreakEven_R, UseMultipleTargets, TP1_Percent, TP2_Percent, TP3_Percent)) {
       Print("ERROR: Could not initialize Trade Manager parameters.");
-      if (Market != NULL) delete Market; Market = NULL;
-      delete TradeMan; TradeMan = NULL;
       success = false;
    } else {
       LogMessage("Trade Manager initialized.", false);
    }
    
    // Initialize logger settings for TradeManager
-   if (TradeMan != NULL && TradeMan.GetLogger() != NULL) {
+   if (TradeMan.GetLogger() != NULL) {
       if (!TradeMan.GetLogger().Initialize(EnableDetailedLogs, EnableCsvLog, CsvLogFilename,
              EnableTelegramNotify, TelegramBotToken, TelegramChatID, TelegramImportantOnly)) {
          Print("Warning: Could not initialize TradeManager logger settings.");
@@ -378,28 +331,16 @@ bool InitializeModules()
    }
 
    // --- Initialize Risk Manager ---
-   RiskMan = new CRiskManager();
-   if (RiskMan == NULL) {
-      Print("ERROR: Could not allocate memory for Risk Manager.");
-      if (Market != NULL) delete Market; Market = NULL;
-      if (TradeMan != NULL) delete TradeMan; TradeMan = NULL;
-      return false;
-   }
-   
-   // Pass necessary parameters
    if (!RiskMan.Initialize(_Symbol, RiskPercent, PropMode, DailyLoss, MaxDD,
-                         MaxDayTrades, MaxConsecutiveLosses, g_DayStartEquity)) {
+                        MaxTradesPerDay, MaxConsecutiveLosses, g_DayStartEquity)) {
       Print("ERROR: Could not initialize Risk Manager parameters.");
-      if (Market != NULL) delete Market; Market = NULL;
-      if (TradeMan != NULL) delete TradeMan; TradeMan = NULL;
-      delete RiskMan; RiskMan = NULL;
       success = false;
    } else {
       LogMessage("Risk Manager initialized.", false);
    }
    
    // Initialize logger settings for RiskManager
-   if (RiskMan != NULL && RiskMan.GetLogger() != NULL) {
+   if (RiskMan.GetLogger() != NULL) {
       if (!RiskMan.GetLogger().Initialize(EnableDetailedLogs, EnableCsvLog, CsvLogFilename,
              EnableTelegramNotify, TelegramBotToken, TelegramChatID, TelegramImportantOnly)) {
          Print("Warning: Could not initialize RiskManager logger settings.");
@@ -410,29 +351,20 @@ bool InitializeModules()
 }
 
 //+------------------------------------------------------------------+
-//| Check processing time interval                                   |
+//| Check processing time interval - FIXED                           |
 //+------------------------------------------------------------------+
 bool CheckProcessingTime()
 {
-   static datetime lastCheckTime = 0;
-   datetime currentTime = TimeCurrent();
+   static ulong lastMillis = 0;
+   ulong currentMillis = GetTickCount();
    
    // Avoid excessive tick processing - process no more than once each 50ms
    uint processingInterval = 50;  // Milliseconds minimum interval
-   
-   // Làm lại kiểm tra thời gian để tránh lỗi
-   if (currentTime == lastCheckTime) {
-      return false;  // Skip if called on the same second
-   }
-   
-   ulong currentMillis = GetTickCount();
-   static ulong lastMillis = 0;
    
    if (currentMillis - lastMillis < processingInterval) {
       return false;  // Skip if called too frequently
    }
    
-   lastCheckTime = currentTime;
    lastMillis = currentMillis;
    return true;
 }
@@ -452,11 +384,7 @@ void UpdateDailyStats()
       g_DayStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
 
       // Reset daily metrics in Risk Manager module
-      if (RiskMan != NULL) {
-         RiskMan.ResetDailyStats(g_DayStartEquity);  // RiskManager handles daily stats reset
-      } else {
-         LogMessage("Warning: Risk Manager not initialized when trying to reset daily stats.", true);
-      }
+      RiskMan.ResetDailyStats(g_DayStartEquity);  // RiskManager handles daily stats reset
 
       LogMessage("New trading day detected. Daily stats reset.", true);
    }
@@ -488,8 +416,8 @@ void CheckNewTradeOpportunities()
    }
    
    // 4. Check daily trade limits if in Prop Firm mode
-   if (PropMode && g_DayTrades >= MaxDayTrades) {
-      LogMessage("Daily trade limit reached: " + IntegerToString(MaxDayTrades), true);
+   if (PropMode && g_DayTrades >= MaxTradesPerDay) {
+      LogMessage("Daily trade limit reached: " + IntegerToString(MaxTradesPerDay), true);
       return;
    }
    
@@ -585,9 +513,7 @@ void CheckNewTradeOpportunities()
       LogMessage("Trade rejected by " + rejectionReason, false);
       
       // Provide feedback to Market Monitor about rejected signal
-      if (TradeMan != NULL) {
-         TradeMan.FeedbackSignalResult(signal, false, 0, rejectionReason);
-      }
+      TradeMan.FeedbackSignalResult(signal, false, 0, rejectionReason);
       return;
    }
 
@@ -599,9 +525,9 @@ void CheckNewTradeOpportunities()
    if (EntryMode == MODE_MARKET) {
       // Market order execution
       if (signal.isLong) {
-         ticket = TradeMan.ExecuteBuyOrder(lotSize, signal.stopLoss, 0, signal.scenario);
+         ticket = TradeMan.SafeBuy(lotSize, signal.stopLoss, 0, signal.scenario);
       } else {
-         ticket = TradeMan.ExecuteSellOrder(lotSize, signal.stopLoss, 0, signal.scenario);
+         ticket = TradeMan.SafeSell(lotSize, signal.stopLoss, 0, signal.scenario);
       }
    } 
    else if (EntryMode == MODE_LIMIT) {
@@ -621,9 +547,9 @@ void CheckNewTradeOpportunities()
       if (signal.quality >= 0.8) {
          // High quality signal - use market order
          if (signal.isLong) {
-            ticket = TradeMan.ExecuteBuyOrder(lotSize, signal.stopLoss, 0, signal.scenario);
+            ticket = TradeMan.SafeBuy(lotSize, signal.stopLoss, 0, signal.scenario);
          } else {
-            ticket = TradeMan.ExecuteSellOrder(lotSize, signal.stopLoss, 0, signal.scenario);
+            ticket = TradeMan.SafeSell(lotSize, signal.stopLoss, 0, signal.scenario);
          }
       } else {
          // Medium quality signal - use limit order with better price
@@ -658,18 +584,14 @@ void CheckNewTradeOpportunities()
       ManageAlerts(tradeMsg, false);
       
       // Send positive feedback to Market Monitor
-      if (TradeMan != NULL) {
-         TradeMan.FeedbackSignalResult(signal, true, ticket);
-      }
+      TradeMan.FeedbackSignalResult(signal, true, ticket);
    } else {
       // Trade execution failed
       string failReason = "Error code: " + IntegerToString(GetLastError());
       LogMessage("Failed to execute " + (signal.isLong ? "BUY" : "SELL") + " order. " + failReason, true);
       
       // Send negative feedback to Market Monitor
-      if (TradeMan != NULL) {
-         TradeMan.FeedbackSignalResult(signal, false, 0, failReason);
-      }
+      TradeMan.FeedbackSignalResult(signal, false, 0, failReason);
    }
 }
 
@@ -901,11 +823,12 @@ string GetScenarioName(ENUM_ENTRY_SCENARIO scenario)
       case SCENARIO_LIQUIDITY_GRAB: return "Liquidity Grab";
       case SCENARIO_BREAKOUT_FAILURE: return "Breakout Failure";
       case SCENARIO_REVERSAL_CONFIRMATION: return "Reversal Confirmation";
-      case SCENARIO_BULLISH_PULLBACK: return "Bullish Pullback"; // Thêm vào
-      case SCENARIO_BEARISH_PULLBACK: return "Bearish Pullback"; // Thêm vào
+      case SCENARIO_BULLISH_PULLBACK: return "Bullish Pullback";
+      case SCENARIO_BEARISH_PULLBACK: return "Bearish Pullback";
       default: return "Undefined";
    }
 }
+
 //+------------------------------------------------------------------+
 //| Create dashboard components on chart                             |
 //+------------------------------------------------------------------+
@@ -915,10 +838,13 @@ bool CreateDashboard()
 
    // Define dashboard size and position
    int x = 20, y = 20;
-   int width = 300, height = 300;
-   color bgColor = clrWhite;
-   color borderColor = clrSteelBlue;
-   color textColor = clrNavy;
+   int width = 450, height = 220; // Kích thước lớn hơn để hiển thị đẹp hơn
+   
+   // Gradient màu nền hiện đại
+   color bgColor = C'240,245,250';
+   color borderColor = C'70,130,180'; // Steel Blue
+   color headerColor = C'25,25,112';  // Dark Blue
+   color titleColor = clrWhite;
    int fontSize = 9;
    
    // Create background
@@ -935,14 +861,34 @@ bool CreateDashboard()
    ObjectSetInteger(0, "Apex_DB_BG", OBJPROP_BGCOLOR, bgColor);
    ObjectSetInteger(0, "Apex_DB_BG", OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, "Apex_DB_BG", OBJPROP_COLOR, borderColor);
-   ObjectSetInteger(0, "Apex_DB_BG", OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, "Apex_DB_BG", OBJPROP_WIDTH, 2); // Viền dày hơn
    ObjectSetInteger(0, "Apex_DB_BG", OBJPROP_BACK, false);
    ObjectSetInteger(0, "Apex_DB_BG", OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, "Apex_DB_BG", OBJPROP_SELECTED, false);
    ObjectSetInteger(0, "Apex_DB_BG", OBJPROP_HIDDEN, true);
    
-   // Create title
-   CreateLabel("Apex_DB_Title", "ApexPullback v10.5", x + 10, y + 10, fontSize + 2, clrNavy, true);
+   // Tạo header
+   if(!ObjectCreate(0, "Apex_DB_Header", OBJ_RECTANGLE_LABEL, 0, 0, 0)) {
+      LogMessage("Error creating dashboard header", true);
+      return false;
+   }
+   
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_XSIZE, width);
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_YSIZE, 30);
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_BGCOLOR, headerColor);
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_COLOR, headerColor);
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_WIDTH, 0);
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_BACK, false);
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_SELECTED, false);
+   ObjectSetInteger(0, "Apex_DB_Header", OBJPROP_HIDDEN, true);
+   
+   // Create title với thiết kế hiện đại
+   CreateLabel("Apex_DB_Title", "ApexPullback v10.6", x + width/2 - 70, y + 8, fontSize + 2, titleColor, true);
    
    // Create info labels with placeholder values - will be updated in UpdateDashboard()
    string items[] = {
@@ -952,10 +898,23 @@ bool CreateDashboard()
       "Last Signal", "Current Trend", "ATR"
    };
    
+   // Phân chia thành 2 cột để hiển thị rõ ràng hơn
+   int items_per_column = (ArraySize(items) + 1) / 2; // Chia đều các mục thông tin cho 2 cột
+   int col_width = 180; // Khoảng cách giữa 2 cột
+   
    for(int i = 0; i < ArraySize(items); i++) {
       string name = "Apex_DB_" + items[i];
-      CreateLabel(name + "_Label", items[i] + ":", x + 10, y + 40 + i*18, fontSize, textColor, false);
-      CreateLabel(name + "_Value", "---", x + 130, y + 40 + i*18, fontSize, textColor, false);
+      
+      // Tính toán vị trí x, y cho mỗi mục dựa trên chỉ số
+      int col = i / items_per_column; // 0 = cột trái, 1 = cột phải
+      int row = i % items_per_column; // Vị trí hàng trong cột
+      
+      int item_x = x + 10 + col * col_width;
+      int item_y = y + 40 + row * 18;
+      
+      // Tạo nhãn và giá trị tương ứng
+      CreateLabel(name + "_Label", items[i] + ":", item_x, item_y, fontSize, clrNavy, false);
+      CreateLabel(name + "_Value", "---", item_x + 120, item_y, fontSize, clrNavy, false);
    }
    
    ChartRedraw();
@@ -982,17 +941,17 @@ void CreateLabel(string name, string text, int x, int y, int fontSize, color tex
 }
 
 //+------------------------------------------------------------------+
-//| Update dashboard information                                     |
+//| Update dashboard information - IMPROVED                          |
 //+------------------------------------------------------------------+
 void UpdateDashboard()
 {
    if (!DisplayDashboard) return;
    
-   // Theo dõi thời gian cập nhật
+   // Theo dõi thởi gian cập nhật
    static datetime lastUpdateTime = 0;
    datetime currentTime = TimeCurrent();
    
-   // Tính khoảng thời gian cập nhật dựa trên DisplayMode và tải CPU
+   // Tính khoảng thởi gian cập nhật dựa trên DisplayMode và tải CPU
    int updateInterval = 2; // Mặc định 2 giây
    
    // Điều chỉnh dựa trên DisplayMode
@@ -1003,27 +962,146 @@ void UpdateDashboard()
    } 
    // DisplayMode == 2 (Detailed) giữ mặc định 2 giây
    
-// Điều chỉnh thêm dựa trên mức sử dụng bộ nhớ nếu quá cao
-double memoryUsage = (double)TerminalInfoInteger(TERMINAL_MEMORY_USED) / TerminalInfoInteger(TERMINAL_MEMORY_TOTAL);
-if (memoryUsage > 0.6) { // Nếu sử dụng hơn 60% bộ nhớ có sẵn
-   updateInterval *= 2; // Tăng gấp đôi khoảng cập nhật
-}
+   // Điều chỉnh thêm dựa trên tải CPU nếu quá cao
+   double cpuUsage = 50.0; // Giá trị cố định thay vì đọc từ TERMINAL_CPU_USAGE
    
-   // Chỉ cập nhật nếu đã qua đủ thời gian
+   // Điều chỉnh thêm dựa trên mức sử dụng bộ nhớ nếu quá cao
+   double memoryUsage = (double)TerminalInfoInteger(TERMINAL_MEMORY_USED) / TerminalInfoInteger(TERMINAL_MEMORY_TOTAL);
+   if (memoryUsage > 0.6) { // Nếu sử dụng hơn 60% bộ nhớ có sẵn
+      updateInterval *= 2; // Tăng gấp đôi khoảng cập nhật
+   }
+   
+   // Chỉ cập nhật nếu đã qua đủ thởi gian
    if (currentTime - lastUpdateTime < updateInterval) return;
    
-   // Ghi nhớ thời gian cập nhật
+   // Ghi nhớ thởi gian cập nhật
    lastUpdateTime = currentTime;
 
-   // EA Status
+   // EA Status với màu sắc thông minh
    string status = (TimeCurrent() < g_PauseUntil) ? 
-                 "PAUSED until " + TimeToString(g_PauseUntil, TIME_MINUTES) : "ACTIVE";
+                  "PAUSED until " + TimeToString(g_PauseUntil, TIME_MINUTES) : "ACTIVE";
+   color statusColor = (TimeCurrent() < g_PauseUntil) ? C'180,180,180' : C'0,128,0'; // Grey khi Paused, Green khi Active
    ObjectSetString(0, "Apex_DB_Status_Value", OBJPROP_TEXT, status);
+   ObjectSetInteger(0, "Apex_DB_Status_Value", OBJPROP_COLOR, statusColor);
    
-   // Mode
-   ObjectSetString(0, "Apex_DB_Mode_Value", OBJPROP_TEXT, PropMode ? "Prop Firm" : "Standard");
+   // Mode với font đậm hơn
+   string modeText = PropMode ? "Prop Firm" : "Standard";
+   ObjectSetString(0, "Apex_DB_Mode_Value", OBJPROP_TEXT, modeText);
+   ObjectSetInteger(0, "Apex_DB_Mode_Value", OBJPROP_FONTSIZE, 9);
    
-   // Các thông tin khác...
+   // Market Regime với màu sắc đặc trưng
+   string regimeText = "";
+   color regimeColor = clrBlack;
+   switch(Market.GetMarketState()) {
+      case REGIME_STRONG_TREND: 
+         regimeText = "Strong Trend"; 
+         regimeColor = C'0,0,139'; // Dark Blue - xu hướng mạnh
+         break;
+      case REGIME_WEAK_TREND: 
+         regimeText = "Weak Trend"; 
+         regimeColor = C'65,105,225'; // Royal Blue - xu hướng yếu
+         break;
+      case REGIME_RANGING: 
+         regimeText = "Ranging"; 
+         regimeColor = C'128,128,128'; // Grey - sideway
+         break;
+      case REGIME_VOLATILE: 
+         regimeText = "Volatile"; 
+         regimeColor = C'178,34,34'; // Firebrick - biến động mạnh
+         break;
+   }
+   ObjectSetString(0, "Apex_DB_Market Regime_Value", OBJPROP_TEXT, regimeText);
+   ObjectSetInteger(0, "Apex_DB_Market Regime_Value", OBJPROP_COLOR, regimeColor);
+   
+   // Current Day Trades với màu sắc dựa trên tỷ lệ so với giới hạn
+   int dayTrades = g_DayTrades;
+   color tradesColor = (dayTrades > MaxTradesPerDay*0.7) ? C'139,0,0' : 
+                     (dayTrades > MaxTradesPerDay*0.3) ? C'205,133,63' : C'0,100,0';
+   ObjectSetString(0, "Apex_DB_Current Day Trades_Value", OBJPROP_TEXT, IntegerToString(dayTrades));
+   ObjectSetInteger(0, "Apex_DB_Current Day Trades_Value", OBJPROP_COLOR, tradesColor);
+   
+   // Account Balance (không thay đổi màu)
+   ObjectSetString(0, "Apex_DB_Account Balance_Value", OBJPROP_TEXT, DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2));
+   
+   // Equity với màu dựa trên tăng/giảm so với balance
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   color equityColor = (equity > balance) ? C'0,100,0' : (equity < balance) ? C'139,0,0' : clrBlack;
+   ObjectSetString(0, "Apex_DB_Equity_Value", OBJPROP_TEXT, DoubleToString(equity, 2));
+   ObjectSetInteger(0, "Apex_DB_Equity_Value", OBJPROP_COLOR, equityColor);
+   
+   // Performance metrics
+   static PerformanceMetrics metrics;
+   if (RiskMan.GetPerformanceMetrics(metrics)) {
+      // Win Rate với màu sắc theo mức
+      double winRate = metrics.winRate;
+      color winRateColor = (winRate >= 60) ? C'0,100,0' : (winRate >= 45) ? C'205,133,63' : C'139,0,0';
+      ObjectSetString(0, "Apex_DB_Win Rate_Value", OBJPROP_TEXT, DoubleToString(winRate, 1) + "%");
+      ObjectSetInteger(0, "Apex_DB_Win Rate_Value", OBJPROP_COLOR, winRateColor);
+      
+      // Profit Factor với màu sắc theo mức
+      double profitFactor = metrics.profitFactor;
+      color pfColor = (profitFactor >= 1.5) ? C'0,100,0' : (profitFactor >= 1.0) ? C'205,133,63' : C'139,0,0';
+      ObjectSetString(0, "Apex_DB_Profit Factor_Value", OBJPROP_TEXT, DoubleToString(profitFactor, 2));
+      ObjectSetInteger(0, "Apex_DB_Profit Factor_Value", OBJPROP_COLOR, pfColor);
+      
+      // Daily P/L
+      double dailyPL = AccountInfoDouble(ACCOUNT_EQUITY) - g_DayStartEquity;
+      color plColor = (dailyPL > 0) ? C'0,100,0' : (dailyPL < 0) ? C'139,0,0' : clrBlack;
+      ObjectSetString(0, "Apex_DB_Daily P/L_Value", OBJPROP_TEXT, DoubleToString(dailyPL, 2));
+      ObjectSetInteger(0, "Apex_DB_Daily P/L_Value", OBJPROP_COLOR, plColor);
+      
+      // Total Trades
+      ObjectSetString(0, "Apex_DB_Total Trades_Value", OBJPROP_TEXT, IntegerToString(metrics.totalTrades));
+      
+      // Consecutive stats
+      int consWins = metrics.maxConsecutiveWins;
+      int consLosses = metrics.maxConsecutiveLosses;
+      
+      // Hiển thị consecutive wins với màu xanh khi > 2
+      color consWinsColor = (consWins >= 3) ? C'0,100,0' : clrBlack;
+      ObjectSetString(0, "Apex_DB_Consec. Wins_Value", OBJPROP_TEXT, IntegerToString(consWins));
+      ObjectSetInteger(0, "Apex_DB_Consec. Wins_Value", OBJPROP_COLOR, consWinsColor);
+      
+      // Hiển thị consecutive losses với màu đỏ khi > 2
+      color consLossesColor = (consLosses >= 3) ? C'139,0,0' : clrBlack;
+      ObjectSetString(0, "Apex_DB_Consec. Losses_Value", OBJPROP_TEXT, IntegerToString(consLosses));
+      ObjectSetInteger(0, "Apex_DB_Consec. Losses_Value", OBJPROP_COLOR, consLossesColor);
+   }
+   
+   // Trend info với màu sắc tương ứng
+   string trendText = Market.IsTrendUp() ? "UP" : (Market.IsTrendDown() ? "DOWN" : "NEUTRAL");
+   color trendColor = Market.IsTrendUp() ? C'0,100,0' : (Market.IsTrendDown() ? C'139,0,0' : C'128,128,128');
+   ObjectSetString(0, "Apex_DB_Current Trend_Value", OBJPROP_TEXT, trendText);
+   ObjectSetInteger(0, "Apex_DB_Current Trend_Value", OBJPROP_COLOR, trendColor);
+   
+   // ATR với màu dựa trên độ biến động
+   double atr = Market.GetATR();
+   double normalATR = 0;
+   // Ước tính ATR bình thường dựa trên giá trị trung bình
+   if(Market.GetAverageATR() > 0) {
+      normalATR = Market.GetAverageATR();
+   } else {
+      normalATR = atr; // Nếu không có giá trị trung bình, sử dụng ATR hiện tại
+   }
+   
+   double atrRatio = 1.0; 
+   if(normalATR > 0) atrRatio = atr / normalATR;
+   
+   color atrColor = (atrRatio >= 1.5) ? clrDarkRed : (atrRatio >= 1.2) ? clrDarkOrange : clrDarkBlue;
+   ObjectSetString(0, "Apex_DB_ATR_Value", OBJPROP_TEXT, DoubleToString(atr, _Digits));
+   ObjectSetInteger(0, "Apex_DB_ATR_Value", OBJPROP_COLOR, atrColor);
+   
+   // Last Signal với màu tương ứng
+   SignalInfo lastSignal;
+   if (Market.GetLastSignal(lastSignal)) {
+      string signalText = StringFormat("%s: %s", 
+                                    lastSignal.isLong ? "BUY" : "SELL",
+                                    GetScenarioName(lastSignal.scenario));
+      color signalColor = lastSignal.isLong ? C'0,100,0' : C'139,0,0';
+      ObjectSetString(0, "Apex_DB_Last Signal_Value", OBJPROP_TEXT, signalText);
+      ObjectSetInteger(0, "Apex_DB_Last Signal_Value", OBJPROP_COLOR, signalColor);
+   }
    
    ChartRedraw();
 }
@@ -1045,13 +1123,13 @@ void DeleteDashboard()
 //+------------------------------------------------------------------+
 void SavePerformanceStats()
 {
-   if (!SaveTradeStatistics || RiskMan == NULL)
+   if (!SaveTradeStatistics)
       return;
 
    LogMessage("Saving performance stats...", false);
    
    // 1) Get performance metrics from RiskManager
-   PerformanceMetrics metrics;
+   static PerformanceMetrics metrics;
    if (!RiskMan.GetPerformanceMetrics(metrics))
    {
       LogMessage("Could not retrieve performance metrics for saving", true);
@@ -1182,14 +1260,9 @@ void AdjustParametersByPreset()
    double adjustedTP_RR = TP_RR * tpRrMultiplier;
    
    // Update parameters for modules
-   if(Market != NULL) {
-      Market.SetEnvelopeDeviation(adjustedEnvF);
-   }
-   
-   if(TradeMan != NULL) {
-      TradeMan.SetStopLossAtrMultiplier(adjustedSL_ATR);
-      TradeMan.SetTakeProfitRrRatio(adjustedTP_RR);
-   }
+   Market.SetEnvelopeDeviation(adjustedEnvF);
+   TradeMan.SetStopLossAtrMultiplier(adjustedSL_ATR);
+   TradeMan.SetTakeProfitRrRatio(adjustedTP_RR);
    
    LogMessage(StringFormat("Parameters adjusted - EnvF: %.2f, SL_ATR: %.2f, TP_RR: %.2f", 
                          adjustedEnvF, adjustedSL_ATR, adjustedTP_RR), false);
@@ -1215,120 +1288,8 @@ bool OpenTrade(bool isLong, double entryPrice, double stopLoss, double takeProfi
    return result;
 }
 
-// --- Logging and notification settings
-input string LoggingSection = "=== Logging & Notification Settings ==="; // Logging section
-input bool   EnableDetailedLogs = false;      // Enable detailed logs
-input bool   EnableCsvLog = false;            // Save logs to CSV file  
-input string CsvLogFilename = "ApexPullback_log.csv"; // CSV log filename
-input bool   EnableTelegramNotify = false;    // Send notifications via Telegram
-input string TelegramBotToken = "";           // Telegram Bot Token
-input string TelegramChatID = "";             // Telegram Chat ID
-input bool   TelegramImportantOnly = true;    // Only send important notifications
-
-// --- News and alert settings
-input string NewsSection = "=== News Filter Settings ==="; // News section
-input ENUM_NEWS_FILTER NewsFilter = NEWS_NONE; // News filtering method
-input int    NewsImpactMinutes = 30;           // Minutes before news (avoid trading)
-input int    NewsImpactLevel = 2;              // News impact level (1=Low, 2=Medium, 3=High)
-input int    NewsWindowBefore = 30;            // Minutes before news (avoid trading)
-input int    NewsWindowAfter = 15;             // Minutes after news (avoid trading)
-input string NEWS_FILE = "news_calendar.csv";  // News calendar filename
-input bool   Alert_Enabled = true;             // Enable alerts
-input bool   Alert_Email = false;              // Send email alerts
-input bool   Alert_PushNotification = false;   // Send push notifications
-
-// --- Entry mode settings
-input string EntryModeSection = "=== Entry Mode Settings ==="; // Entry section
-input ENUM_ENTRY_MODE EntryMode = MODE_MARKET; // Entry mode
-
-// --- Display and interface settings
-input string DisplaySection = "=== Display & Interface Settings ==="; // Display section
-input bool   DisplayDashboard = true;         // Display dashboard
-input int    DisplayMode = 1;                 // Display mode (0=Minimal, 1=Standard, 2=Detailed)
-input int    TrendMode = 1;                   // Trend mode (0=None, 1=Lines, 2=Zone)
-input bool   SaveTradeStatistics = true;      // Save trade statistics
-
-// --- Pause settings
-input string PauseSection = "=== Pause Settings ==="; // Pause section
-input bool   EnableAutoPause = true;          // Auto-pause when DD limit reached
-input int    PauseMinutes = 240;              // Minutes to pause after limit reached
-
-// --- Advanced trailing stop settings
-input string TrailingStopSection = "=== Advanced Trailing Stop Settings ==="; // Trailing section
-input bool   UseAdaptiveTrailing = true;      // Use adaptive trailing stop (based on ADX)
-input double AdxThreshold = 20.0;             // ADX threshold (medium trend)
-input double AdxStrongThreshold = 30.0;       // ADX threshold (strong trend)
-
-// --- Strategy and timeframe settings
-input string StrategySection = "=== Strategy & Timeframe Settings ==="; // Strategy section
-input ENUM_TIMEFRAMES EntryTimeframe = PERIOD_H1;   // Main entry timeframe
-input int    EMAf = 34;                       // Fast EMA period
-input int    EMAt = 89;                       // Trend EMA period
-input double EnvF = 0.001;                    // Envelope deviation (default 0.1%)
-input bool   UseMultiTimeframe = true;        // Use multi-timeframe analysis
-input ENUM_TIMEFRAMES HigherTimeframe = PERIOD_H4; // Higher timeframe
-input bool   UseNestedTimeframe = true;       // Use nested timeframe
-input ENUM_TIMEFRAMES NestedTimeframe = PERIOD_M15; // Nested timeframe
-input bool   EnableMarketRegimeFilter = true; // Enable market regime filter
-input ENUM_MARKET_PRESET Preset = PRESET_AUTO; // Auto-detect market type
-
-// --- Trading and position management settings
-input string TradingSection = "=== Trading & Position Management Settings ==="; // Trading section
-input int    MaxPositions = 5;                // Maximum number of open positions
-input string Comment_Prefix = "ApexPB";       // Comment prefix for trades
-input bool   AllowNewTrades = true;           // Allow opening new trades
-input double RiskPercent = 1.0;               // Risk percentage (% of capital)
-input double MaxSpreadPoints = 50;            // Maximum allowed spread (points)
-input int    g_MinPullbackPct = 20;           // Minimum pullback percentage
-input int    g_MaxPullbackPct = 60;           // Maximum pullback percentage
-input int    LookbackBars = 20;               // Bars to look back for analysis
-input double SL_ATR = 1.2;                    // SL ATR multiplier
-input double TP_RR = 1.5;                     // TP/SL ratio (Risk:Reward)
-input bool   UseDynamicLotSize = true;        // Use dynamic lot sizing based on volatility 
-input double MinLotMultiplier = 0.5;          // Minimum lot size multiplier
-input double MaxVolatilityFactor = 2.0;       // Maximum volatility factor
-
-// --- Breakeven and take profit settings
-input string TPSection = "=== Breakeven & Take Profit Settings ==="; // TP section
-input ENUM_TRAILING_MODE TrailingMode = TRAILING_MODE_ATR; // Trailing Stop Mode
-input double TrailingAtrMultiplier = 2.0;     // ATR multiplier for Trailing Stop
-input double BreakEven_R = 1.0;               // R level to activate breakeven
-input bool   UseMultipleTargets = true;       // Use multiple take profit targets
-input int    TP1_Percent = 30;                // Percentage to close at TP1
-input int    TP2_Percent = 30;                // Percentage to close at TP2
-input int    TP3_Percent = 40;                // Percentage to close at TP3
-
-// --- Session filter settings
-input string SessionSection = "=== Session Filter Settings ==="; // Session section
-input bool   FilterBySession = false;         // Filter trades by session
-input int    SessionStartHour = 7;            // Session start hour (GMT)
-input int    SessionStartMinute = 0;          // Session start minute
-input int    SessionEndHour = 17;             // Session end hour (GMT)
-input int    SessionEndMinute = 0;            // Session end minute
-input int    GMT_Offset = 0;                  // GMT offset hours
-
-// --- Market-specific multiplier settings
-input string MarketFactorsSection = "=== Market Multiplier Settings ==="; // Market factors section
-input double FX_EnvF_Multiplier = 1.0;        // Envelope multiplier for Forex
-input double FX_SL_ATR_Multiplier = 1.0;      // SL ATR multiplier for Forex
-input double FX_TP_RR_Multiplier = 1.0;       // TP/SL multiplier for Forex
-input double GOLD_EnvF_Multiplier = 1.5;      // Envelope multiplier for Gold
-input double GOLD_SL_ATR_Multiplier = 1.5;    // SL ATR multiplier for Gold
-input double GOLD_TP_RR_Multiplier = 1.3;     // TP/SL multiplier for Gold
-input double CRYPTO_EnvF_Multiplier = 2.0;    // Envelope multiplier for Crypto 
-input double CRYPTO_SL_ATR_Multiplier = 2.0;  // SL ATR multiplier for Crypto
-input double CRYPTO_TP_RR_Multiplier = 1.5;   // TP/SL multiplier for Crypto
-
-// --- Risk management settings
-input string RiskManagementSection = "=== Risk Management Settings ==="; // Risk management section
-input bool   PropMode = false;      // Prop Firm Mode (daily max trades limit)
-input int    MaxDayTrades = 5;      // Maximum trades per day (Prop Mode)
-input double DailyLoss = 0.0;       // Daily loss limit (% of capital)
-input double MaxDD = 0.0;           // Maximum drawdown limit (% of capital)
-input int    MaxConsecutiveLosses = 3; // Maximum consecutive losses
-
 //+------------------------------------------------------------------+
-//| Tester function                                                  |
+//| Tester function - IMPROVED                                      |
 //+------------------------------------------------------------------+
 double OnTester()
 {
@@ -1337,14 +1298,12 @@ double OnTester()
    double profitFactor = 0.0;
    double maxDrawdown = 0.0;
    
-   // Lấy thống kê từ RiskManager nếu có
-   if (RiskMan != NULL) {
-      PerformanceMetrics metrics;
-      if (RiskMan.GetPerformanceMetrics(metrics)) {
-         winRate = metrics.winRate;
-         profitFactor = metrics.profitFactor;
-         maxDrawdown = metrics.maxEquityDD;
-      }
+   // Lấy thống kê từ RiskManager
+   static PerformanceMetrics metrics;
+   if (RiskMan.GetPerformanceMetrics(metrics)) {
+      winRate = metrics.winRate;
+      profitFactor = metrics.profitFactor;
+      maxDrawdown = metrics.maxEquityDD;
    }
    
    // Tính toán điểm tester tùy chỉnh
@@ -1404,11 +1363,21 @@ void SaveBacktestResultsToCSV(
    if(FileIsExist(filename, FILE_COMMON)) {
       // Mở file để thêm dữ liệu
       fileHandle = FileOpen(filename, FILE_WRITE|FILE_READ|FILE_CSV|FILE_COMMON);
+      if(fileHandle == INVALID_HANDLE) {
+         Print("Log open fail: ", GetLastError());
+         return;
+      }
+      
       // Di chuyển con trỏ đến cuối file
       FileSeek(fileHandle, 0, SEEK_END);
    } else {
       // Tạo file mới và thêm header
       fileHandle = FileOpen(filename, FILE_WRITE|FILE_CSV|FILE_COMMON);
+      if(fileHandle == INVALID_HANDLE) {
+         Print("Log open fail: ", GetLastError());
+         return;
+      }
+      
       // Viết header
       FileWrite(fileHandle, 
          "Date", "Symbol", "Timeframe", "EMA Fast", "EMA Trend", 
@@ -1417,22 +1386,127 @@ void SaveBacktestResultsToCSV(
       );
    }
    
-   if(fileHandle != INVALID_HANDLE) {
-      // Ghi kết quả
-      FileWrite(fileHandle, 
-         TimeToString(TimeCurrent(), TIME_DATE), 
-         _Symbol, 
-         EnumToString((ENUM_TIMEFRAMES)Period()), 
-         IntegerToString(EMAf), 
-         IntegerToString(EMAt), 
-         DoubleToString(winRate, 2), 
-         DoubleToString(profitFactor, 2), 
-         DoubleToString(maxDrawdown, 2), 
-         DoubleToString(netProfit, 2), 
-         DoubleToString(totalTrades, 0), 
-         DoubleToString(customScore, 4)
-      );
-      
-      FileClose(fileHandle);
-   }
+   // Ghi kết quả
+   FileWrite(fileHandle, 
+      TimeToString(TimeCurrent(), TIME_DATE), 
+      _Symbol, 
+      EnumToString((ENUM_TIMEFRAMES)Period()), 
+      IntegerToString(EMAf), 
+      IntegerToString(EMAt), 
+      DoubleToString(winRate, 2), 
+      DoubleToString(profitFactor, 2), 
+      DoubleToString(maxDrawdown, 2), 
+      DoubleToString(netProfit, 2), 
+      DoubleToString(totalTrades, 0), 
+      DoubleToString(customScore, 4)
+   );
+   
+   FileClose(fileHandle);
 }
+
+//--- Input parameters được nhóm gọn gàng 
+
+// === LOGGING & THÔNG BÁO ===
+sinput string LoggingSection = "=== Logging & Notification Settings ==="; // === THIẾT LẬP LOGGING & THÔNG BÁO ===
+input bool   EnableDetailedLogs = false;      // Bật logs chi tiết
+input bool   EnableCsvLog = false;            // Lưu logs vào file CSV
+input string CsvLogFilename = "ApexPullback_log.csv"; // Tên file CSV log
+input bool   EnableTelegramNotify = false;    // Gửi thông báo qua Telegram
+input string TelegramBotToken = "";           // Telegram Bot Token
+input string TelegramChatID = "";             // Telegram Chat ID
+input bool   TelegramImportantOnly = true;    // Chỉ gửi thông báo quan trọng
+
+// === LỌC TIN TỨC & CẢNH BÁO ===
+sinput string NewsSection = "=== News Filter Settings ==="; // === THIẾT LẬP LỌC TIN TỨC ===
+input ENUM_NEWS_FILTER NewsFilter = NEWS_NONE; // Phương pháp lọc tin tức
+input int    NewsImpactLevel = 2;              // Mức độ ảnh hưởng (1=Thấp, 2=Trung bình, 3=Cao)
+input int    NewsWindowBefore = 30;            // Phút trước tin (tránh giao dịch)
+input int    NewsWindowAfter = 15;             // Phút sau tin (tránh giao dịch)
+input string NEWS_FILE = "news_calendar.csv";  // Tên file lịch tin tức
+input bool   Alert_Enabled = true;             // Bật thông báo
+input bool   Alert_Email = false;              // Gửi email thông báo
+input bool   Alert_PushNotification = false;   // Gửi thông báo push
+
+// === CHIẾN LƯỢC & KHUNG THỜI GIAN ===
+sinput string StrategySection = "=== Strategy & Timeframe Settings ==="; // === THIẾT LẬP CHIẾN LƯỢC & KHUNG THỜI GIAN ===
+input ENUM_ENTRY_MODE EntryMode = MODE_MARKET; // Phương thức vào lệnh
+input ENUM_TIMEFRAMES EntryTimeframe = PERIOD_H1; // Khung thởi gian vào lệnh chính
+input int    EMAf = 34;                       // EMA nhanh (kỳ)
+input int    EMAt = 89;                       // EMA xu hướng (kỳ)
+input double EnvF = 0.001;                    // Độ lệch biên (mặc định 0.1%)
+input bool   UseMultiTimeframe = true;        // Sử dụng phân tích đa khung
+input ENUM_TIMEFRAMES HigherTimeframe = PERIOD_H4; // Khung thởi gian cao hơn
+input bool   UseNestedTimeframe = true;       // Sử dụng khung thởi gian lồng ghép
+input ENUM_TIMEFRAMES NestedTimeframe = PERIOD_M15; // Khung thởi gian lồng ghép
+input bool   EnableMarketRegimeFilter = true; // Bật lọc trạng thái thị trường
+input ENUM_MARKET_PRESET Preset = PRESET_AUTO; // Tự động phát hiện loại thị trường
+
+// === QUẢN LÝ GIAO DỊCH & VỊ THẾ ===
+sinput string TradingSection = "=== Trading & Position Management Settings ==="; // === THIẾT LẬP QUẢN LÝ GIAO DỊCH & VỊ THẾ ===
+input int    MaxPositions = 5;                // Số vị thế tối đa
+input string Comment_Prefix = "ApexPB";       // Tiền tố comment giao dịch
+input bool   AllowNewTrades = true;           // Cho phép mở lệnh mới
+input double RiskPercent = 1.0;               // Tỷ lệ rủi ro (% vốn)
+input double MaxSpreadPoints = 50;            // Spread tối đa cho phép (điểm)
+input int    g_MinPullbackPct = 20;           // Tỷ lệ pullback tối thiểu
+input int    g_MaxPullbackPct = 60;           // Tỷ lệ pullback tối đa
+input int    LookbackBars = 20;               // Số nến nhìn lại để phân tích
+input double SL_ATR = 1.2;                    // Hệ số ATR cho SL
+input double TP_RR = 1.5;                     // Tỷ lệ TP/SL (R:R)
+input bool   UseDynamicLotSize = true;        // Sử dụng lot size động theo biến động
+input double MinLotMultiplier = 0.5;          // Hệ số lot size tối thiểu
+input double MaxVolatilityFactor = 2.0;       // Hệ số biến động tối đa
+
+// === HÒA VỐN & CHỐT LỜI ===
+sinput string TPSection = "=== Breakeven & Take Profit Settings ==="; // === THIẾT LẬP HÒA VỐN & CHỐT LỜI ===
+input ENUM_TRAILING_MODE TrailingMode = TRAILING_MODE_ATR; // Phương thức Trailing Stop
+input double TrailingAtrMultiplier = 2.0;     // Hệ số ATR cho Trailing Stop
+input double BreakEven_R = 1.0;               // Mức R để kích hoạt breakeven
+input bool   UseMultipleTargets = true;       // Sử dụng nhiều mục tiêu TP
+input int    TP1_Percent = 30;                // Phần trăm đóng tại TP1
+input int    TP2_Percent = 30;                // Phần trăm đóng tại TP2
+input int    TP3_Percent = 40;                // Phần trăm đóng tại TP3
+
+// === TRAILING STOP NÂNG CAO ===
+sinput string TrailingStopSection = "=== Advanced Trailing Stop Settings ==="; // === THIẾT LẬP TRAILING STOP NÂNG CAO ===
+input bool   UseAdaptiveTrailing = true;      // Sử dụng trailing stop thích ứng (dựa trên ADX)
+input double AdxThreshold = 20.0;             // Ngưỡng ADX (xu hướng trung bình)
+input double AdxStrongThreshold = 30.0;       // Ngưỡng ADX (xu hướng mạnh)
+
+// === HIỂN THỊ & GIAO DIỆN ===
+sinput string DisplaySection = "=== Display & Interface Settings ==="; // === THIẾT LẬP HIỂN THỊ & GIAO DIỆN ===
+input bool   DisplayDashboard = true;         // Hiển thị bảng điều khiển
+input int    DisplayMode = 1;                 // Chế độ hiển thị (0=Tối thiểu, 1=Tiêu chuẩn, 2=Chi tiết)
+input int    TrendMode = 1;                   // Chế độ xu hướng (0=Không, 1=Đường, 2=Vùng)
+input bool   SaveTradeStatistics = true;      // Lưu thống kê giao dịch
+
+// === LỌC PHIÊN GIAO DỊCH ===
+sinput string SessionSection = "=== Session Filter Settings ==="; // === THIẾT LẬP LỌC PHIÊN GIAO DỊCH ===
+input bool   FilterBySession = false;         // Lọc giao dịch theo phiên
+input int    SessionStartHour = 7;            // Giờ bắt đầu phiên (GMT)
+input int    SessionStartMinute = 0;          // Phút bắt đầu phiên
+input int    SessionEndHour = 17;             // Giờ kết thúc phiên (GMT)
+input int    SessionEndMinute = 0;            // Phút kết thúc phiên
+input int    GMT_Offset = 0;                  // Độ lệch GMT
+
+// === THIẾT LẬP TÙNG THỊ TRƯỜNG ===
+sinput string MarketFactorsSection = "=== Market Multiplier Settings ==="; // === THIẾT LẬP HỆ SỐ THỊ TRƯỜNG ===
+input double FX_EnvF_Multiplier = 1.0;        // Hệ số Envelope cho Forex
+input double FX_SL_ATR_Multiplier = 1.0;      // Hệ số SL ATR cho Forex
+input double FX_TP_RR_Multiplier = 1.0;       // Hệ số TP/SL cho Forex
+input double GOLD_EnvF_Multiplier = 1.5;      // Hệ số Envelope cho Vàng
+input double GOLD_SL_ATR_Multiplier = 1.5;    // Hệ số SL ATR cho Vàng
+input double GOLD_TP_RR_Multiplier = 1.3;     // Hệ số TP/SL cho Vàng
+input double CRYPTO_EnvF_Multiplier = 2.0;    // Hệ số Envelope cho Crypto
+input double CRYPTO_SL_ATR_Multiplier = 2.0;  // Hệ số SL ATR cho Crypto
+input double CRYPTO_TP_RR_Multiplier = 1.5;   // Hệ số TP/SL cho Crypto
+
+// === QUẢN LÝ RỦI RO ===
+sinput string RiskManagementSection = "=== Risk Management Settings ==="; // === THIẾT LẬP QUẢN LÝ RỦI RO ===
+input bool   PropMode = false;                // Chế độ Prop Firm (giới hạn giao dịch hàng ngày)
+input int    MaxTradesPerDay = 5;                // Số giao dịch tối đa mỗi ngày
+input double DailyLoss = 0.0;                 // Giới hạn lỗ hàng ngày (% vốn)
+input double MaxDD = 0.0;                     // Giới hạn drawdown tối đa (% vốn)
+input int    MaxConsecutiveLosses = 3;        // Số lần thua liên tiếp tối đa
+input bool   EnableAutoPause = true;          // Tự động tạm dừng khi đạt giới hạn DD
+input int    PauseMinutes = 240;              // Số phút tạm dừng sau khi đạt giới hạn

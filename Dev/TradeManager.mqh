@@ -196,6 +196,10 @@ public:
    // Signal feedback
    void                 FeedbackSignalResult(SignalInfo &signal, bool success, ulong ticket, string failReason = "");
    
+   // Safe trade execution with retry
+   bool                 SafeBuy(double lotSize, double stopLoss, double takeProfit, ENUM_ENTRY_SCENARIO scenario);
+   bool                 SafeSell(double lotSize, double stopLoss, double takeProfit, ENUM_ENTRY_SCENARIO scenario);
+   
    // Accessors
    int                  GetTotalTrades() const { return m_TotalTrades; }
    int                  GetWinningTrades() const { return m_WinningTrades; }
@@ -2693,4 +2697,69 @@ void CTradeManager::FeedbackSignalResult(SignalInfo &signal, bool success, ulong
       // Here you could implement file writing logic
       // FileWrite(m_SignalLogHandle, logEntry);
    }
+}
+
+//+------------------------------------------------------------------+
+//| Safe trade execution with retry                                  |
+//+------------------------------------------------------------------+
+bool CTradeManager::SafeBuy(double lotSize, double stopLoss, double takeProfit, ENUM_ENTRY_SCENARIO scenario)
+{
+   ulong ticket = 0;
+   int attempts = 0;
+   int maxAttempts = 3;
+   
+   while (attempts < maxAttempts && ticket == 0)
+   {
+      ticket = ExecuteBuyOrder(lotSize, stopLoss, takeProfit, scenario);
+      
+      if (ticket == 0)
+      {
+         uint errorCode = m_Trade.ResultRetcode();
+         if (errorCode == TRADE_RETCODE_REQUOTE || errorCode == TRADE_RETCODE_REJECT)
+         {
+            attempts++;
+            Sleep(100); // Chờ 100ms trước khi thử lại
+            m_Logger.LogWarning(StringFormat("Retrying BUY order (attempt %d): %s", 
+                                        attempts, m_Trade.ResultRetcodeDescription()));
+         }
+         else
+         {
+            // Lỗi khác, không thử lại
+            return false;
+         }
+      }
+   }
+   
+   return (ticket > 0);
+}
+
+bool CTradeManager::SafeSell(double lotSize, double stopLoss, double takeProfit, ENUM_ENTRY_SCENARIO scenario)
+{
+   ulong ticket = 0;
+   int attempts = 0;
+   int maxAttempts = 3;
+   
+   while (attempts < maxAttempts && ticket == 0)
+   {
+      ticket = ExecuteSellOrder(lotSize, stopLoss, takeProfit, scenario);
+      
+      if (ticket == 0)
+      {
+         uint errorCode = m_Trade.ResultRetcode();
+         if (errorCode == TRADE_RETCODE_REQUOTE || errorCode == TRADE_RETCODE_REJECT)
+         {
+            attempts++;
+            Sleep(100); // Chờ 100ms trước khi thử lại
+            m_Logger.LogWarning(StringFormat("Retrying SELL order (attempt %d): %s", 
+                                        attempts, m_Trade.ResultRetcodeDescription()));
+         }
+         else
+         {
+            // Lỗi khác, không thử lại
+            return false;
+         }
+      }
+   }
+   
+   return (ticket > 0);
 }
