@@ -1,0 +1,16 @@
+; Preset cho thị trường Crypto
+RiskPercent=0.5
+MaxDayTrades=5
+SL_ATR=2.0
+TP_RR=2.0
+UseDynamicLotSize=true
+MinLotMultiplier=0.3
+MaxVolatilityFactor=4.0
+Preset=PRESET_CRYPTO
+EntryMode=MODE_SMART
+UseMultipleTargets=true
+TP1_Percent=33
+TP2_Percent=33
+TP3_Percent=34
+TrailingMode=TRAILING_MODE_ATR
+TrailingAtrMultiplier=3.5

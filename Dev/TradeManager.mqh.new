@@ -1,0 +1,12 @@
+//+------------------------------------------------------------------+
+//| Set take profit risk-reward ratio                                |
+//+------------------------------------------------------------------+
+void CTradeManager::SetTakeProfitRrRatio(double tpRrRatio)
+{
+   // Đảm bảo tỷ lệ risk:reward hợp lý (tối thiểu 0.5, tối đa 5.0)
+   m_TP_RR = MathMax(0.5, MathMin(tpRrRatio, 5.0));
+   
+   if (m_Logger != NULL) {
+      m_Logger.LogInfo(StringFormat("Take Profit Risk-Reward ratio set to %.2f", m_TP_RR));
+   }
+}

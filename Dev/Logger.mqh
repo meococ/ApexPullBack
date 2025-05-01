@@ -51,9 +51,13 @@ public:
    void              LogWarning(string message);
    void              LogError(string message, int errorCode = -1);
    void              LogDebug(string message);
+   
+   //--- Check Debug Status ---
+   bool              IsDebugEnabled() const { return m_detailedLogsEnabled; }
 
    //--- Notification Method ---
    bool              SendTelegramNotification(string message, bool forceSend = false);
+   bool              SendTelegramMessage(string message);
 };
 
 //+------------------------------------------------------------------+
@@ -337,6 +341,14 @@ bool CLogger::SendTelegramNotification(string message, bool forceSend = false)
                ". Response: " + CharArrayToString(post_result));
       return false;
    }
+}
+
+//+------------------------------------------------------------------+
+//| Send Telegram Message                                            |
+//+------------------------------------------------------------------+
+bool CLogger::SendTelegramMessage(string message)
+{
+   return SendTelegramNotification(message, true);
 }
 
 //+------------------------------------------------------------------+

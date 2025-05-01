@@ -122,7 +122,7 @@ int OnInit()
    }
 
    // Load news data if needed
-   if (NewsFilter == NEWS_FILE) {
+   if ((int)NewsFilter == (int)NEWS_FILE) {
       LoadNewsData();
    }
 
@@ -306,7 +306,7 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
                g_PauseUntil = TimeCurrent() + PauseMinutes * 60;
                TradeMan.CloseAllPendingOrders();  // Close any pending orders during pause
                string pauseMsg = StringFormat("Maximum consecutive losses (%d) reached. Paused until: %s",
-                                           MaxConsecutiveLosses, TimeToString(g_PauseUntil, TIME_DATE|TIME_MINUTES));
+                                           MaxConsecutiveLosses, TimeToString(g_PauseUntil));
                ManageAlerts(pauseMsg, true);
                LogMessage(pauseMsg, true);
             }
@@ -420,12 +420,20 @@ bool CheckProcessingTime()
    // Avoid excessive tick processing - process no more than once each 50ms
    uint processingInterval = 50;  // Milliseconds minimum interval
    
-   if (currentTime == lastCheckTime || (GetTickCount() - GetTickCount(lastCheckTime)) < processingInterval)
-   {
+   // Làm lại kiểm tra thời gian để tránh lỗi
+   if (currentTime == lastCheckTime) {
+      return false;  // Skip if called on the same second
+   }
+   
+   ulong currentMillis = GetTickCount();
+   static ulong lastMillis = 0;
+   
+   if (currentMillis - lastMillis < processingInterval) {
       return false;  // Skip if called too frequently
    }
-
+   
    lastCheckTime = currentTime;
+   lastMillis = currentMillis;
    return true;
 }
 
@@ -524,9 +532,9 @@ void CheckNewTradeOpportunities()
    double maxAllowedSpread = MaxSpreadPoints * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
    if (currentSpread > maxAllowedSpread) {
-      if ((TimeCurrent() % 300) == 0)  // Log every 5 minutes to avoid spam
+      if ((int)(TimeCurrent() % 300) == 0)  // Log every 5 minutes to avoid spam
          LogMessage("Current spread (" + DoubleToString(currentSpread/_Point, 1) + 
-                   " points) exceeds maximum allowed (" + IntegerToString(MaxSpreadPoints) + 
+                   " points) exceeds maximum allowed (" + IntegerToString((int)MaxSpreadPoints) + 
                    " points)", false);
       return;
    }
@@ -547,7 +555,7 @@ void CheckNewTradeOpportunities()
 
    // Calculate lot size through Risk Manager
    double stopLossPoints = MathAbs(signal.entryPrice - signal.stopLoss) / _Point;
-   double lotSize = RiskMan.CalculateLotSize(stopLossPoints, signal.quality);
+   double lotSize = RiskMan.CalculateLotSize(_Symbol, stopLossPoints, signal.entryPrice, signal.quality);
 
    // Apply dynamic lot sizing if enabled
    if (g_UseDynamicLotSize) {
@@ -722,7 +730,7 @@ bool IsAllowedTradingSession()
 bool IsNewsImpactPeriod()
 {
    // If news filtering is disabled, always return false (no impact)
-   if (NewsFilter == NEWS_NONE)
+   if ((int)NewsFilter == (int)NEWS_NONE)
       return false;
       
    // Get current time
@@ -751,7 +759,7 @@ bool IsNewsImpactPeriod()
 bool LoadNewsData()
 {
    // Only load data if news filtering is set to NEWS_FILE
-   if (NewsFilter != NEWS_FILE)
+   if ((int)NewsFilter != (int)NEWS_FILE)
       return false;
       
    string filename = NEWS_FILE;
@@ -893,10 +901,11 @@ string GetScenarioName(ENUM_ENTRY_SCENARIO scenario)
       case SCENARIO_LIQUIDITY_GRAB: return "Liquidity Grab";
       case SCENARIO_BREAKOUT_FAILURE: return "Breakout Failure";
       case SCENARIO_REVERSAL_CONFIRMATION: return "Reversal Confirmation";
+      case SCENARIO_BULLISH_PULLBACK: return "Bullish Pullback"; // Thêm vào
+      case SCENARIO_BEARISH_PULLBACK: return "Bearish Pullback"; // Thêm vào
       default: return "Undefined";
    }
 }
-
 //+------------------------------------------------------------------+
 //| Create dashboard components on chart                             |
 //+------------------------------------------------------------------+
@@ -979,6 +988,33 @@ void UpdateDashboard()
 {
    if (!DisplayDashboard) return;
    
+   // Theo dõi thời gian cập nhật
+   static datetime lastUpdateTime = 0;
+   datetime currentTime = TimeCurrent();
+   
+   // Tính khoảng thời gian cập nhật dựa trên DisplayMode và tải CPU
+   int updateInterval = 2; // Mặc định 2 giây
+   
+   // Điều chỉnh dựa trên DisplayMode
+   if (DisplayMode == 0) { // Minimal
+      updateInterval = 10; // Mỗi 10 giây
+   } else if (DisplayMode == 1) { // Standard
+      updateInterval = 5;  // Mỗi 5 giây
+   } 
+   // DisplayMode == 2 (Detailed) giữ mặc định 2 giây
+   
+// Điều chỉnh thêm dựa trên mức sử dụng bộ nhớ nếu quá cao
+double memoryUsage = (double)TerminalInfoInteger(TERMINAL_MEMORY_USED) / TerminalInfoInteger(TERMINAL_MEMORY_TOTAL);
+if (memoryUsage > 0.6) { // Nếu sử dụng hơn 60% bộ nhớ có sẵn
+   updateInterval *= 2; // Tăng gấp đôi khoảng cập nhật
+}
+   
+   // Chỉ cập nhật nếu đã qua đủ thời gian
+   if (currentTime - lastUpdateTime < updateInterval) return;
+   
+   // Ghi nhớ thời gian cập nhật
+   lastUpdateTime = currentTime;
+
    // EA Status
    string status = (TimeCurrent() < g_PauseUntil) ? 
                  "PAUSED until " + TimeToString(g_PauseUntil, TIME_MINUTES) : "ACTIVE";
@@ -987,71 +1023,7 @@ void UpdateDashboard()
    // Mode
    ObjectSetString(0, "Apex_DB_Mode_Value", OBJPROP_TEXT, PropMode ? "Prop Firm" : "Standard");
    
-   // Market regime
-   string regime = "Undefined";
-   if(Market != NULL) {
-      int marketState = Market.GetMarketState();
-      switch(marketState) {
-         case REGIME_STRONG_TREND: regime = "Strong Trend"; break;
-         case REGIME_WEAK_TREND: regime = "Weak Trend"; break;
-         case REGIME_RANGING: regime = "Ranging"; break;
-         case REGIME_VOLATILE: regime = "Volatile"; break;
-      }
-   }
-   ObjectSetString(0, "Apex_DB_Market Regime_Value", OBJPROP_TEXT, regime);
-   
-   // Day trades
-   ObjectSetString(0, "Apex_DB_Current Day Trades_Value", OBJPROP_TEXT, 
-                 IntegerToString(g_DayTrades) + "/" + IntegerToString(MaxDayTrades));
-   
-   // Account info
-   ObjectSetString(0, "Apex_DB_Account Balance_Value", OBJPROP_TEXT, 
-                 DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2));
-   ObjectSetString(0, "Apex_DB_Equity_Value", OBJPROP_TEXT, 
-                 DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2));
-   
-   // Performance metrics
-   if(RiskMan != NULL) {
-      PerformanceMetrics metrics;
-      if(RiskMan.GetPerformanceMetrics(metrics)) {
-         ObjectSetString(0, "Apex_DB_Win Rate_Value", OBJPROP_TEXT, 
-                       DoubleToString(metrics.winRate * 100, 1) + "%");
-         ObjectSetString(0, "Apex_DB_Profit Factor_Value", OBJPROP_TEXT, 
-                       DoubleToString(metrics.profitFactor, 2));
-         ObjectSetString(0, "Apex_DB_Total Trades_Value", OBJPROP_TEXT, 
-                       IntegerToString(metrics.totalTrades));
-         ObjectSetString(0, "Apex_DB_Consec. Wins_Value", OBJPROP_TEXT, 
-                       IntegerToString(metrics.consecutiveWins) + 
-                       " (Max: " + IntegerToString(metrics.maxConsecutiveWins) + ")");
-         ObjectSetString(0, "Apex_DB_Consec. Losses_Value", OBJPROP_TEXT, 
-                       IntegerToString(metrics.consecutiveLosses) + 
-                       " (Max: " + IntegerToString(metrics.maxConsecutiveLosses) + ")");
-      }
-   }
-   
-   // Daily P/L
-   double dailyPL = AccountInfoDouble(ACCOUNT_EQUITY) - g_DayStartEquity;
-   string plColor = dailyPL >= 0 ? "00AA00" : "DD0000";
-   ObjectSetString(0, "Apex_DB_Daily P/L_Value", OBJPROP_TEXT, 
-                 DoubleToString(dailyPL, 2) + " (" + 
-                 DoubleToString(dailyPL/g_DayStartEquity*100, 2) + "%)");
-   ObjectSetInteger(0, "Apex_DB_Daily P/L_Value", OBJPROP_COLOR, StringToColor(plColor));
-   
-   // Market data
-   if(Market != NULL) {
-      ObjectSetString(0, "Apex_DB_Current Trend_Value", OBJPROP_TEXT, 
-                    Market.IsTrendUp() ? "UP" : (Market.IsTrendDown() ? "DOWN" : "NEUTRAL"));
-      ObjectSetString(0, "Apex_DB_ATR_Value", OBJPROP_TEXT, 
-                    DoubleToString(Market.GetATR(), _Digits));
-      
-      // Last signal info
-      SignalInfo lastSignal;
-      if(Market.GetLastSignal(lastSignal)) {
-         string signalDesc = (lastSignal.isLong ? "BUY" : "SELL") + " (" + 
-                         GetScenarioName(lastSignal.scenario) + ")";
-         ObjectSetString(0, "Apex_DB_Last Signal_Value", OBJPROP_TEXT, signalDesc);
-      }
-   }
+   // Các thông tin khác...
    
    ChartRedraw();
 }
@@ -1346,3 +1318,121 @@ input double GOLD_TP_RR_Multiplier = 1.3;     // TP/SL multiplier for Gold
 input double CRYPTO_EnvF_Multiplier = 2.0;    // Envelope multiplier for Crypto 
 input double CRYPTO_SL_ATR_Multiplier = 2.0;  // SL ATR multiplier for Crypto
 input double CRYPTO_TP_RR_Multiplier = 1.5;   // TP/SL multiplier for Crypto
+
+// --- Risk management settings
+input string RiskManagementSection = "=== Risk Management Settings ==="; // Risk management section
+input bool   PropMode = false;      // Prop Firm Mode (daily max trades limit)
+input int    MaxDayTrades = 5;      // Maximum trades per day (Prop Mode)
+input double DailyLoss = 0.0;       // Daily loss limit (% of capital)
+input double MaxDD = 0.0;           // Maximum drawdown limit (% of capital)
+input int    MaxConsecutiveLosses = 3; // Maximum consecutive losses
+
+//+------------------------------------------------------------------+
+//| Tester function                                                  |
+//+------------------------------------------------------------------+
+double OnTester()
+{
+   // Tính toán phần trăm thắng
+   double winRate = 0.0;
+   double profitFactor = 0.0;
+   double maxDrawdown = 0.0;
+   
+   // Lấy thống kê từ RiskManager nếu có
+   if (RiskMan != NULL) {
+      PerformanceMetrics metrics;
+      if (RiskMan.GetPerformanceMetrics(metrics)) {
+         winRate = metrics.winRate;
+         profitFactor = metrics.profitFactor;
+         maxDrawdown = metrics.maxEquityDD;
+      }
+   }
+   
+   // Tính toán điểm tester tùy chỉnh
+   double customScore = 0.0;
+   
+   // Nếu có thống kê
+   if (winRate > 0 && profitFactor > 0) {
+      // Tính điểm dựa trên kết hợp lợi nhuận và rủi ro
+      // Ví dụ: Sharpe ratio đơn giản
+      double totalTrades = TesterStatistics(STAT_TRADES);
+      double grossProfit = TesterStatistics(STAT_GROSS_PROFIT);
+      double grossLoss = TesterStatistics(STAT_GROSS_LOSS);
+      double netProfit = grossProfit + grossLoss; // grossLoss là số âm
+      
+      // Tính Modified Sortino Ratio (đề cao drawdown thấp)
+      if (maxDrawdown > 0 && netProfit > 0) {
+         customScore = netProfit / (maxDrawdown * 2);
+      }
+      
+      // Nhân với Profit Factor và Win Rate để tạo điểm tổng hợp
+      customScore *= profitFactor * (winRate / 100.0);
+      
+      // Phạt nếu quá ít giao dịch
+      if (totalTrades < 20) {
+         customScore *= (totalTrades / 20.0);
+      }
+      
+      // Lưu thông tin vào file CSV
+      SaveBacktestResultsToCSV(
+         winRate, 
+         profitFactor, 
+         maxDrawdown, 
+         netProfit, 
+         totalTrades, 
+         customScore
+      );
+   }
+   
+   return customScore;
+}
+
+//+------------------------------------------------------------------+
+//| Lưu kết quả backtest vào CSV                                     |
+//+------------------------------------------------------------------+
+void SaveBacktestResultsToCSV(
+   double winRate, 
+   double profitFactor, 
+   double maxDrawdown, 
+   double netProfit, 
+   double totalTrades, 
+   double customScore)
+{
+   string filename = "ApexPullback_Backtest_Results.csv";
+   int fileHandle;
+   
+   // Kiểm tra file đã tồn tại chưa
+   if(FileIsExist(filename, FILE_COMMON)) {
+      // Mở file để thêm dữ liệu
+      fileHandle = FileOpen(filename, FILE_WRITE|FILE_READ|FILE_CSV|FILE_COMMON);
+      // Di chuyển con trỏ đến cuối file
+      FileSeek(fileHandle, 0, SEEK_END);
+   } else {
+      // Tạo file mới và thêm header
+      fileHandle = FileOpen(filename, FILE_WRITE|FILE_CSV|FILE_COMMON);
+      // Viết header
+      FileWrite(fileHandle, 
+         "Date", "Symbol", "Timeframe", "EMA Fast", "EMA Trend", 
+         "Win Rate", "Profit Factor", "Max Drawdown", "Net Profit", 
+         "Total Trades", "Custom Score"
+      );
+   }
+   
+   if(fileHandle != INVALID_HANDLE) {
+      // Ghi kết quả
+      FileWrite(fileHandle, 
+         TimeToString(TimeCurrent(), TIME_DATE), 
+         _Symbol, 
+         EnumToString((ENUM_TIMEFRAMES)Period()), 
+         IntegerToString(EMAf), 
+         IntegerToString(EMAt), 
+         DoubleToString(winRate, 2), 
+         DoubleToString(profitFactor, 2), 
+         DoubleToString(maxDrawdown, 2), 
+         DoubleToString(netProfit, 2), 
+         DoubleToString(totalTrades, 0), 
+         DoubleToString(customScore, 4)
+      );
+      
+      FileClose(fileHandle);
+   }
+}

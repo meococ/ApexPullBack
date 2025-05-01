@@ -1,0 +1,63 @@
+// Đây là bản sửa của hàm PlaceSellLimit
+ulong CTradeManager::PlaceSellLimit(double lotSize, double price, double stopLoss, double takeProfit, ENUM_ENTRY_SCENARIO scenario)
+{
+   // Validate inputs
+   if (lotSize <= 0) {
+      m_Logger.LogError("Invalid lot size for sell limit: " + DoubleToString(lotSize, 2));
+      return 0;
+   }
+   
+   // Format scenario name for comment
+   string scenarioName = "LIMIT_" + IntegerToString((int)scenario);
+   
+   // Create trade comment with prefix
+   string comment = m_CommentPrefix + "_" + scenarioName;
+   
+   // Normalize price
+   price = NormalizeDouble(price, m_Digits);
+   
+   // If stop loss wasn't provided, calculate based on ATR
+   if (stopLoss <= 0) {
+      double atr = GetValidATR();
+      if (atr > 0) {
+         stopLoss = price + (atr * m_SL_ATR);
+      } else {
+         // Fallback - use 1% as stop
+         stopLoss = price * 1.01;
+      }
+   }
+   
+   // Normalize stop loss
+   stopLoss = NormalizeDouble(stopLoss, m_Digits);
+   
+   // If take profit wasn't provided, calculate based on stop
+   if (takeProfit <= 0) {
+      double riskPoints = stopLoss - price;
+      // Use 2:1 reward-to-risk ratio by default
+      takeProfit = price - (riskPoints * m_TP_RR);
+   }
+   
+   // Normalize take profit
+   takeProfit = NormalizeDouble(takeProfit, m_Digits);
+   
+   // Log the order parameters
+   if (m_Logger.IsDebugEnabled()) {
+      m_Logger.LogDebug("Placing sell limit - Price: " + DoubleToString(price, m_Digits) + 
+                       ", SL: " + DoubleToString(stopLoss, m_Digits) + 
+                       ", TP: " + DoubleToString(takeProfit, m_Digits) + 
+                       ", Lot: " + DoubleToString(lotSize, 2) + 
+                       ", Scenario: " + scenarioName);
+   }
+   
+   ulong ticket = 0;
+   if (!m_Trade.SellLimit(lotSize, price, m_Symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, comment)) {
+      int error = GetLastError();
+      string errorMsg = IntegerToString(error) + ": " + ErrorDescription(error);
+      m_Logger.LogError("Failed to place sell limit order: " + errorMsg);
+      return 0;
+   }
+   
+   ticket = m_Trade.ResultOrder();
+   m_Logger.LogInfo("Sell limit placed successfully. Ticket: " + IntegerToString(ticket));
+   return ticket;
+}

@@ -63,7 +63,9 @@ enum ENUM_ENTRY_SCENARIO {
    SCENARIO_MOMENTUM_SHIFT,            // Momentum shift (combination of RSI, MACD)
    SCENARIO_LIQUIDITY_GRAB,            // Stop hunt/liquidity grab followed by reversal
    SCENARIO_BREAKOUT_FAILURE,          // Failed breakout returning to trend
-   SCENARIO_REVERSAL_CONFIRMATION      // Reversal confirmation after accumulation
+   SCENARIO_REVERSAL_CONFIRMATION,     // Reversal confirmation after accumulation
+   SCENARIO_BULLISH_PULLBACK,          // Bullish pullback pattern (added)
+   SCENARIO_BEARISH_PULLBACK           // Bearish pullback pattern (added)
 };
 
 //--- Entry Mode - Defines how trade entries are executed ---
@@ -90,12 +92,12 @@ enum ENUM_MARKET_REGIME {
 
 //--- Trailing Mode - Định nghĩa các phương pháp trailing stop ---
 enum ENUM_TRAILING_MODE {
-   TRAILING_NONE = 0,     // Không sử dụng trailing stop
-   TRAILING_ATR  = 1,     // Trailing stop dựa trên ATR
-   TRAILING_SWING = 2,    // Trailing stop dựa trên swing levels
-   TRAILING_EMA = 3,      // Trailing stop dựa trên EMA
-   TRAILING_PSAR = 4,     // Trailing stop dựa trên Parabolic SAR
-   TRAILING_SUPERTREND = 5 // Trailing stop dựa trên SuperTrend indicator
+   TRAILING_NONE = 0,             // Không sử dụng trailing stop
+   TRAILING_MODE_ATR = 1,         // Trailing stop dựa trên ATR
+   TRAILING_MODE_SWING = 2,       // Trailing stop dựa trên swing levels
+   TRAILING_MODE_EMA = 3,         // Trailing stop dựa trên EMA
+   TRAILING_MODE_PSAR = 4,        // Trailing stop dựa trên Parabolic SAR
+   TRAILING_MODE_SUPERTREND = 5   // Trailing stop dựa trên SuperTrend indicator
 };
 
 //--- Log Level - Controls the verbosity of logging ---
@@ -185,6 +187,8 @@ struct SignalInfo {
          case SCENARIO_LIQUIDITY_GRAB: return "Liquidity Grab";
          case SCENARIO_BREAKOUT_FAILURE: return "Breakout Failure";
          case SCENARIO_REVERSAL_CONFIRMATION: return "Reversal Confirmation";
+         case SCENARIO_BULLISH_PULLBACK: return "Bullish Pullback"; // Thêm vào
+         case SCENARIO_BEARISH_PULLBACK: return "Bearish Pullback"; // Thêm vào
          default: return "Unknown";
       }
    }
@@ -369,13 +373,13 @@ struct TradeStatistics {
    double maxDrawdown;           // Maximum drawdown experienced
    
    // Per scenario statistics
-   int tradesPerScenario[10];    // Number of trades per scenario
-   int winsPerScenario[10];      // Number of wins per scenario
-   double profitPerScenario[10]; // Profit per scenario
+   int tradesPerScenario[15];    // Number of trades per scenario (tăng lên để đủ cho các kịch bản)
+   int winsPerScenario[15];      // Number of wins per scenario
+   double profitPerScenario[15]; // Profit per scenario
    
    // Per market type statistics
-   int tradesPerMarket[3];       // Number of trades per market type
-   double profitPerMarket[3];    // Profit per market type
+   int tradesPerMarket[5];       // Number of trades per market type (tăng lên)
+   double profitPerMarket[5];    // Profit per market type
    
    // Constructor with default initialization
    TradeStatistics() {
@@ -492,6 +496,7 @@ struct SessionInfo {
       
       // Adjust for GMT offset
       currentHour = (dt.hour + gmtOffset) % 24;
+      if (currentHour < 0) currentHour += 24; // Đảm bảo giờ luôn dương
       
       // Asian session: approximately 00:00-09:00 GMT
       isAsianSession = (currentHour >= 0 && currentHour < 9);
@@ -676,6 +681,8 @@ string ScenarioToString(ENUM_ENTRY_SCENARIO scenario) {
       case SCENARIO_LIQUIDITY_GRAB: return "Liquidity Grab";
       case SCENARIO_BREAKOUT_FAILURE: return "Breakout Failure";
       case SCENARIO_REVERSAL_CONFIRMATION: return "Reversal Confirmation";
+      case SCENARIO_BULLISH_PULLBACK: return "Bullish Pullback"; // Thêm vào
+      case SCENARIO_BEARISH_PULLBACK: return "Bearish Pullback"; // Thêm vào
       default: return "Unknown Scenario";
    }
 }

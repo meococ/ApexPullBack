@@ -121,6 +121,7 @@ public:
    bool              GetPerformanceMetrics(PerformanceMetrics &metrics);
    bool              GetScenarioStats(ScenarioStats &stats[]);
    void              SetParameters(double slAtrMultiplier);
+   bool              IsMaxDrawdownExceeded(double maxDDPercent);
 
    //--- Statistics Reporting ---
    void              PrintStats();
@@ -704,4 +705,12 @@ bool CRiskManager::LoadStatsFromFile(string filename)
         m_Logger.LogError("Error opening statistics file for reading: " + filename + ", Error: " + IntegerToString(GetLastError()));
         return false;
     }
+}
+
+//+------------------------------------------------------------------+
+//| Check if maximum drawdown exceeded                               |
+//+------------------------------------------------------------------+
+bool CRiskManager::IsMaxDrawdownExceeded(double maxDDPercent)
+{
+    return m_stats.maxEquityDrawdown >= maxDDPercent;
 }

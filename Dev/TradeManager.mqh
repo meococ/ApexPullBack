@@ -46,6 +46,7 @@ private:
    // ATR and SL parameters
    double               m_ATR;                   // Current ATR value
    double               m_SL_ATR;                // ATR multiplier for stop loss
+   double               m_TP_RR;                 // Risk-reward ratio for take profit
    datetime             m_LastCachedATRTime;     // Time of last ATR cache update
    double               m_CachedATR;             // Cached ATR value
 
@@ -128,8 +129,8 @@ private:
    double               GetValidATR();
    double               GetValidEMAFast();
    double               GetValidEMATrend();
-   double               FindRecentSwingLevel(bool isLong);
    int                  GetVolumeDigits();
+   double               FindRecentSwingLevel(bool isLong);
    
    // Advanced features
    bool                 AdjustAdaptiveTrailingStop(ulong ticket, bool isLong, double currentPrice, double stopLoss);
@@ -164,6 +165,7 @@ public:
    ulong                ExecuteSellOrder(double lotSize, double stopLoss, double takeProfit, ENUM_ENTRY_SCENARIO scenario);
    ulong                PlaceBuyLimit(double lotSize, double price, double stopLoss, double takeProfit, ENUM_ENTRY_SCENARIO scenario);
    ulong                PlaceSellLimit(double lotSize, double price, double stopLoss, double takeProfit, ENUM_ENTRY_SCENARIO scenario);
+   bool                 OpenPosition(bool isLong, double entryPrice, double stopLoss, double takeProfit, double riskAmount, string comment = "");
    bool                 PositionClose(ulong ticket);
    bool                 PositionClosePartial(ulong ticket, double volume);
    void                 ProcessTradeTransaction(const MqlTradeTransaction& trans,
@@ -197,6 +199,7 @@ public:
    int                  GetMagicNumber() const { return m_MagicNumber; }
    int                  GetConsecutiveLosses() const { return m_ConsecutiveLosses; }
    CLogger*             GetLogger() const { return m_Logger; }
+   double               CalculateTrailingStop(bool isLong, double currentPrice);
 };
 
 //+------------------------------------------------------------------+
@@ -217,6 +220,8 @@ CTradeManager::CTradeManager(void)
    m_AdxThreshold = 20.0;
    m_AdxStrongThreshold = 30.0;
    m_BreakEven_R = 1.0;
+   m_SL_ATR = 1.5;       // Default ATR multiplier for stop loss
+   m_TP_RR = 2.0;        // Default risk-reward ratio for take profit
 
    // Set default take profit parameters
    m_UseMultipleTargets = true;
@@ -363,6 +368,19 @@ void CTradeManager::SetHedgingParameters(bool useHedging, double hedgingFibLevel
          "Hedging enabled: Fib level=%.2f, Volume ratio=%.2f", 
          m_HedgingFibLevel, m_HedgingVolume
       ));
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Set take profit risk-reward ratio                                |
+//+------------------------------------------------------------------+
+void CTradeManager::SetTakeProfitRrRatio(double tpRrRatio)
+{
+   // Đảm bảo tỷ lệ risk:reward hợp lý (tối thiểu 0.5, tối đa 5.0)
+   m_TP_RR = MathMax(0.5, MathMin(tpRrRatio, 5.0));
+   
+   if (m_Logger != NULL) {
+      m_Logger.LogInfo(StringFormat("Take Profit Risk-Reward ratio set to %.2f", m_TP_RR));
    }
 }
 
@@ -602,12 +620,12 @@ void CTradeManager::ManageOpenPositions(ENUM_MARKET_REGIME marketRegime)
                
                if (m_Trade.PositionModify(ticket, newStopLoss, currentTakeProfit)) {
                   m_Logger.LogInfo(StringFormat(
-                     "Updated trailing stop (#%d): %.5f", 
+                     "Updated trailing stop (#%llu): %.5f", 
                      ticket, newStopLoss
                   ));
                } else {
                   m_Logger.LogWarning(StringFormat(
-                     "Failed to update trailing stop (#%d): Error %d", 
+                     "Failed to update trailing stop (#%llu): Error %d", 
                      ticket, GetLastError()
                   ));
                }
@@ -694,7 +712,7 @@ void CTradeManager::ManagePartialClose(int targetIndex, double currentPrice, boo
          if (PositionClosePartial(ticket, closeVolume))
          {
             m_Logger.LogInfo(StringFormat(
-               "TP1 Hit (#%d): Closed %.2f lots (%.1f%%)", 
+               "TP1 Hit (#%llu): Closed %.2f lots (%.1f%%)", 
                ticket, closeVolume, (double)target.tp1_percent
             ));
             
@@ -710,7 +728,7 @@ void CTradeManager::ManagePartialClose(int targetIndex, double currentPrice, boo
          // Close full position if partial would be >= current volume
          if (PositionClose(ticket)) {
             m_Logger.LogInfo(StringFormat(
-               "TP1 Hit (#%d): Closed full position %.2f lots", 
+               "TP1 Hit (#%llu): Closed full position %.2f lots", 
                ticket, currentVolume
             ));
             RemoveTargetInfo(targetIndex);
@@ -742,7 +760,7 @@ void CTradeManager::ManagePartialClose(int targetIndex, double currentPrice, boo
          if (PositionClosePartial(ticket, closeVolume))
          {
             m_Logger.LogInfo(StringFormat(
-               "TP2 Hit (#%d): Closed %.2f lots (%.1f%%)", 
+               "TP2 Hit (#%llu): Closed %.2f lots (%.1f%%)", 
                ticket, closeVolume, (double)target.tp2_percent
             ));
             
@@ -761,7 +779,7 @@ void CTradeManager::ManagePartialClose(int targetIndex, double currentPrice, boo
       else if (closeVolume >= currentVolume) {
          if (PositionClose(ticket)) {
             m_Logger.LogInfo(StringFormat(
-               "TP2 Hit (#%d): Closed full position %.2f lots", 
+               "TP2 Hit (#%llu): Closed full position %.2f lots", 
                ticket, currentVolume
             ));
             RemoveTargetInfo(targetIndex);
@@ -784,7 +802,7 @@ void CTradeManager::ManagePartialClose(int targetIndex, double currentPrice, boo
       if (PositionClose(ticket))
       {
          m_Logger.LogInfo(StringFormat(
-            "TP3 Hit (#%d): Closed remaining position", 
+            "TP3 Hit (#%llu): Closed remaining position", 
             ticket
          ));
          RemoveTargetInfo(targetIndex);
@@ -843,22 +861,46 @@ double CTradeManager::CalculateSwingTrailingStop(bool isLong, double atr)
 //+------------------------------------------------------------------+
 double CTradeManager::CalculateSuperTrendTrailingStop(bool isLong, double currentPrice)
 {
-   // This is a placeholder for SuperTrend calculation
-   // Proper implementation requires either:
-   // 1. Using a custom SuperTrend indicator
-   // 2. Calculating SuperTrend values directly
+   // Implementation for SuperTrend trailing stop calculation
+   // This should be your SuperTrend calculation logic
    
-   // SuperTrend calculation basics:
-   // 1. Calculate ATR
-   // 2. Calculate basic upper/lower bands: (High+Low)/2 ± Factor*ATR
-   // 3. Calculate final upper/lower bands based on previous values
-   // 4. Determine SuperTrend line based on trend direction
+   // For now, we'll just use a simple implementation
+   if (m_HandleSuperTrend == INVALID_HANDLE) {
+      m_Logger.LogWarning("SuperTrend handle is invalid");
+      return 0;
+   }
+
+   // Get SuperTrend values
+   double superTrend[];
+   ArraySetAsSeries(superTrend, true);
    
-   // Fall back to ATR trailing if SuperTrend isn't available
-   double atr = GetValidATR();
-   if (atr <= 0) return 0;
+   // Try to get SuperTrend value with error handling
+   if (CopyBuffer(m_HandleSuperTrend, 0, 0, 1, superTrend) <= 0) {
+      int error = GetLastError();
+      m_Logger.LogWarning(StringFormat(
+         "Failed to copy SuperTrend buffer: Error %d", 
+         error
+      ));
+      
+      // Try once more after resetting error
+      ResetLastError();
+      if (CopyBuffer(m_HandleSuperTrend, 0, 0, 1, superTrend) <= 0) {
+         return 0;
+      }
+   }
    
-   return CalculateAtrTrailingStop(isLong, currentPrice, atr);
+   // For long positions, only use SuperTrend if it's below price
+   // For short positions, only use SuperTrend if it's above price
+   currentPrice = isLong ? 
+                       SymbolInfoDouble(m_Symbol, SYMBOL_BID) : 
+                       SymbolInfoDouble(m_Symbol, SYMBOL_ASK);
+   
+   if ((isLong && superTrend[0] >= currentPrice) || 
+       (!isLong && superTrend[0] <= currentPrice)) {
+      return 0; // SuperTrend has switched sides, don't use it for trailing
+   }
+   
+   return NormalizeDouble(superTrend[0], m_Digits);
 }
 
 //+------------------------------------------------------------------+
@@ -983,7 +1025,7 @@ void CTradeManager::ManageStrongTrendTrailing(ulong ticket, bool isLong, double 
          
          if (m_Trade.PositionModify(ticket, desiredSL, currentTP)) {
             m_Logger.LogInfo(StringFormat(
-               "Strong trend trailing: Updated SL for #%d to %.5f (ATR: %.5f, Mult: %.1f)",
+               "Strong trend trailing: Updated SL for #%llu to %.5f (ATR: %.5f, Mult: %.1f)",
                ticket, desiredSL, atr, adjustedMul
             ));
          } else {
@@ -1045,7 +1087,7 @@ void CTradeManager::ManageWeakTrendTrailing(ulong ticket, bool isLong, double cu
       shouldUpdate = (stopLoss == 0 || newStopLoss < stopLoss) && (newStopLoss > currentPrice);
    }
    
-   if (shouldUpdate && newStopLoss > 0) {
+   if (shouldUpdate) {
       // Apply new stop loss
       if (m_Position.SelectByTicket(ticket)) {
          double currentTP = m_Position.TakeProfit();
@@ -1053,7 +1095,7 @@ void CTradeManager::ManageWeakTrendTrailing(ulong ticket, bool isLong, double cu
          
          if (m_Trade.PositionModify(ticket, newStopLoss, currentTP)) {
             m_Logger.LogInfo(StringFormat(
-               "Weak trend trailing (%s): Updated SL for #%d to %.5f",
+               "Weak trend trailing (%s): Updated SL for #%llu to %.5f",
                methodUsed, ticket, newStopLoss
             ));
          }
@@ -1089,7 +1131,7 @@ void CTradeManager::ManageVolatileTrailing(ulong ticket, bool isLong, double cur
       TargetInfo* target = m_Targets.At(idx);
       if (target != NULL && target.risk_points > 0) {
          double currentProfitPoints = isLong ?
-                                    (currentPrice - entryPrice) / _Point :
+                                    (currentPrice - entryPrice) / _Point : 
                                     (entryPrice - currentPrice) / _Point;
                                     
          // Use a higher threshold (1.5R) for volatile markets before setting breakeven
@@ -1098,7 +1140,7 @@ void CTradeManager::ManageVolatileTrailing(ulong ticket, bool isLong, double cur
             if ((isLong && stopLoss < entryPrice) || (!isLong && (stopLoss > entryPrice || stopLoss == 0))) {
                if (SetBreakEvenStop(ticket, 10)) { // Use wider buffer in volatile conditions
                   m_Logger.LogInfo(StringFormat(
-                     "Set breakeven+10 in volatile market for #%d (%.1f R profit)",
+                     "Set breakeven+10 in volatile market for #%llu (%.1f R profit)",
                      ticket, currentProfitPoints / target.risk_points
                   ));
                   return;
@@ -1125,7 +1167,7 @@ void CTradeManager::ManageVolatileTrailing(ulong ticket, bool isLong, double cur
          
          if (m_Trade.PositionModify(ticket, newStopLoss, currentTP)) {
             m_Logger.LogInfo(StringFormat(
-               "Volatile market trailing: Updated SL for #%d to %.5f (ATR: %.5f, Mult: %.1f)",
+               "Volatile market trailing: Updated SL for #%llu to %.5f (ATR: %.5f, Mult: %.1f)",
                ticket, newStopLoss, atr, atrMultiplier
             ));
          }
@@ -1152,7 +1194,7 @@ void CTradeManager::ManageRangingTrailing(ulong ticket, bool isLong, double curr
       TargetInfo* target = m_Targets.At(idx);
       if (target != NULL && target.risk_points > 0) {
          double currentProfitPoints = isLong ?
-                                    (currentPrice - entryPrice) / _Point :
+                                    (currentPrice - entryPrice) / _Point : 
                                     (entryPrice - currentPrice) / _Point;
                                     
          // Use a lower threshold (0.7R) for ranging markets before setting breakeven
@@ -1161,7 +1203,7 @@ void CTradeManager::ManageRangingTrailing(ulong ticket, bool isLong, double curr
             if ((isLong && stopLoss < entryPrice) || (!isLong && (stopLoss > entryPrice || stopLoss == 0))) {
                if (SetBreakEvenStop(ticket, 2)) { // Use tight buffer in ranging conditions
                   m_Logger.LogInfo(StringFormat(
-                     "Set breakeven+2 in ranging market for #%d (%.1f R profit)",
+                     "Set breakeven+2 in ranging market for #%llu (%.1f R profit)",
                      ticket, currentProfitPoints / target.risk_points
                   ));
                   return;
@@ -1197,7 +1239,7 @@ void CTradeManager::ManageRangingTrailing(ulong ticket, bool isLong, double curr
          
          if (m_Trade.PositionModify(ticket, newStopLoss, currentTP)) {
             m_Logger.LogInfo(StringFormat(
-               "Ranging market trailing: Updated SL for #%d to %.5f (ATR: %.5f, Mult: %.1f)",
+               "Ranging market trailing: Updated SL for #%llu to %.5f (ATR: %.5f, Mult: %.1f)",
                ticket, newStopLoss, atr, atrMultiplier
             ));
          }
@@ -1429,10 +1471,8 @@ int CTradeManager::GetVolumeDigits()
 bool CTradeManager::SetBreakEvenStop(ulong ticket, int offsetPoints)
 {
    if (!m_Position.SelectByTicket(ticket)) {
-      m_Logger.LogWarning(StringFormat(
-         "Cannot set breakeven - position #%d not found", 
-         ticket
-      ));
+      string errorMsg = StringFormat("Cannot set breakeven - position #%llu not found", ticket);
+      m_Logger.LogError(errorMsg);
       return false;
    }
    
@@ -1450,7 +1490,7 @@ bool CTradeManager::SetBreakEvenStop(ulong ticket, int offsetPoints)
    
    if (m_Trade.PositionModify(ticket, newSL, currentTP)) {
       m_Logger.LogInfo(StringFormat(
-         "Set breakeven stop for #%d at %.5f (offset: %d points)",
+         "Set breakeven stop for #%llu at %.5f (offset: %d points)",
          ticket, newSL, offsetPoints
       ));
       
@@ -1463,8 +1503,8 @@ bool CTradeManager::SetBreakEvenStop(ulong ticket, int offsetPoints)
       
       return true;
    } else {
-      m_Logger.LogWarning(StringFormat(
-         "Failed to set breakeven for #%d: Error %d",
+      m_Logger.LogError(StringFormat(
+         "Failed to set breakeven for #%llu: Error %d",
          ticket, GetLastError()
       ));
    }
@@ -1568,6 +1608,7 @@ void CTradeManager::CheckAndApplyHedging()
    
    // Loop through all open positions
    for (int i = PositionsTotal() - 1; i >= 0; i--) {
+      // Select position by index
       if (!m_Position.SelectByIndex(i)) continue;
       
       // Only consider our positions on the managed symbol
@@ -1604,7 +1645,7 @@ void CTradeManager::CheckAndApplyHedging()
          // If price has retraced to the Fib level, open a hedge
          if (currentPrice < fibLevel) {
             m_Logger.LogInfo(StringFormat(
-               "Hedge trigger for BUY #%d: Price %.5f < Fib %.5f (%.1f%%)",
+               "Hedge trigger for BUY #%llu: Price %.5f < Fib %.5f (%.1f%%)",
                ticket, currentPrice, fibLevel, m_HedgingFibLevel * 100
             ));
             
@@ -1626,7 +1667,7 @@ void CTradeManager::CheckAndApplyHedging()
          // If price has retraced to the Fib level, open a hedge
          if (currentPrice > fibLevel) {
             m_Logger.LogInfo(StringFormat(
-               "Hedge trigger for SELL #%d: Price %.5f > Fib %.5f (%.1f%%)",
+               "Hedge trigger for SELL #%llu: Price %.5f > Fib %.5f (%.1f%%)",
                ticket, currentPrice, fibLevel, m_HedgingFibLevel * 100
             ));
             
@@ -1696,7 +1737,7 @@ bool CTradeManager::AdjustAdaptiveTrailingStop(ulong ticket, bool isLong, double
       
       if (m_Trade.PositionModify(ticket, newStopLoss, takeProfit)) {
          m_Logger.LogInfo(StringFormat(
-            "Adaptive trailing stop: Updated SL for #%d to %.5f (ADX: %.1f, Mult: %.1f)",
+            "Adaptive trailing stop: Updated SL for #%llu to %.5f (ADX: %.1f, Mult: %.1f)",
             ticket, newStopLoss, adxValue, trailingAtrMultiplier
          ));
          return true;
@@ -1776,14 +1817,14 @@ bool CTradeManager::CheckEmergencyExit(ulong ticket)
    if (exitCondition) {
       if (PositionClose(ticket)) {
          m_Logger.LogInfo(StringFormat(
-            "EMERGENCY EXIT triggered for #%d - RSI: %.1f %s", 
+            "EMERGENCY EXIT triggered for #%llu - RSI: %.1f %s", 
             ticket, rsiValue,
             isLong ? "(extreme overbought)" : "(extreme oversold)"
          ));
          return true;
       } else {
          m_Logger.LogError(StringFormat(
-            "Failed to execute emergency exit for #%d. Error: %d",
+            "Failed to execute emergency exit for #%llu. Error: %d",
             ticket, GetLastError()
          ));
       }
@@ -1797,111 +1838,145 @@ bool CTradeManager::CheckEmergencyExit(ulong ticket)
 //+------------------------------------------------------------------+
 ulong CTradeManager::ExecuteBuyOrder(double lotSize, double stopLoss, double takeProfit, ENUM_ENTRY_SCENARIO scenario)
 {
-   // Validate inputs
+   // Kiểm tra đầu vào
    if (lotSize <= 0) {
       m_Logger.LogError("Invalid lot size for buy order: " + DoubleToString(lotSize, 2));
       return 0;
    }
    
-   // Format scenario name for comment
+   // Định dạng tên kịch bản cho comment
    string scenarioName = "";
-   switch (scenario) {
-      case SCENARIO_BULLISH_PULLBACK:
-         scenarioName = "PULL_BULL";
-         break;
-      case SCENARIO_FIBONACCI_PULLBACK:
-         scenarioName = "FIB_BULL";
-         break;
-      case SCENARIO_HARMONIC_PATTERN:
-         scenarioName = "HARM_BULL";
-         break;
-      case SCENARIO_MOMENTUM_SHIFT:
-         scenarioName = "MOM_BULL";
-         break;
-      case SCENARIO_LIQUIDITY_GRAB:
-         scenarioName = "LIQ_BULL";
-         break;
-      case SCENARIO_BREAKOUT_FAILURE:
-         scenarioName = "BRK_BULL";
-         break;
-      default:
-         scenarioName = "BUY";
-         break;
+   
+   // Sử dụng if-else thay vì switch nếu có vấn đề với hằng số
+   if(scenario == SCENARIO_BULLISH_PULLBACK) {
+      scenarioName = "PULL_BULL";
+   }
+   else if(scenario == SCENARIO_FIBONACCI_PULLBACK) {
+      scenarioName = "FIB_BULL";
+   }
+   else if(scenario == SCENARIO_HARMONIC_PATTERN) {
+      scenarioName = "HARM_BULL";
+   }
+   else if(scenario == SCENARIO_MOMENTUM_SHIFT) {
+      scenarioName = "MOM_BULL";
+   }
+   else if(scenario == SCENARIO_LIQUIDITY_GRAB) {
+      scenarioName = "LIQ_BULL";
+   }
+   else if(scenario == SCENARIO_BREAKOUT_FAILURE) {
+      scenarioName = "BRK_BULL";
+   }
+   else {
+      scenarioName = "BUY";
    }
    
-   // Create trade comment with prefix
+   // Tạo comment giao dịch với tiền tố
    string comment = m_CommentPrefix + "_" + scenarioName;
    
-   // Get current Ask price
+   // Lấy giá Ask hiện tại
    double price = SymbolInfoDouble(m_Symbol, SYMBOL_ASK);
    
-   // If stop loss wasn't provided, calculate based on ATR
+   // Nếu không cung cấp stop loss, tính toán dựa trên ATR
    if (stopLoss <= 0) {
       double atr = GetValidATR();
       if (atr > 0) {
          stopLoss = price - (atr * m_SL_ATR);
       } else {
-         // Fallback - use 1% as stop
+         // Phương án dự phòng - sử dụng 1% làm stop
          stopLoss = price * 0.99;
       }
    }
    
-   // Normalize stop loss
+   // Chuẩn hóa stop loss
    stopLoss = NormalizeDouble(stopLoss, m_Digits);
    
-   // If take profit wasn't provided, calculate based on stop
+   // Nếu không cung cấp take profit, tính toán dựa trên stop
    if (takeProfit <= 0) {
       double riskPoints = price - stopLoss;
-      // Use 2:1 reward-to-risk ratio by default
+      // Sử dụng tỷ lệ rủi ro-lợi nhuận 1:2 mặc định
       takeProfit = price + (riskPoints * 2.0);
    }
    
-   // Normalize take profit
+   // Chuẩn hóa take profit
    takeProfit = NormalizeDouble(takeProfit, m_Digits);
    
-   // Execute the order
+   // Thực thi lệnh
    if (!m_Trade.Buy(lotSize, m_Symbol, 0, stopLoss, takeProfit, comment)) {
-      m_Logger.LogError(StringFormat(
-         "Failed to execute buy order: Error %d (%s)",
-         m_Trade.ResultRetcode(), m_Trade.ResultRetcodeDescription()
-      ));
+      // Xử lý lỗi chi tiết
+      uint errorCode = m_Trade.ResultRetcode();
+      string errorDesc = m_Trade.ResultRetcodeDescription();
+      
+      // Log lỗi cụ thể
+      string errorMessage = StringFormat(
+         "Failed to execute buy order: Error %d (%s)", 
+         errorCode, errorDesc
+      );
+      m_Logger.LogError(errorMessage);
+      
+      // Sử dụng if-else thay vì switch cho mã lỗi
+      if(errorCode == TRADE_RETCODE_REQUOTE) {
+         m_Logger.LogWarning("Buy order requoted - consider increasing deviation or retry");
+      }
+      else if(errorCode == TRADE_RETCODE_MARKET_CLOSED) {
+         m_Logger.LogError("Market closed - cannot place buy order");
+      }
+      else if(errorCode == TRADE_RETCODE_INVALID_STOPS) {
+         m_Logger.LogError(StringFormat(
+            "Invalid stop levels: SL=%.5f, TP=%.5f, Current=%.5f", 
+            stopLoss, takeProfit, price
+         ));
+      }
+      else if(errorCode == TRADE_RETCODE_INVALID_VOLUME) {
+         m_Logger.LogError(StringFormat(
+            "Invalid volume: %.2f (Min=%.2f, Max=%.2f, Step=%.2f)", 
+            lotSize, 
+            SymbolInfoDouble(m_Symbol, SYMBOL_VOLUME_MIN),
+            SymbolInfoDouble(m_Symbol, SYMBOL_VOLUME_MAX),
+            SymbolInfoDouble(m_Symbol, SYMBOL_VOLUME_STEP)
+         ));
+      }
+      else if(errorCode == TRADE_RETCODE_NO_MONEY) {
+         m_Logger.LogError("Not enough money to execute buy order");
+      }
+      // Các trường hợp khác nếu cần
+      
       return 0;
    }
    
-   // Get the ticket number
+   // Lấy số ticket - THÊM DÒNG NÀY
    ulong ticket = m_Trade.ResultOrder();
    
-   // Log the trade
+   // Log giao dịch
    m_Logger.LogInfo(StringFormat(
-      "BUY order executed (#%d): %.2f lots at %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
+      "BUY order executed (#%llu): %.2f lots at %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
       ticket, lotSize, price, stopLoss, takeProfit, scenarioName
    ));
    
-   // Create target info
+   // Tạo thông tin mục tiêu
    if (ticket > 0) {
       TargetInfo* target = new TargetInfo();
       target.ticket = ticket;
       target.entry_price = price;
       target.risk_points = (int)((price - stopLoss) / _Point);
       
-      // Set take profit levels if multiple targets are enabled
+      // Thiết lập các mức take profit nếu sử dụng nhiều mục tiêu
       if (m_UseMultipleTargets) {
-         // Calculate take profit levels based on risk
+         // Tính toán các mức take profit dựa trên rủi ro
          double risk = price - stopLoss;
          
-         // Distribute according to percentages
+         // Phân phối theo phần trăm
          target.tp1_percent = m_TP1_Percent;
          target.tp2_percent = m_TP2_Percent;
          target.tp3_percent = m_TP3_Percent;
          
-         // Set TP levels at different risk multiples
+         // Thiết lập mức TP ở các bội số rủi ro khác nhau
          target.tp1 = price + risk * 1.0;  // 1R
          target.tp2 = price + risk * 2.0;  // 2R
          target.tp3 = price + risk * 3.0;  // 3R
          
-         // For strong patterns, consider setting more aggressive targets
+         // Đối với mô hình mạnh, cân nhắc thiết lập mục tiêu tích cực hơn
          if (scenario == SCENARIO_HARMONIC_PATTERN || scenario == SCENARIO_FIBONACCI_PULLBACK) {
-            target.tp3 = price + risk * 3.5;  // 3.5R for high-quality patterns
+            target.tp3 = price + risk * 3.5;  // 3.5R cho mô hình chất lượng cao
          }
       }
       
@@ -1980,10 +2055,43 @@ ulong CTradeManager::ExecuteSellOrder(double lotSize, double stopLoss, double ta
    
    // Execute the order
    if (!m_Trade.Sell(lotSize, m_Symbol, 0, stopLoss, takeProfit, comment)) {
-      m_Logger.LogError(StringFormat(
-         "Failed to execute sell order: Error %d (%s)",
-         m_Trade.ResultRetcode(), m_Trade.ResultRetcodeDescription()
-      ));
+      // Xử lý lỗi chi tiết
+      uint errorCode = m_Trade.ResultRetcode();
+      string errorDesc = m_Trade.ResultRetcodeDescription();
+      
+      // Log lỗi cụ thể
+      string errorMessage = StringFormat(
+         "Failed to execute sell order: Error %d (%s)", 
+         errorCode, errorDesc
+      );
+      m_Logger.LogError(errorMessage);
+      
+      // Xử lý một số lỗi phổ biến
+      if(errorCode == TRADE_RETCODE_REQUOTE) {
+         m_Logger.LogWarning("Sell order requoted - consider increasing deviation or retry");
+      }
+      else if(errorCode == TRADE_RETCODE_MARKET_CLOSED) {
+         m_Logger.LogError("Market closed - cannot place sell order");
+      }
+      else if(errorCode == TRADE_RETCODE_INVALID_STOPS) {
+         m_Logger.LogError(StringFormat(
+            "Invalid stop levels: SL=%.5f, TP=%.5f, Current=%.5f", 
+            stopLoss, takeProfit, price
+         ));
+      }
+      else if(errorCode == TRADE_RETCODE_INVALID_VOLUME) {
+         m_Logger.LogError(StringFormat(
+            "Invalid volume: %.2f (Min=%.2f, Max=%.2f, Step=%.2f)", 
+            lotSize, 
+            SymbolInfoDouble(m_Symbol, SYMBOL_VOLUME_MIN),
+            SymbolInfoDouble(m_Symbol, SYMBOL_VOLUME_MAX),
+            SymbolInfoDouble(m_Symbol, SYMBOL_VOLUME_STEP)
+         ));
+      }
+      else if(errorCode == TRADE_RETCODE_NO_MONEY) {
+         m_Logger.LogError("Not enough money to execute sell order");
+      }
+      
       return 0;
    }
    
@@ -1992,7 +2100,7 @@ ulong CTradeManager::ExecuteSellOrder(double lotSize, double stopLoss, double ta
    
    // Log the trade
    m_Logger.LogInfo(StringFormat(
-      "SELL order executed (#%d): %.2f lots at %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
+      "SELL order executed (#%llu): %.2f lots at %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
       ticket, lotSize, price, stopLoss, takeProfit, scenarioName
    ));
    
@@ -2088,7 +2196,7 @@ ulong CTradeManager::PlaceBuyLimit(double lotSize, double price, double stopLoss
    
    // Log the trade
    m_Logger.LogInfo(StringFormat(
-      "BUY LIMIT placed (#%d): %.2f lots at %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
+      "BUY LIMIT placed (#%llu): %.2f lots at %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
       ticket, lotSize, price, stopLoss, takeProfit, scenarioName
    ));
    
@@ -2133,218 +2241,215 @@ ulong CTradeManager::PlaceSellLimit(double lotSize, double price, double stopLos
    if (takeProfit <= 0) {
       double riskPoints = stopLoss - price;
       // Use 2:1 reward-to-risk ratio by default
-      takeProfit = price - (riskPointsbool CMarketMonitor::DetectBreakoutFailure(bool isUptrend, double &entryPrice, double &stopLevel,
-                                          double &quality, string &description)
+      takeProfit = price - (riskPoints * 2.0);
+   }
+   
+   // Normalize take profit
+   takeProfit = NormalizeDouble(takeProfit, m_Digits);
+   
+   // Place the limit order
+   if (!m_Trade.SellLimit(lotSize, price, m_Symbol, stopLoss, takeProfit, 0, 0, comment)) {
+      m_Logger.LogError(StringFormat(
+         "Failed to place sell limit: Error %d (%s)",
+         m_Trade.ResultRetcode(), m_Trade.ResultRetcodeDescription()
+      ));
+      return 0;
+   }
+   
+   // Get the ticket number
+   ulong ticket = m_Trade.ResultOrder();
+   
+   // Log the trade
+   m_Logger.LogInfo(StringFormat(
+      "SELL LIMIT placed (#%llu): %.2f lots at %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
+      ticket, lotSize, price, stopLoss, takeProfit, scenarioName
+   ));
+   
+   return ticket;
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Trailing Stop                                          |
+//+------------------------------------------------------------------+
+double CTradeManager::CalculateTrailingStop(bool isLong, double currentPrice)
 {
-   // Khởi tạo
-   entryPrice = 0; stopLevel = 0; quality = 0;
-   description = "";
-   
-   // Tham số (nên chuyển thành input parameters)
-   double SL_ATR_BUFFER = 0.3;              // Buffer cho SL (tính bằng ATR)
-   double MIN_BREAKOUT_ATR = 0.3;           // Kích thước tối thiểu của breakout (tính bằng ATR)
-   double MIN_FAILURE_ATR = 0.5;            // Độ sâu tối thiểu của failure (tính bằng ATR)
-   int MAX_BREAKOUT_AGE = 15;               // Tuổi tối đa của breakout (số nến)
-   int MAX_LOOKBACK = 100;                  // Số nến tối đa để phân tích
-   
-   // Lấy dữ liệu giá
-   double high[], low[], close[], open[];
-   ArraySetAsSeries(high, true);
-   ArraySetAsSeries(low, true);
-   ArraySetAsSeries(close, true);
-   ArraySetAsSeries(open, true);
-   
-   if (CopyHigh(m_Symbol, m_EntryTimeframe, 0, MAX_LOOKBACK, high) <= 0 ||
-       CopyLow(m_Symbol, m_EntryTimeframe, 0, MAX_LOOKBACK, low) <= 0 ||
-       CopyClose(m_Symbol, m_EntryTimeframe, 0, MAX_LOOKBACK, close) <= 0 ||
-       CopyOpen(m_Symbol, m_EntryTimeframe, 0, MAX_LOOKBACK, open) <= 0) {
-      m_Logger.LogError("Không thể sao chép dữ liệu giá cho phân tích Breakout Failure");
+   switch(m_TrailingMode) {
+      case TRAILING_MODE_ATR:
+         return CalculateAtrTrailingStop(isLong, currentPrice, GetValidATR());
+      case TRAILING_MODE_SWING:
+         return CalculateSwingTrailingStop(isLong, GetValidATR());
+      case TRAILING_MODE_EMA:
+         return CalculateEmaTrailingStop(isLong);
+      case TRAILING_MODE_PSAR:
+         return CalculatePsarTrailingStop(isLong);
+      case TRAILING_MODE_SUPERTREND:
+         return CalculateSuperTrendTrailingStop(isLong, currentPrice);
+      default:
+         return 0.0; // Không trailing
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Open Position                                                    |
+//+------------------------------------------------------------------+
+bool CTradeManager::OpenPosition(bool isLong, double entryPrice, double stopLoss, double takeProfit, double riskAmount, string comment)
+{
+   // Validate inputs
+   if (riskAmount <= 0) {
+      m_Logger.LogError("Invalid risk amount for open position: " + DoubleToString(riskAmount, 2));
       return false;
    }
    
-   // BƯỚC 1: Tìm vùng tích lũy (consolidation zone)
-   double zoneHigh = 0, zoneLow = 0;
-   bool foundZone = FindConsolidationZone(high, low, zoneHigh, zoneLow, 5, 20);
+   // Normalize price levels
+   entryPrice = NormalizeDouble(entryPrice, m_Digits);
+   stopLoss = NormalizeDouble(stopLoss, m_Digits);
+   takeProfit = NormalizeDouble(takeProfit, m_Digits);
    
-   if (!foundZone || zoneHigh <= 0 || zoneLow <= 0 || zoneHigh <= zoneLow) {
-      m_Logger.LogDebug("Không tìm thấy vùng tích lũy rõ ràng");
+   // Calculate lot size based on risk amount
+   double lotSize = riskAmount / (MathAbs(entryPrice - stopLoss) * SymbolInfoDouble(m_Symbol, SYMBOL_POINT));
+   
+   // Ensure lot size is valid
+   double minVolume = SymbolInfoDouble(m_Symbol, SYMBOL_VOLUME_MIN);
+   double maxVolume = SymbolInfoDouble(m_Symbol, SYMBOL_VOLUME_MAX);
+   double stepVolume = SymbolInfoDouble(m_Symbol, SYMBOL_VOLUME_STEP);
+   
+   if (lotSize < minVolume || lotSize > maxVolume || MathRound(lotSize / stepVolume) * stepVolume != lotSize) {
+      m_Logger.LogError(StringFormat(
+         "Invalid lot size: %.2f (Min=%.2f, Max=%.2f, Step=%.2f)", 
+         lotSize, minVolume, maxVolume, stepVolume
+      ));
       return false;
    }
    
-   // BƯỚC 2: Tìm nến breakout
-   int breakoutBar = -1;
-   double breakoutLevel = 0;
-   bool isBreakoutUp = false;
+   // Open the position
+   if (isLong) {
+      if (!m_Trade.Buy(lotSize, m_Symbol, 0, stopLoss, takeProfit, comment)) {
+         m_Logger.LogError(StringFormat(
+            "Failed to open long position: Error %d (%s)", 
+            m_Trade.ResultRetcode(), m_Trade.ResultRetcodeDescription()
+         ));
+         return false;
+      }
+   } else {
+      if (!m_Trade.Sell(lotSize, m_Symbol, 0, stopLoss, takeProfit, comment)) {
+         m_Logger.LogError(StringFormat(
+            "Failed to open short position: Error %d (%s)", 
+            m_Trade.ResultRetcode(), m_Trade.ResultRetcodeDescription()
+         ));
+         return false;
+      }
+   }
    
-   for (int i = 1; i < MAX_LOOKBACK - 5; i++) {
-      // Kiểm tra breakout lên (close trên zoneHigh)
-      if (close[i] > zoneHigh && close[i+1] <= zoneHigh) {
-         breakoutBar = i;
-         breakoutLevel = zoneHigh;
-         isBreakoutUp = true;
-         break;
+   // Get the ticket number
+   ulong ticket = m_Trade.ResultOrder();
+   
+   // Log the trade
+   m_Logger.LogInfo(StringFormat(
+      "%s order executed (#%llu): %.2f lots at %.5f, SL: %.5f, TP: %.5f, Risk: %.2f",
+      isLong ? "BUY" : "SELL", ticket, lotSize, entryPrice, stopLoss, takeProfit, riskAmount
+   ));
+   
+   // Create target info
+   if (ticket > 0) {
+      TargetInfo* target = new TargetInfo();
+      target.ticket = ticket;
+      target.entry_price = entryPrice;
+      target.risk_points = (int)((isLong ? entryPrice - stopLoss : stopLoss - entryPrice) / _Point);
+      
+      // Set take profit levels if multiple targets are enabled
+      if (m_UseMultipleTargets) {
+         // Calculate take profit levels based on risk
+         double risk = MathAbs(entryPrice - stopLoss);
+         
+         // Distribute according to percentages
+         target.tp1_percent = m_TP1_Percent;
+         target.tp2_percent = m_TP2_Percent;
+         target.tp3_percent = m_TP3_Percent;
+         
+         // Set TP levels at different risk multiples
+         if (isLong) {
+            target.tp1 = entryPrice + risk * 1.0;  // 1R
+            target.tp2 = entryPrice + risk * 2.0;  // 2R
+            target.tp3 = entryPrice + risk * 3.0;  // 3R
+         } else {
+            target.tp1 = entryPrice - risk * 1.0;  // 1R
+            target.tp2 = entryPrice - risk * 2.0;  // 2R
+            target.tp3 = entryPrice - risk * 3.0;  // 3R
+         }
       }
       
-      // Kiểm tra breakout xuống (close dưới zoneLow)
-      if (close[i] < zoneLow && close[i+1] >= zoneLow) {
-         breakoutBar = i;
-         breakoutLevel = zoneLow;
-         isBreakoutUp = false;
-         break;
-      }
+      m_Targets.Add(target);
    }
    
-   // Kiểm tra nếu không tìm thấy breakout
-   if (breakoutBar < 0) {
-      m_Logger.LogDebug("Không tìm thấy breakout từ vùng tích lũy");
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Close Position                                                   |
+//+------------------------------------------------------------------+
+bool CTradeManager::PositionClose(ulong ticket)
+{
+   // Select position by ticket
+   if (!m_Position.SelectByTicket(ticket)) {
+      m_Logger.LogError(StringFormat(
+         "Failed to close position: Position #%llu not found", 
+         ticket
+      ));
       return false;
    }
    
-   // Kiểm tra nếu breakout quá cũ
-   if (breakoutBar > MAX_BREAKOUT_AGE) {
-      m_Logger.LogDebug(StringFormat("Breakout quá cũ: %d nến", breakoutBar));
+   // Close the position
+   if (!m_Trade.PositionClose(ticket)) {
+      m_Logger.LogError(StringFormat(
+         "Failed to close position: Error %d (%s)", 
+         m_Trade.ResultRetcode(), m_Trade.ResultRetcodeDescription()
+      ));
       return false;
    }
    
-   // Kiểm tra độ lớn của breakout
-   double breakoutSize = 0;
-   if (isBreakoutUp) {
-      breakoutSize = (close[breakoutBar] - breakoutLevel) / m_Cache.atr_entry;
-   } else {
-      breakoutSize = (breakoutLevel - close[breakoutBar]) / m_Cache.atr_entry;
+   // Log the close
+   m_Logger.LogInfo(StringFormat(
+      "Position closed (#%llu)", 
+      ticket
+   ));
+   
+   // Remove target info
+   int idx = FindTargetInfoByTicket(ticket);
+   if (idx >= 0) {
+      RemoveTargetInfo(idx);
    }
    
-   if (breakoutSize < MIN_BREAKOUT_ATR) {
-      m_Logger.LogDebug(StringFormat("Breakout quá nhỏ: %.2f ATR", breakoutSize));
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Close Position Partially                                         |
+//+------------------------------------------------------------------+
+bool CTradeManager::PositionClosePartial(ulong ticket, double volume)
+{
+   // Select position by ticket
+   if (!m_Position.SelectByTicket(ticket)) {
+      m_Logger.LogError(StringFormat(
+         "Failed to close position partially: Position #%llu not found", 
+         ticket
+      ));
       return false;
    }
    
-   // BƯỚC 3: Tìm sự thất bại của breakout
-   int failureBar = -1;
-   
-   // Chỉ kiểm tra các nến sau breakout
-   for (int i = breakoutBar - 1; i >= 0; i--) {
-      // Nếu là breakout lên, tìm sự thất bại là giá đóng cửa dưới breakoutLevel
-      if (isBreakoutUp && close[i] < breakoutLevel) {
-         failureBar = i;
-         break;
-      }
-      // Nếu là breakout xuống, tìm sự thất bại là giá đóng cửa trên breakoutLevel
-      else if (!isBreakoutUp && close[i] > breakoutLevel) {
-         failureBar = i;
-         break;
-      }
-   }
-   
-   // Kiểm tra nếu không tìm thấy sự thất bại
-   if (failureBar < 0) {
-      m_Logger.LogDebug("Không tìm thấy sự thất bại của breakout");
+   // Close the position partially
+   if (!m_Trade.PositionClosePartial(ticket, volume)) {
+      m_Logger.LogError(StringFormat(
+         "Failed to close position partially: Error %d (%s)", 
+         m_Trade.ResultRetcode(), m_Trade.ResultRetcodeDescription()
+      ));
       return false;
    }
    
-   // Kiểm tra để đảm bảo sự thất bại đủ mới
-   if (failureBar > 5) {
-      m_Logger.LogDebug(StringFormat("Sự thất bại quá cũ: %d nến", failureBar));
-      return false;
-   }
-   
-   // Kiểm tra độ sâu của sự thất bại
-   double failureDepth = 0;
-   if (isBreakoutUp) {
-      // Đối với breakout lên, độ sâu là khoảng cách từ breakoutLevel đến low[failureBar]
-      failureDepth = (breakoutLevel - low[failureBar]) / m_Cache.atr_entry;
-   } else {
-      // Đối với breakout xuống, độ sâu là khoảng cách từ high[failureBar] đến breakoutLevel
-      failureDepth = (high[failureBar] - breakoutLevel) / m_Cache.atr_entry;
-   }
-   
-   if (failureDepth < MIN_FAILURE_ATR) {
-      m_Logger.LogDebug(StringFormat("Độ sâu thất bại quá nhỏ: %.2f ATR", failureDepth));
-      return false;
-   }
-   
-   // BƯỚC 4: Kiểm tra sự xác nhận xu hướng tiếp theo
-   bool hasConfirmation = false;
-   double confirmationLevel = 0;
-   
-   // Gán dấu hiệu xác nhận dựa trên sự di chuyển tiếp theo của giá
-   if (isUptrend) {
-      // Với xu hướng tăng, cần giá tiếp tục tăng sau failure
-      if (close[0] > close[failureBar]) {
-         hasConfirmation = true;
-         confirmationLevel = close[failureBar];
-      }
-   } else {
-      // Với xu hướng giảm, cần giá tiếp tục giảm sau failure
-      if (close[0] < close[failureBar]) {
-         hasConfirmation = true;
-         confirmationLevel = close[failureBar];
-      }
-   }
-   
-   if (!hasConfirmation) {
-      m_Logger.LogDebug("Không có xác nhận cho xu hướng sau failure");
-      return false;
-   }
-   
-   // BƯỚC 5: Thiết lập thông tin giao dịch
-   
-   // Điểm vào lệnh là giá hiện tại
-   entryPrice = close[0];
-   
-   // Đặt stop loss dựa trên vùng breakout với buffer
-   if (isUptrend) {
-      stopLevel = breakoutLevel - (m_Cache.atr_entry * SL_ATR_BUFFER);
-   } else {
-      stopLevel = breakoutLevel + (m_Cache.atr_entry * SL_ATR_BUFFER);
-   }
-   
-   // BƯỚC 6: Tính chất lượng tín hiệu
-   
-   // Điểm chất lượng cơ bản
-   quality = 0.7;
-   
-   // Thưởng điểm nếu failure xảy ra gần đây
-   if (failureBar <= 2) {
-      quality += 0.05;
-   }
-   
-   // Thưởng điểm cho độ sâu failure lớn
-   if (failureDepth > MIN_FAILURE_ATR * 2) {
-      quality += 0.05;
-   }
-   
-   // Thưởng điểm nếu độ lớn của breakout lớn
-   if (breakoutSize > MIN_BREAKOUT_ATR * 2) {
-      quality += 0.05;
-   }
-   
-   // Thưởng điểm nếu phản ứng sau failure rõ ràng
-   if (isUptrend && (close[0] - close[failureBar]) / m_Cache.atr_entry > 0.5) {
-      quality += 0.05;
-   } else if (!isUptrend && (close[failureBar] - close[0]) / m_Cache.atr_entry > 0.5) {
-      quality += 0.05;
-   }
-   
-   // Thưởng điểm nếu khớp với xu hướng của khung cao hơn
-   if (m_UseMultiTimeframe) {
-      bool higherTFUptrend = (m_Cache.ema_fast_higher > m_Cache.ema_trend_higher);
-      if (isUptrend == higherTFUptrend) {
-         quality += 0.1;
-      }
-   }
-   
-   // Giới hạn chất lượng trong khoảng [0,1]
-   quality = MathMin(quality, 1.0);
-   
-   // BƯỚC 7: Tạo mô tả
-   string trendDir = isUptrend ? "Tăng" : "Giảm";
-   string breakoutDir = isBreakoutUp ? "Lên" : "Xuống";
-   
-   description = StringFormat("Breakout Failure %s: Breakout %s thất bại %.1f ATR, Đã xác nhận", 
-                            trendDir, breakoutDir, failureDepth);
-   
-   m_Logger.LogInfo("Phát hiện Breakout Failure: " + description);
+   // Log the close
+   m_Logger.LogInfo(StringFormat(
+      "Position closed partially (#%llu): %.2f lots", 
+      ticket, volume
+   ));
    
    return true;
 }

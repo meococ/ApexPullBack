@@ -123,7 +123,7 @@ private:
    
    // Fibonacci parameters
    double               m_FibonacciNearThreshold; // How close price must be to fib level (ATR multiplier)
-   double               m_GoldenZoneBonus;      // Quality bonus for golden zone retracement
+   double               m_GoldenZoneBonus;      // Quality bonus for golden zone entries
    double               m_FibMinImpulseSize;    // Minimum size of impulse for fib analysis
 
    // Harmonic pattern parameters
@@ -179,6 +179,21 @@ private:
    double               AssessSignalQuality(ENUM_ENTRY_SCENARIO scenario, bool isLong, 
                                           double entryPrice, double stopLoss);
 
+   // Helper methods for identifying structures
+   bool                 FindConsolidationZone(const double &high[], const double &low[], 
+                                            double &zoneHigh, double &zoneLow, 
+                                            int minConsolidationBars, int maxConsolidationBars);
+   bool                 IsInRange(double value, double target, double tolerance);
+   bool                 FindPivots(const double &high[], const double &low[], int maxBars,
+                                  bool isUptrend, double &pivotHigh[], double &pivotLow[],
+                                  int &pivotHighBar[], int &pivotLowBar[]);
+   
+   bool                 IsLocalTop(const double &high[], int index);
+   bool                 IsLocalBottom(const double &low[], int index);
+   
+   // Signal feedback methods
+   void                 FeedbackSignalResult(SignalInfo &signal, bool success, ulong ticket, string failReason = "");
+   
 public:
                         CMarketMonitor(void);
                         ~CMarketMonitor(void);
@@ -201,6 +216,23 @@ public:
    // Main updating method
    bool                 Update();
    
+   // Light update method for more frequent updates without heavy calculations
+   void                 LightUpdate()
+   {
+      // Update only essential data without recalculating heavy indicators
+      // This method is called more frequently than the full update
+      
+      // Fetch latest price data
+      double currentPrice = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
+      
+      // Maybe update very basic indicators
+      // But avoid expensive calculations
+      
+      if (m_Logger != NULL && m_Logger.IsDebugEnabled()) {
+         m_Logger.LogInfo("Light market update performed");
+      }
+   }
+   
    // Signal generation methods
    bool                 CheckEntrySignal(SignalInfo &signal);
    ENUM_TRADE_SIGNAL    GenerateSignals(double &entryPrice, double &stopLoss, double &takeProfit, 
@@ -218,16 +250,6 @@ public:
                                          double &quality, string &description);
    bool                 DetectBreakoutFailure(bool isUptrend, double &entryPrice, double &stopLevel,
                                           double &quality, string &description);
-   
-   // Helper methods for identifying structures
-   bool                 FindConsolidationZone(const double &high[], const double &low[], 
-                                           double &zoneHigh, double &zoneLow, 
-                                           int minBars, int maxLookback);
-   bool                 IsLocalTop(const double &high[], int index);
-   bool                 IsLocalBottom(const double &low[], int index);
-   
-   // Signal feedback methods
-   void                 FeedbackSignalResult(SignalInfo &signal, bool success, ulong ticket, string failReason = "");
    
    // Getters for market state and indicator data
    ENUM_MARKET_REGIME   GetMarketState() const { return m_MarketRegime; }
@@ -339,44 +361,75 @@ CMarketMonitor::~CMarketMonitor(void)
 //| Initialize the Market Monitor                                    |
 //+------------------------------------------------------------------+
 bool CMarketMonitor::Initialize(string symbol, ENUM_TIMEFRAMES entryTimeframe, 
-                             int emaFastPeriod, int emaTrendPeriod,
-                             bool useMultiTimeframe, ENUM_TIMEFRAMES higherTimeframe,
-                             bool useNestedTimeframe, ENUM_TIMEFRAMES nestedTimeframe,
-                             bool enableMarketRegimeFilter)
+                              int emaFastPeriod, int emaTrendPeriod,
+                              bool useMultiTimeframe, ENUM_TIMEFRAMES higherTimeframe,
+                              bool useNestedTimeframe, ENUM_TIMEFRAMES nestedTimeframe,
+                              bool enableMarketRegimeFilter)
 {
-   if (m_IsInitialized) {
-      // If already initialized, release existing resources first
-      ReleaseIndicators();
-   }
-   
-   // Set core parameters
+   // Store parameters
    m_Symbol = symbol;
    m_EntryTimeframe = entryTimeframe;
    m_EmaFastPeriod = emaFastPeriod;
    m_EmaTrendPeriod = emaTrendPeriod;
-   
-   // Set multi-timeframe parameters
    m_UseMultiTimeframe = useMultiTimeframe;
    m_HigherTimeframe = higherTimeframe;
    m_UseNestedTimeframe = useNestedTimeframe;
    m_NestedTimeframe = nestedTimeframe;
-   
-   // Set regime filter
    m_EnableMarketRegimeFilter = enableMarketRegimeFilter;
    
-   // Initialize all indicators
+   // Initialize the logger if not already done
+   if (m_Logger == NULL) {
+      m_Logger = new CLogger("MarketMonitor");
+      if (m_Logger == NULL) {
+         Print("ERROR: Failed to create Logger object for MarketMonitor");
+         return false;
+      }
+   }
+   
+   // Initialize indicators
    if (!InitializeIndicators()) {
-      m_Logger.LogError("Failed to initialize indicators for " + symbol);
+      m_Logger.LogError("Failed to initialize indicators");
       return false;
    }
    
-   // Update data initially to populate cache
+   // Set default values for parameters not passed to Initialize
+   if (m_ATRPeriod == 0) m_ATRPeriod = 14;
+   if (m_EnvelopeDeviation == 0) m_EnvelopeDeviation = 0.2;
+   
+   // Set default values for pullback parameters if not already set
+   if (m_MinPullbackDepth == 0) m_MinPullbackDepth = 1.0;
+   if (m_MaxPullbackDepth == 0) m_MaxPullbackDepth = 3.0;
+   if (m_MinBounceStrength == 0) m_MinBounceStrength = 0.3;
+   if (m_MaxBounceStrength == 0) m_MaxBounceStrength = 0.8;
+   
+   m_FibonacciNearThreshold = 0.25; // Price must be within 0.25 ATR of fib level
+   m_GoldenZoneBonus = 0.15;   // Quality bonus for golden zone entries
+   m_FibMinImpulseSize = 1.5;  // Impulse must be at least 1.5 ATR
+   
+   m_HarmonicTolerance = 0.03; // 3% tolerance for harmonic pattern ratios
+   
+   m_MomentumLookback = 60;    // Lookback for momentum analysis
+   
+   m_MinWickRatio = 2.0;       // Wick must be 2x body for liquidity grab
+   m_MinVolumeRatio = 1.5;     // Volume must be 1.5x average for liquidity grab
+   
+   m_MinBreakoutSize = 0.3;    // Breakout must be at least 0.3 ATR
+   
+   // Log successful initialization
+   m_Logger.LogInfo(StringFormat(
+      "Market Monitor initialized for %s on %s timeframe (Fast EMA: %d, Trend EMA: %d)", 
+      m_Symbol, 
+      TimeframeToString(m_EntryTimeframe), 
+      m_EmaFastPeriod, 
+      m_EmaTrendPeriod
+   ));
+   
+   // Update market data for the first time
    if (!UpdateIndicatorData()) {
-      m_Logger.LogError("Failed to update indicator data for " + symbol);
-      return false;
+      m_Logger.LogWarning("Initial market data update failed");
+      // Continue anyway as this might succeed on subsequent calls
    }
    
-   m_Logger.LogInfo("Market Monitor initialized successfully for " + symbol);
    m_IsInitialized = true;
    return true;
 }
@@ -1608,11 +1661,11 @@ bool CMarketMonitor::DetectFibonacciPullback(bool isUptrend, double &entryLevels
    int FIB_COUNT = ArraySize(FIB_LEVELS);
    
    // Get price data with safety checks
-   double high[], low[], close[], open[];
+   double open[], high[], low[], close[];
+   ArraySetAsSeries(open, true);
    ArraySetAsSeries(high, true);
    ArraySetAsSeries(low, true);
    ArraySetAsSeries(close, true);
-   ArraySetAsSeries(open, true);
    
    int MAX_LOOKBACK = 100; // Maximum bars to analyze
    
@@ -1844,6 +1897,638 @@ bool CMarketMonitor::DetectFibonacciPullback(bool isUptrend, double &entryLevels
    return true;
 }
 
-// Continue with implementations of other detection methods
-// DetectHarmonicPatterns, DetectMomentumShift, DetectLiquidityGrab, DetectBreakoutFailure, etc.
-// Implement these following the same pattern as above (proper error handling, using cached data where possible)
+//+------------------------------------------------------------------+
+//| DetectHarmonicPatterns Implementation                            |
+//+------------------------------------------------------------------+
+bool CMarketMonitor::DetectHarmonicPatterns(bool isUptrend, double &entryLevel, double &stopLevel, 
+                                          double &qualityScore, string &patternName)
+{
+   // Khởi tạo giá trị
+   entryLevel = 0; stopLevel = 0; qualityScore = 0;
+   patternName = "";
+   
+   // Tham số
+   double TOLERANCE = m_HarmonicTolerance;  // Dung sai cho tỉ lệ Fibonacci
+   double SL_BUFFER = 0.3;                  // Buffer cho stop loss (tính bằng ATR)
+   
+   // Các tỉ lệ Fibonacci quan trọng
+   double FIB_0_382 = 0.382;
+   double FIB_0_500 = 0.500;
+   double FIB_0_618 = 0.618;
+   double FIB_0_786 = 0.786;
+   double FIB_0_886 = 0.886;
+   double FIB_1_000 = 1.000;
+   double FIB_1_272 = 1.272;
+   double FIB_1_414 = 1.414;
+   double FIB_1_618 = 1.618;
+   double FIB_2_000 = 2.000;
+   double FIB_2_618 = 2.618;
+   double FIB_3_618 = 3.618;
+   
+   // Lấy dữ liệu giá
+   double high[], low[], close[];
+   ArraySetAsSeries(high, true);
+   ArraySetAsSeries(low, true);
+   ArraySetAsSeries(close, true);
+   
+   if (CopyHigh(m_Symbol, m_EntryTimeframe, 0, 100, high) <= 0 ||
+       CopyLow(m_Symbol, m_EntryTimeframe, 0, 100, low) <= 0 ||
+       CopyClose(m_Symbol, m_EntryTimeframe, 0, 100, close) <= 0) {
+      if (m_Logger != NULL) {
+         m_Logger.LogError("Không thể sao chép dữ liệu giá cho phân tích Harmonic Patterns");
+      }
+      return false;
+   }
+   
+   // Khai báo mảng để lưu các điểm đảo chiều (pivots)
+   double pivotHigh[5], pivotLow[5];
+   int pivotHighBar[5], pivotLowBar[5];
+   
+   // Tìm 5 điểm quan trọng để phân tích mô hình
+   if (!FindPivots(high, low, 100, isUptrend, pivotHigh, pivotLow, pivotHighBar, pivotLowBar)) {
+      if (m_Logger != NULL) {
+         m_Logger.LogDebug("Không tìm đủ các điểm pivot cho phân tích Harmonic Patterns");
+      }
+      return false;
+   }
+   
+   // Tính các tỉ lệ Fibonacci giữa các điểm
+   double ratioAB = 0, ratioBC = 0, ratioCD = 0, ratioXAD = 0;
+   
+   if (isUptrend) {
+      // Tính các tỉ lệ cho mô hình bullish (giảm-tăng-giảm-tăng)
+      double rangeXA = MathAbs(pivotHigh[0] - pivotLow[1]);
+      double rangeAB = MathAbs(pivotLow[1] - pivotHigh[2]);
+      double rangeBC = MathAbs(pivotHigh[2] - pivotLow[3]);
+      double rangeCD = MathAbs(pivotLow[3] - pivotHigh[4]);
+      double rangeXD = MathAbs(pivotHigh[0] - pivotHigh[4]);
+      
+      if (rangeXA > 0) ratioAB = rangeAB / rangeXA;
+      if (rangeAB > 0) ratioBC = rangeBC / rangeAB;
+      if (rangeBC > 0) ratioCD = rangeCD / rangeBC;
+      if (rangeXA > 0) ratioXAD = rangeXD / rangeXA;
+   } else {
+      // Tính các tỉ lệ cho mô hình bearish (tăng-giảm-tăng-giảm)
+      double rangeXA = MathAbs(pivotLow[0] - pivotHigh[1]);
+      double rangeAB = MathAbs(pivotHigh[1] - pivotLow[2]);
+      double rangeBC = MathAbs(pivotLow[2] - pivotHigh[3]);
+      double rangeCD = MathAbs(pivotHigh[3] - pivotLow[4]);
+      double rangeXD = MathAbs(pivotLow[0] - pivotLow[4]);
+      
+      if (rangeXA > 0) ratioAB = rangeAB / rangeXA;
+      if (rangeAB > 0) ratioBC = rangeBC / rangeAB;
+      if (rangeBC > 0) ratioCD = rangeCD / rangeBC;
+      if (rangeXA > 0) ratioXAD = rangeXD / rangeXA;
+   }
+   
+   // Kiểm tra và xác định các mô hình
+   bool patternFound = false;
+   string patternType = "";
+   double patternQuality = 0.0;
+   
+   // Mẫu Gartley
+   if (IsInRange(ratioAB, FIB_0_618, TOLERANCE) && 
+      IsInRange(ratioBC, FIB_0_382, TOLERANCE) && 
+      IsInRange(ratioCD, FIB_1_272, TOLERANCE) && 
+      IsInRange(ratioXAD, FIB_0_786, TOLERANCE)) {
+      patternFound = true;
+      patternType = "Gartley";
+      patternQuality = 0.8;
+   }
+   
+   // Mẫu Butterfly
+   else if (IsInRange(ratioAB, FIB_0_786, TOLERANCE) && 
+           IsInRange(ratioBC, FIB_0_382, TOLERANCE) && 
+           IsInRange(ratioCD, FIB_1_618, TOLERANCE) && 
+           IsInRange(ratioXAD, FIB_1_272, TOLERANCE)) {
+      patternFound = true;
+      patternType = "Butterfly";
+      patternQuality = 0.85;
+   }
+   
+   // Mẫu Bat
+   else if (IsInRange(ratioAB, FIB_0_382, TOLERANCE) && 
+           IsInRange(ratioBC, FIB_0_382, TOLERANCE) && 
+           IsInRange(ratioCD, FIB_1_618, TOLERANCE) && 
+           IsInRange(ratioXAD, FIB_0_886, TOLERANCE)) {
+      patternFound = true;
+      patternType = "Bat";
+      patternQuality = 0.75;
+   }
+   
+   // Mẫu Crab
+   else if (IsInRange(ratioAB, FIB_0_382, TOLERANCE) && 
+           IsInRange(ratioBC, FIB_0_618, TOLERANCE) && 
+           IsInRange(ratioCD, FIB_2_618, TOLERANCE) && 
+           IsInRange(ratioXAD, FIB_1_618, TOLERANCE)) {
+      patternFound = true;
+      patternType = "Crab";
+      patternQuality = 0.9;
+   }
+   
+   // Nếu không tìm thấy mẫu nào
+   if (!patternFound) {
+      if (m_Logger != NULL) {
+         m_Logger.LogDebug("Không tìm thấy mô hình Harmonic hợp lệ");
+      }
+      return false;
+   }
+   
+   // Thiết lập thông tin giao dịch
+   if (isUptrend) {
+      entryLevel = close[0]; // Hoặc có thể thiết lập tại mức hỗ trợ/kháng cự
+      stopLevel = pivotLow[4] - m_Cache.atr_entry * SL_BUFFER; // Stop ở dưới điểm D với buffer
+   } else {
+      entryLevel = close[0]; // Giá hiện tại
+      stopLevel = pivotHigh[4] + m_Cache.atr_entry * SL_BUFFER; // Stop ở trên điểm D với buffer
+   }
+   
+   // Thưởng điểm cho chất lượng mẫu
+   if (IsInRange(ratioAB, FIB_0_618, TOLERANCE/2) || 
+       IsInRange(ratioAB, FIB_0_786, TOLERANCE/2) || 
+       IsInRange(ratioAB, FIB_0_886, TOLERANCE/2)) {
+      patternQuality += 0.05;
+   }
+   
+   if (IsInRange(ratioCD, FIB_1_618, TOLERANCE/2) || 
+       IsInRange(ratioCD, FIB_2_618, TOLERANCE/2)) {
+      patternQuality += 0.05;
+   }
+   
+   // Thưởng điểm nếu mẫu hoàn thiện gần đây
+   if (pivotHighBar[4] <= 3 || pivotLowBar[4] <= 3) {
+      patternQuality += 0.1;
+   }
+   
+   // Giới hạn chất lượng trong phạm vi [0,1]
+   qualityScore = MathMin(patternQuality, 1.0);
+   
+   // Thiết lập tên mẫu
+   patternName = StringFormat("%s %s Pattern", isUptrend ? "Bullish" : "Bearish", patternType);
+   
+   if (m_Logger != NULL) {
+      m_Logger.LogInfo("Phát hiện mô hình Harmonic: " + patternName + " (Quality: " + DoubleToString(qualityScore, 2) + ")");
+   }
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| DetectLiquidityGrab Implementation                               |
+//+------------------------------------------------------------------+
+bool CMarketMonitor::DetectLiquidityGrab(bool isUptrend, double &entryPrice, double &stopLevel,
+                                        double &quality, string &description)
+{
+   // Khởi tạo giá trị
+   entryPrice = 0.0;
+   stopLevel = 0.0;
+   quality = 0.0;
+   description = "";
+   
+   // Tham số
+   double SL_ATR_BUFFER = 0.3;      // Buffer cho stop loss (tính bằng ATR)
+   
+   // Lấy dữ liệu giá
+   double high[], low[], close[];
+   ArraySetAsSeries(high, true);
+   ArraySetAsSeries(low, true);
+   ArraySetAsSeries(close, true);
+   
+   if (CopyHigh(m_Symbol, m_EntryTimeframe, 0, 100, high) <= 0 ||
+       CopyLow(m_Symbol, m_EntryTimeframe, 0, 100, low) <= 0 ||
+       CopyClose(m_Symbol, m_EntryTimeframe, 0, 100, close) <= 0) {
+      if (m_Logger != NULL) {
+         m_Logger.LogError("Không thể sao chép dữ liệu giá cho phân tích Liquidity Grab");
+      }
+      return false;
+   }
+   
+   // Chưa triển khai đầy đủ, sẽ cập nhật sau
+   if (m_Logger != NULL) {
+      m_Logger.LogDebug("Phương thức DetectLiquidityGrab chưa được triển khai đầy đủ");
+   }
+   
+   return false; // Trả về false vì chưa triển khai
+}
+
+//+------------------------------------------------------------------+
+//| DetectBreakoutFailure Implementation                             |
+//+------------------------------------------------------------------+
+bool CMarketMonitor::DetectBreakoutFailure(bool isUptrend, double &entryPrice, double &stopLevel,
+                                          double &quality, string &description)
+{
+   // Khởi tạo giá trị
+   entryPrice = 0; stopLevel = 0; quality = 0;
+   description = "";
+   
+   // Tham số (nên chuyển thành input parameters)
+   double SL_ATR_BUFFER = 0.3;              // Buffer cho SL (tính bằng ATR)
+   double MIN_BREAKOUT_ATR = 0.3;           // Kích thước tối thiểu của breakout (tính bằng ATR)
+   double MIN_FAILURE_ATR = 0.5;            // Độ sâu tối thiểu của failure (tính bằng ATR)
+   int MAX_BREAKOUT_AGE = 15;               // Tuổi tối đa của breakout (số nến)
+   
+   // Lấy dữ liệu giá
+   double high[], low[], close[], open[];
+   ArraySetAsSeries(high, true);
+   ArraySetAsSeries(low, true);
+   ArraySetAsSeries(close, true);
+   ArraySetAsSeries(open, true);
+   
+   if (CopyHigh(m_Symbol, m_EntryTimeframe, 0, 100, high) <= 0 ||
+       CopyLow(m_Symbol, m_EntryTimeframe, 0, 100, low) <= 0 ||
+       CopyClose(m_Symbol, m_EntryTimeframe, 0, 100, close) <= 0 ||
+       CopyOpen(m_Symbol, m_EntryTimeframe, 0, 100, open) <= 0) {
+      if (m_Logger != NULL) {
+         m_Logger.LogError("Không thể sao chép dữ liệu giá cho phân tích Breakout Failure");
+      }
+      return false;
+   }
+   
+   // BƯỚC 1: Tìm vùng tích lũy (consolidation zone)
+   double zoneHigh = 0, zoneLow = 0;
+   bool foundZone = FindConsolidationZone(high, low, zoneHigh, zoneLow, 5, 20);
+   
+   if (!foundZone || zoneHigh <= 0 || zoneLow <= 0 || zoneHigh <= zoneLow) {
+      if (m_Logger != NULL) {
+         m_Logger.LogDebug("Không tìm thấy vùng tích lũy rõ ràng");
+      }
+      return false;
+   }
+   
+   // BƯỚC 2: Tìm nến breakout
+   int breakoutBar = -1;
+   double breakoutLevel = 0;
+   bool isBreakoutUp = false;
+   
+   for (int i = 1; i < 100 - 5; i++) {
+      // Kiểm tra breakout lên (close trên zoneHigh)
+      if (close[i] > zoneHigh && close[i+1] <= zoneHigh) {
+         breakoutBar = i;
+         breakoutLevel = zoneHigh;
+         isBreakoutUp = true;
+         break;
+      }
+      
+// Kiểm tra breakout xuống (close dưới zoneLow)
+      if (close[i] < zoneLow && close[i+1] >= zoneLow) {
+         breakoutBar = i;
+         breakoutLevel = zoneLow;
+         isBreakoutUp = false;
+         break;
+      }
+   }
+   
+   // Kiểm tra nếu không tìm thấy breakout
+   if (breakoutBar < 0) {
+      m_Logger.LogDebug("Không tìm thấy breakout từ vùng tích lũy");
+      return false;
+   }
+   
+   // Kiểm tra nếu breakout quá cũ
+   if (breakoutBar > MAX_BREAKOUT_AGE) {
+      m_Logger.LogDebug(StringFormat("Breakout quá cũ: %d nến", breakoutBar));
+      return false;
+   }
+   
+   // Kiểm tra độ lớn của breakout
+   double breakoutSize = 0;
+   if (isBreakoutUp) {
+      breakoutSize = (close[breakoutBar] - breakoutLevel) / m_Cache.atr_entry;
+   } else {
+      breakoutSize = (breakoutLevel - close[breakoutBar]) / m_Cache.atr_entry;
+   }
+   
+   if (breakoutSize < MIN_BREAKOUT_ATR) {
+      m_Logger.LogDebug(StringFormat("Breakout quá nhỏ: %.2f ATR", breakoutSize));
+      return false;
+   }
+   
+   // BƯỚC 3: Tìm sự thất bại của breakout
+   int failureBar = -1;
+   
+   // Chỉ kiểm tra các nến sau breakout
+   for (int i = breakoutBar - 1; i >= 0; i--) {
+      // Nếu là breakout lên, tìm sự thất bại là giá đóng cửa dưới breakoutLevel
+      if (isBreakoutUp && close[i] < breakoutLevel) {
+         failureBar = i;
+         break;
+      }
+      // Nếu là breakout xuống, tìm sự thất bại là giá đóng cửa trên breakoutLevel
+      else if (!isBreakoutUp && close[i] > breakoutLevel) {
+         failureBar = i;
+         break;
+      }
+   }
+   
+   // Kiểm tra nếu không tìm thấy sự thất bại
+   if (failureBar < 0) {
+      m_Logger.LogDebug("Không tìm thấy sự thất bại của breakout");
+      return false;
+   }
+   
+   // Kiểm tra để đảm bảo sự thất bại đủ mới
+   if (failureBar > 5) {
+      m_Logger.LogDebug(StringFormat("Sự thất bại quá cũ: %d nến", failureBar));
+      return false;
+   }
+   
+   // Kiểm tra độ sâu của sự thất bại
+   double failureDepth = 0;
+   if (isBreakoutUp) {
+      // Đối với breakout lên, độ sâu là khoảng cách từ breakoutLevel đến low[failureBar]
+      failureDepth = (breakoutLevel - low[failureBar]) / m_Cache.atr_entry;
+   } else {
+      // Đối với breakout xuống, độ sâu là khoảng cách từ high[failureBar] đến breakoutLevel
+      failureDepth = (high[failureBar] - breakoutLevel) / m_Cache.atr_entry;
+   }
+   
+   if (failureDepth < MIN_FAILURE_ATR) {
+      m_Logger.LogDebug(StringFormat("Độ sâu thất bại quá nhỏ: %.2f ATR", failureDepth));
+      return false;
+   }
+   
+   // BƯỚC 4: Kiểm tra sự xác nhận xu hướng tiếp theo
+   bool hasConfirmation = false;
+   double confirmationLevel = 0;
+   
+   // Gán dấu hiệu xác nhận dựa trên sự di chuyển tiếp theo của giá
+   if (isUptrend) {
+      // Với xu hướng tăng, cần giá tiếp tục tăng sau failure
+      if (close[0] > close[failureBar]) {
+         hasConfirmation = true;
+         confirmationLevel = close[failureBar];
+      }
+   } else {
+      // Với xu hướng giảm, cần giá tiếp tục giảm sau failure
+      if (close[0] < close[failureBar]) {
+         hasConfirmation = true;
+         confirmationLevel = close[failureBar];
+      }
+   }
+   
+   if (!hasConfirmation) {
+      m_Logger.LogDebug("Không có xác nhận cho xu hướng sau failure");
+      return false;
+   }
+   
+   // BƯỚC 5: Thiết lập thông tin giao dịch
+   
+   // Điểm vào lệnh là giá hiện tại
+   entryPrice = close[0]; // Entry ở giá đóng cửa hiện tại
+   
+   // Đặt stop loss dựa trên vùng breakout với buffer
+   if (isUptrend) {
+      stopLevel = breakoutLevel - (m_Cache.atr_entry * SL_ATR_BUFFER);
+   } else {
+      stopLevel = breakoutLevel + (m_Cache.atr_entry * SL_ATR_BUFFER);
+   }
+   
+   // BƯỚC 6: Tính chất lượng tín hiệu
+   
+   // Điểm chất lượng cơ bản
+   quality = 0.7;
+   
+   // Thưởng điểm nếu failure xảy ra gần đây
+   if (failureBar <= 2) {
+      quality += 0.05;
+   }
+   
+   // Thưởng điểm cho độ sâu failure lớn
+   if (failureDepth > MIN_FAILURE_ATR * 2) {
+      quality += 0.05;
+   }
+   
+   // Thưởng điểm nếu độ lớn của breakout lớn
+   if (breakoutSize > MIN_BREAKOUT_ATR * 2) {
+      quality += 0.05;
+   }
+   
+   // Thưởng điểm nếu phản ứng sau failure rõ ràng
+   if (isUptrend && (close[0] - close[failureBar]) / m_Cache.atr_entry > 0.5) {
+      quality += 0.05;
+   } else if (!isUptrend && (close[failureBar] - close[0]) / m_Cache.atr_entry > 0.5) {
+      quality += 0.05;
+   }
+   
+   // Thưởng điểm nếu khớp với xu hướng của khung cao hơn
+   if (m_UseMultiTimeframe) {
+      bool higherTFUptrend = (m_Cache.ema_fast_higher > m_Cache.ema_trend_higher);
+      if (isUptrend == higherTFUptrend) {
+         quality += 0.1; // Alignment bonus
+      }
+   }
+   
+   // Giới hạn chất lượng trong phạm vi [0,1]
+   quality = MathMin(quality, 1.0);
+   
+   // BƯỚC 7: Tạo mô tả
+   string trendDir = isUptrend ? "Tăng" : "Giảm";
+   string breakoutDir = isBreakoutUp ? "Lên" : "Xuống";
+   
+   description = StringFormat("Breakout Failure %s: Breakout %s thất bại %.1f ATR, Đã xác nhận", 
+                            trendDir, breakoutDir, failureDepth);
+   
+   m_Logger.LogInfo("Phát hiện Breakout Failure: " + description);
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| DetectMomentumShift Implementation                               |
+//+------------------------------------------------------------------+
+bool CMarketMonitor::DetectMomentumShift(bool isUptrend, double &entryPrice, double &stopLevel,
+                                      double &quality, string &description)
+{
+   // Khởi tạo giá trị
+   entryPrice = 0.0;
+   stopLevel = 0.0;
+   quality = 0.0;
+   description = "";
+   
+   // Tham số
+   double SL_ATR_BUFFER = 0.3;      // Buffer cho stop loss (tính bằng ATR)
+   
+   // Lấy dữ liệu giá
+   double high[], low[], close[];
+   ArraySetAsSeries(high, true);
+   ArraySetAsSeries(low, true);
+   ArraySetAsSeries(close, true);
+   
+   if (CopyHigh(m_Symbol, m_EntryTimeframe, 0, 100, high) <= 0 ||
+       CopyLow(m_Symbol, m_EntryTimeframe, 0, 100, low) <= 0 ||
+       CopyClose(m_Symbol, m_EntryTimeframe, 0, 100, close) <= 0) {
+      if (m_Logger != NULL) {
+         m_Logger.LogError("Không thể sao chép dữ liệu giá cho phân tích Momentum Shift");
+      }
+      return false;
+   }
+   
+   // Chưa triển khai đầy đủ, sẽ cập nhật sau
+   if (m_Logger != NULL) {
+      m_Logger.LogDebug("Phương thức DetectMomentumShift chưa được triển khai đầy đủ");
+   }
+   
+   return false; // Trả về false vì chưa triển khai
+}
+
+//+------------------------------------------------------------------+
+//| Find a consolidation zone based on price action                  |
+//+------------------------------------------------------------------+
+bool CMarketMonitor::FindConsolidationZone(const double &high[], const double &low[], 
+                                          double &zoneHigh, double &zoneLow, 
+                                          int minConsolidationBars, int maxConsolidationBars)
+{
+   // Initialize output values
+   zoneHigh = 0;
+   zoneLow = 0;
+   
+   // Get current ATR for relative measurements
+   double atr = m_Cache.atr_entry;
+   if (atr <= 0) {
+      m_Logger.LogDebug("Invalid ATR for consolidation zone detection");
+      return false;
+   }
+   
+   // Look for a consolidation zone within the lookback period
+   int consolidationStart = -1;
+   int consolidationEnd = -1;
+   
+   // Maximum height of consolidation zone in ATR terms
+   double maxZoneHeightATR = 2.0;
+   
+   // Start from recent bars and search backwards
+   for (int start = 1; start < maxConsolidationBars - minConsolidationBars; start++) {
+      // Try to find a potential consolidation zone starting at 'start'
+      
+      // Find highest high and lowest low in the potential zone
+      double tempHigh = high[start];
+      double tempLow = low[start];
+      
+      for (int i = start; i < start + minConsolidationBars && i < maxConsolidationBars; i++) {
+         tempHigh = MathMax(tempHigh, high[i]);
+         tempLow = MathMin(tempLow, low[i]);
+      }
+      
+      // Calculate zone height
+      double zoneHeight = tempHigh - tempLow;
+      double zoneHeightATR = zoneHeight / atr;
+      
+      // Check if zone is valid (not too wide)
+      if (zoneHeightATR <= maxZoneHeightATR) {
+         // Check if price stayed within this zone for the minimum number of bars
+         bool validZone = true;
+         int endBar = start + minConsolidationBars;
+         
+         // Extend zone as far as possible within maxConsolidationBars
+         for (int i = start; i < maxConsolidationBars; i++) {
+            // If price breaks out of the zone, stop extending
+            if (high[i] > tempHigh + (atr * 0.3) || low[i] < tempLow - (atr * 0.3)) {
+               endBar = i;
+               break;
+            }
+            endBar = i + 1; // Update end bar if this bar is still in zone
+         }
+         
+         // Ensure minimum length requirement is met
+         if (endBar - start >= minConsolidationBars) {
+            consolidationStart = start;
+            consolidationEnd = endBar;
+            zoneHigh = tempHigh;
+            zoneLow = tempLow;
+            break;
+         }
+      }
+   }
+   
+   // Check if a valid consolidation zone was found
+   if (consolidationStart < 0 || consolidationEnd < 0 || consolidationEnd - consolidationStart < minConsolidationBars) {
+      return false;
+   }
+   
+   // Add a small buffer to zone boundaries for cleaner detection
+   zoneHigh += atr * 0.05;
+   zoneLow -= atr * 0.05;
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Check if a value is within a tolerance range of a target         |
+//+------------------------------------------------------------------+
+bool CMarketMonitor::IsInRange(double value, double target, double tolerance)
+{
+   return (MathAbs(value - target) <= tolerance);
+}
+
+//+------------------------------------------------------------------+
+//| Find significant pivot points in price data                      |
+//+------------------------------------------------------------------+
+bool CMarketMonitor::FindPivots(const double &high[], const double &low[], int maxBars,
+                                bool isUptrend, double &pivotHigh[], double &pivotLow[],
+                                int &pivotHighBar[], int &pivotLowBar[])
+{
+   // Clear output arrays
+   ArrayResize(pivotHigh, 0);
+   ArrayResize(pivotLow, 0);
+   ArrayResize(pivotHighBar, 0);
+   ArrayResize(pivotLowBar, 0);
+   
+   int highCount = 0;
+   int lowCount = 0;
+   
+   // Look for pivots with 2 bars on each side
+   for (int i = 2; i < maxBars - 2; i++) {
+      // Check for pivot high
+      if (high[i] > high[i-1] && high[i] > high[i-2] && 
+          high[i] > high[i+1] && high[i] > high[i+2]) {
+         // Add to pivot high array
+         ArrayResize(pivotHigh, highCount + 1);
+         ArrayResize(pivotHighBar, highCount + 1);
+         pivotHigh[highCount] = high[i];
+         pivotHighBar[highCount] = i;
+         highCount++;
+      }
+      
+      // Check for pivot low
+      if (low[i] < low[i-1] && low[i] < low[i-2] && 
+          low[i] < low[i+1] && low[i] < low[i+2]) {
+         // Add to pivot low array
+         ArrayResize(pivotLow, lowCount + 1);
+         ArrayResize(pivotLowBar, lowCount + 1);
+         pivotLow[lowCount] = low[i];
+         pivotLowBar[lowCount] = i;
+         lowCount++;
+      }
+   }
+   
+   // Return true if we found at least one pivot of each type
+   return (highCount > 0 && lowCount > 0);
+}
+
+//+------------------------------------------------------------------+
+//| Check if a bar forms a local top                                 |
+//+------------------------------------------------------------------+
+bool CMarketMonitor::IsLocalTop(const double &high[], int index)
+{
+   // Check if we have enough bars to analyze
+   if (index < 2 || index >= ArraySize(high) - 2) 
+      return false;
+      
+   // Check if this bar's high is higher than surrounding bars
+   return (high[index] > high[index-1] && high[index] > high[index-2] && 
+           high[index] > high[index+1] && high[index] > high[index+2]);
+}
+
+//+------------------------------------------------------------------+
+//| Check if a bar forms a local bottom                              |
+//+------------------------------------------------------------------+
+bool CMarketMonitor::IsLocalBottom(const double &low[], int index)
+{
+   // Check if we have enough bars to analyze
+   if (index < 2 || index >= ArraySize(low) - 2) 
+      return false;
+      
+   // Check if this bar's low is lower than surrounding bars
+   return (low[index] < low[index-1] && low[index] < low[index-2] && 
+           low[index] < low[index+1] && low[index] < low[index+2]);
+}
