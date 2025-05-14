@@ -1,0 +1,22 @@
+# MT4/MT5 specific files
+*.ex4
+*.ex5
+*.mqproj
+*.mq4.vsd
+*.mq5.vsd
+
+# Compiled files
+*.o
+*.obj
+*.log
+*.txt
+
+# Debug files
+debug/
+debuglog.txt
+
+# Temporary files
+*~
+*.bak
+.DS_Store
+Thumbs.db
