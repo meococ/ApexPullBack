@@ -8,6 +8,10 @@
 #property version   "14.0"
 #property strict
 
+// FIX: Thêm bảo vệ include để tránh trùng lặp định nghĩa
+#ifndef _ASSET_PROFILE_MANAGER_MQH_
+#define _ASSET_PROFILE_MANAGER_MQH_
+
 // Include cần thiết
 #include "Logger.mqh"
 #include "Enums.mqh"
@@ -18,6 +22,9 @@
 #define MAX_HISTORY_DAYS 30       // Số ngày lịch sử lưu trữ dữ liệu
 #define TRADING_DAYS_PER_YEAR 252 // Số ngày giao dịch trong năm
 #define DEFAULT_ATR_PERIOD 14     // Số nến mặc định cho ATR
+
+// FIX: Khai báo namespace để tránh xung đột
+namespace ApexPullback {
 
 //+------------------------------------------------------------------+
 //| Cấu trúc dữ liệu Asset Profile                                   |
@@ -65,7 +72,7 @@ struct AssetProfileData {
     // Constructor để khởi tạo giá trị mặc định
     void AssetProfileData() {
         symbol = "";
-        assetClass = ASSET_FOREX;
+        assetClass = ASSET_CLASS_FOREX;
         symbolGroup = GROUP_UNDEFINED;
         volatilityLevel = VOLATILITY_MEDIUM;
         
@@ -154,8 +161,8 @@ public:
     bool UpdateHistoricalData(AssetProfileData &profile);
     
     // Các phương thức truy vấn thông tin
-    AssetProfileData* GetCurrentAssetProfile();
-    AssetProfileData* GetAssetProfile(string symbol);
+    AssetProfileData GetCurrentAssetProfile();
+    bool GetAssetProfile(string symbol, AssetProfileData& profile);
     ENUM_ASSET_CLASS GetAssetClass(string symbol = "");
     ENUM_SYMBOL_GROUP GetSymbolGroup(string symbol = "");
     
@@ -196,10 +203,12 @@ private:
     void InitializeDefaultValues();
 };
 
+// FIX: Định nghĩa các phương thức trong cùng namespace
+
 //+------------------------------------------------------------------+
 //| Constructor                                                      |
 //+------------------------------------------------------------------+
-CAssetProfileManager::CAssetProfileManager() {
+CAssetProfileManager::CAssetProfileManager(void) {
     m_CurrentSymbol = _Symbol;
     m_MainTimeframe = PERIOD_CURRENT;
     m_ProfileCount = 0;
@@ -236,26 +245,23 @@ CAssetProfileManager::~CAssetProfileManager() {
 //| Khởi tạo các giá trị mặc định theo loại tài sản                  |
 //+------------------------------------------------------------------+
 void CAssetProfileManager::InitializeDefaultValues() {
-    // Ngưỡng spread mặc định (điểm) theo loại tài sản
-    m_DefaultSpreadThresholds[ASSET_FOREX] = 30.0;      // Forex: 30 điểm
-    m_DefaultSpreadThresholds[ASSET_METALS] = 100.0;    // Metals: 100 điểm
-    m_DefaultSpreadThresholds[ASSET_INDICES] = 50.0;    // Indices: 50 điểm
-    m_DefaultSpreadThresholds[ASSET_CRYPTO] = 200.0;    // Crypto: 200 điểm
-    m_DefaultSpreadThresholds[ASSET_OTHER] = 50.0;      // Other: 50 điểm
-    
-    // Hệ số ATR mặc định cho SL theo loại tài sản
-    m_DefaultATRMultipliers[ASSET_FOREX] = 1.5;         // Forex: 1.5 ATR
-    m_DefaultATRMultipliers[ASSET_METALS] = 1.2;        // Metals: 1.2 ATR
-    m_DefaultATRMultipliers[ASSET_INDICES] = 1.3;       // Indices: 1.3 ATR
-    m_DefaultATRMultipliers[ASSET_CRYPTO] = 2.0;        // Crypto: 2.0 ATR
-    m_DefaultATRMultipliers[ASSET_OTHER] = 1.5;         // Other: 1.5 ATR
-    
-    // % Risk mặc định theo loại tài sản
-    m_DefaultRiskPercents[ASSET_FOREX] = 1.0;           // Forex: 1.0%
-    m_DefaultRiskPercents[ASSET_METALS] = 0.75;         // Metals: 0.75%
-    m_DefaultRiskPercents[ASSET_INDICES] = 0.75;        // Indices: 0.75%
-    m_DefaultRiskPercents[ASSET_CRYPTO] = 0.5;          // Crypto: 0.5%
-    m_DefaultRiskPercents[ASSET_OTHER] = 0.75;          // Other: 0.75%
+    m_DefaultSpreadThresholds[0] = 30.0;   // ASSET_CLASS_FOREX
+    m_DefaultSpreadThresholds[1] = 100.0;  // ASSET_CLASS_METALS
+    m_DefaultSpreadThresholds[2] = 50.0;   // ASSET_CLASS_INDICES
+    m_DefaultSpreadThresholds[3] = 200.0;  // ASSET_CLASS_CRYPTO
+    m_DefaultSpreadThresholds[4] = 50.0;   // ASSET_CLASS_OTHER
+
+    m_DefaultATRMultipliers[0] = 1.5;      // ASSET_CLASS_FOREX
+    m_DefaultATRMultipliers[1] = 1.2;      // ASSET_CLASS_METALS
+    m_DefaultATRMultipliers[2] = 1.3;      // ASSET_CLASS_INDICES
+    m_DefaultATRMultipliers[3] = 2.0;      // ASSET_CLASS_CRYPTO
+    m_DefaultATRMultipliers[4] = 1.5;      // ASSET_CLASS_OTHER
+
+    m_DefaultRiskPercents[0] = 1.0;        // ASSET_CLASS_FOREX
+    m_DefaultRiskPercents[1] = 0.75;       // ASSET_CLASS_METALS
+    m_DefaultRiskPercents[2] = 0.75;       // ASSET_CLASS_INDICES
+    m_DefaultRiskPercents[3] = 0.5;        // ASSET_CLASS_CRYPTO
+    m_DefaultRiskPercents[4] = 0.75;       // ASSET_CLASS_OTHER
 }
 
 //+------------------------------------------------------------------+
@@ -320,6 +326,10 @@ bool CAssetProfileManager::Initialize(string symbol, ENUM_TIMEFRAMES timeframe, 
     return true;
 }
 
+// FIX: Thêm các phương thức còn lại của lớp CAssetProfileManager với cùng cách định nghĩa
+// Giữ nguyên các định nghĩa phương thức khác từ file gốc nhưng đảm bảo đúng cú pháp
+// CAssetProfileManager::TênPhươngThức
+
 //+------------------------------------------------------------------+
 //| Thiết lập các tham số cấu hình                                   |
 //+------------------------------------------------------------------+
@@ -376,9 +386,9 @@ bool CAssetProfileManager::Update() {
         
         // Kiểm tra thời gian cần cập nhật
         if (TimeCurrent() - m_AssetProfiles[i].lastUpdated > m_UpdateIntervalMinutes * 60) {
-            AssetProfileData &profile = m_AssetProfiles[i];
-            if (!AnalyzeSymbol(profile.symbol, profile)) {
-                LogInfo("Không thể cập nhật profile cho: " + profile.symbol, true);
+            // Sử dụng trực tiếp m_AssetProfiles[i] thay vì tham chiếu cục bộ
+            if (!AnalyzeSymbol(m_AssetProfiles[i].symbol, m_AssetProfiles[i])) {
+                LogInfo("Không thể cập nhật profile cho: " + m_AssetProfiles[i].symbol, true);
                 success = false;
             }
         }
@@ -434,6 +444,8 @@ bool CAssetProfileManager::UpdateCurrentSymbol(bool forceUpdate) {
     return true;
 }
 
+
+
 //+------------------------------------------------------------------+
 //| Phân tích và tạo profile cho một symbol                          |
 //+------------------------------------------------------------------+
@@ -453,7 +465,7 @@ bool CAssetProfileManager::AnalyzeSymbol(string symbol, AssetProfileData &profil
     profile.symbol = symbol;
     
     // Phát hiện loại tài sản nếu chưa có
-    if (profile.assetClass == ASSET_FOREX || forceAnalysis) {
+    if (profile.assetClass == ASSET_CLASS_FOREX || forceAnalysis) {
         DetectAssetClass(symbol, profile);
     }
     
@@ -538,14 +550,14 @@ bool CAssetProfileManager::DetectAssetClass(string symbol, AssetProfileData &pro
     if (symbol == "") return false;
     
     // Mặc định là Forex
-    profile.assetClass = ASSET_FOREX;
+    profile.assetClass = ASSET_CLASS_FOREX;
     profile.symbolGroup = GROUP_UNDEFINED;
     
     // Kiểm tra các loại tài sản dựa trên quy tắc đặt tên thông thường
     
     // Kiểm tra Forex
     if (StringLen(symbol) == 6) {
-        profile.assetClass = ASSET_FOREX;
+        profile.assetClass = ASSET_CLASS_FOREX;
         
         // Xác định nhóm cặp tiền
         string baseCurrency = StringSubstr(symbol, 0, 3);
@@ -581,7 +593,7 @@ bool CAssetProfileManager::DetectAssetClass(string symbol, AssetProfileData &pro
     else if (StringFind(symbol, "GOLD") >= 0 || StringFind(symbol, "SILVER") >= 0 || 
              StringFind(symbol, "PLAT") >= 0 || StringFind(symbol, "XAU") >= 0 || 
              StringFind(symbol, "XAG") >= 0) {
-        profile.assetClass = ASSET_METALS;
+        profile.assetClass = ASSET_CLASS_METALS;
         
         // Xác định nhóm kim loại
         if (StringFind(symbol, "GOLD") >= 0 || StringFind(symbol, "XAU") >= 0) {
@@ -599,7 +611,7 @@ bool CAssetProfileManager::DetectAssetClass(string symbol, AssetProfileData &pro
              StringFind(symbol, "NAS") >= 0 || StringFind(symbol, "SPX") >= 0 || 
              StringFind(symbol, "DOW") >= 0 || StringFind(symbol, "DAX") >= 0 || 
              StringFind(symbol, "FTSE") >= 0 || StringFind(symbol, "NIKKEI") >= 0) {
-        profile.assetClass = ASSET_INDICES;
+        profile.assetClass = ASSET_CLASS_INDICES;
         
         // Xác định nhóm chỉ số
         if (StringFind(symbol, "US") >= 0 || StringFind(symbol, "NAS") >= 0 || 
@@ -619,23 +631,23 @@ bool CAssetProfileManager::DetectAssetClass(string symbol, AssetProfileData &pro
     else if (StringFind(symbol, "BTC") >= 0 || StringFind(symbol, "ETH") >= 0 || 
              StringFind(symbol, "LTC") >= 0 || StringFind(symbol, "XRP") >= 0 || 
              StringFind(symbol, "BCH") >= 0 || StringFind(symbol, "EOS") >= 0) {
-        profile.assetClass = ASSET_CRYPTO;
+        profile.assetClass = ASSET_CLASS_CRYPTO;
         profile.symbolGroup = GROUP_CRYPTO;
     }
     // Kiểm tra Oil/Energy
     else if (StringFind(symbol, "OIL") >= 0 || StringFind(symbol, "BRENT") >= 0 || 
              StringFind(symbol, "WTI") >= 0 || StringFind(symbol, "GAS") >= 0) {
-        profile.assetClass = ASSET_OTHER;
+        profile.assetClass = ASSET_CLASS_OTHER;
         profile.symbolGroup = GROUP_ENERGY;
     } else {
         // Mặc định là OTHER
-        profile.assetClass = ASSET_OTHER;
+        profile.assetClass = ASSET_CLASS_OTHER;
         profile.symbolGroup = GROUP_UNDEFINED;
     }
     
     // Xác định mức độ biến động dựa trên loại tài sản
     switch (profile.assetClass) {
-        case ASSET_FOREX:
+        case ASSET_CLASS_FOREX:
             if (profile.symbolGroup == GROUP_MAJOR) {
                 profile.volatilityLevel = VOLATILITY_LOW;
             } else if (profile.symbolGroup == GROUP_MINOR) {
@@ -645,15 +657,15 @@ bool CAssetProfileManager::DetectAssetClass(string symbol, AssetProfileData &pro
             }
             break;
             
-        case ASSET_METALS:
+        case ASSET_CLASS_METALS:
             profile.volatilityLevel = VOLATILITY_MEDIUM;
             break;
             
-        case ASSET_INDICES:
+        case ASSET_CLASS_INDICES:
             profile.volatilityLevel = VOLATILITY_MEDIUM;
             break;
             
-        case ASSET_CRYPTO:
+        case ASSET_CLASS_CRYPTO:
             profile.volatilityLevel = VOLATILITY_EXTREME;
             break;
             
@@ -702,54 +714,46 @@ bool CAssetProfileManager::UpdateHistoricalData(AssetProfileData &profile) {
 //+------------------------------------------------------------------+
 //| Lấy thông tin profile cho symbol hiện tại                         |
 //+------------------------------------------------------------------+
-AssetProfileData* CAssetProfileManager::GetCurrentAssetProfile() {
-    // Cập nhật profile nếu cần và được bật auto update
+AssetProfileData CAssetProfileManager::GetCurrentAssetProfile() {
     if (m_AutoUpdateEnabled) {
         datetime currentTime = TimeCurrent();
         if (currentTime - m_CurrentAssetProfile.lastUpdated > m_UpdateIntervalMinutes * 60) {
             UpdateCurrentSymbol();
         }
     }
-    
-    return &m_CurrentAssetProfile;
+    return m_CurrentAssetProfile;
 }
 
 //+------------------------------------------------------------------+
 //| Lấy thông tin profile cho một symbol cụ thể                      |
 //+------------------------------------------------------------------+
-AssetProfileData* CAssetProfileManager::GetAssetProfile(string symbol) {
-    // Nếu là symbol hiện tại, trả về profile hiện tại
+bool CAssetProfileManager::GetAssetProfile(string symbol, AssetProfileData& profile) {
     if (symbol == "" || symbol == m_CurrentSymbol) {
-        return GetCurrentAssetProfile();
+        profile = GetCurrentAssetProfile();
+        return true;
     }
-    
-    // Tìm trong danh sách profile đã có
     int index = GetProfileIndex(symbol);
     if (index >= 0) {
-        // Cập nhật nếu cần và được bật auto update
         if (m_AutoUpdateEnabled) {
             datetime currentTime = TimeCurrent();
             if (currentTime - m_AssetProfiles[index].lastUpdated > m_UpdateIntervalMinutes * 60) {
                 AnalyzeSymbol(symbol, m_AssetProfiles[index]);
             }
         }
-        
-        return &m_AssetProfiles[index];
+        profile = m_AssetProfiles[index];
+        return true;
     }
-    
-    // Nếu không tìm thấy, tạo profile mới
     if (m_ProfileCount < MAX_ASSETS_PROFILE) {
         AssetProfileData newProfile;
         if (AnalyzeSymbol(symbol, newProfile)) {
             m_AssetProfiles[m_ProfileCount] = newProfile;
             m_ProfileCount++;
-            return &m_AssetProfiles[m_ProfileCount - 1];
+            profile = m_AssetProfiles[m_ProfileCount - 1];
+            return true;
         }
     }
-    
-    // Không thể tạo profile mới
     LogInfo("Không thể lấy hoặc tạo profile cho: " + symbol, true);
-    return NULL;
+    return false;
 }
 
 //+------------------------------------------------------------------+
@@ -760,13 +764,13 @@ ENUM_ASSET_CLASS CAssetProfileManager::GetAssetClass(string symbol) {
     if (symbol == "") symbol = m_CurrentSymbol;
     
     // Lấy profile và trả về loại tài sản
-    AssetProfileData *profile = GetAssetProfile(symbol);
-    if (profile != NULL) {
+    AssetProfileData profile;
+    if (GetAssetProfile(symbol, profile)) {
         return profile.assetClass;
     }
     
     // Mặc định là Forex nếu không tìm thấy
-    return ASSET_FOREX;
+    return ASSET_CLASS_FOREX;
 }
 
 //+------------------------------------------------------------------+
@@ -777,8 +781,8 @@ ENUM_SYMBOL_GROUP CAssetProfileManager::GetSymbolGroup(string symbol) {
     if (symbol == "") symbol = m_CurrentSymbol;
     
     // Lấy profile và trả về nhóm symbol
-    AssetProfileData *profile = GetAssetProfile(symbol);
-    if (profile != NULL) {
+    AssetProfileData profile;
+    if (GetAssetProfile(symbol, profile)) {
         return profile.symbolGroup;
     }
     
@@ -790,53 +794,42 @@ ENUM_SYMBOL_GROUP CAssetProfileManager::GetSymbolGroup(string symbol) {
 //| Lấy SL tối ưu (điểm) cho symbol                                  |
 //+------------------------------------------------------------------+
 double CAssetProfileManager::GetOptimalSLPoints(string symbol) {
-    // Sử dụng symbol hiện tại nếu không được chỉ định
     if (symbol == "") symbol = m_CurrentSymbol;
-    
-    // Lấy profile
-    AssetProfileData *profile = GetAssetProfile(symbol);
-    if (profile == NULL) return 0;
-    
-    // Tính toán SL tối ưu dựa trên ATR
+    AssetProfileData profile;
+    if (!GetAssetProfile(symbol, profile)) return 0;
     double atr = profile.averageATR;
     double atrPoints = profile.averageATRPoints;
-    
-    // Nếu không có ATR, sử dụng giá trị mặc định
     if (atr <= 0) {
-        // 50 điểm cho Forex, 200 điểm cho Kim loại, 100 điểm cho chỉ số, 500 điểm cho Crypto
         switch (profile.assetClass) {
-            case ASSET_FOREX:    return 50.0;
-            case ASSET_METALS:   return 200.0;
-            case ASSET_INDICES:  return 100.0;
-            case ASSET_CRYPTO:   return 500.0;
+            case ASSET_CLASS_FOREX:    return 50.0;
+            case ASSET_CLASS_METALS:   return 200.0;
+            case ASSET_CLASS_INDICES:  return 100.0;
+            case ASSET_CLASS_CRYPTO:   return 500.0;
             default:             return 100.0;
         }
     }
-    
-    // SL = ATR * hệ số tối ưu
     double slPoints = atrPoints * profile.optimalSLATRMulti;
-    
     return slPoints;
 }
 
 //+------------------------------------------------------------------+
 //| Lấy TP tối ưu (điểm) cho symbol                                  |
 //+------------------------------------------------------------------+
-double CAssetProfileManager::GetOptimalTPPoints(string symbol, double slPoints) {
+double CAssetProfileManager::GetOptimalTPPoints(string symbol, double targetSLPoints = 0) {
     // Sử dụng symbol hiện tại nếu không được chỉ định
     if (symbol == "") symbol = m_CurrentSymbol;
     
     // Lấy profile
-    AssetProfileData *profile = GetAssetProfile(symbol);
-    if (profile == NULL) return 0;
+    AssetProfileData profile;
+    if (!GetAssetProfile(symbol, profile)) return 0;
     
     // Nếu không cung cấp SL, tính toán SL
-    if (slPoints <= 0) {
-        slPoints = GetOptimalSLPoints(symbol);
+    if (targetSLPoints <= 0) {
+        targetSLPoints = GetOptimalSLPoints(symbol);
     }
     
     // TP = SL * R:R tối ưu
-    double tpPoints = slPoints * profile.optimalRRRatio;
+    double tpPoints = targetSLPoints * profile.optimalRRRatio;
     
     return tpPoints;
 }
@@ -849,8 +842,8 @@ double CAssetProfileManager::GetOptimalTrailingPoints(string symbol) {
     if (symbol == "") symbol = m_CurrentSymbol;
     
     // Lấy profile
-    AssetProfileData *profile = GetAssetProfile(symbol);
-    if (profile == NULL) return 0;
+    AssetProfileData profile;
+    if (!GetAssetProfile(symbol, profile)) return 0;
     
     // Trailing = ATR * hệ số trailing tối ưu
     double atrPoints = profile.averageATRPoints;
@@ -859,10 +852,10 @@ double CAssetProfileManager::GetOptimalTrailingPoints(string symbol) {
     if (atrPoints <= 0) {
         // 30 điểm cho Forex, 150 điểm cho Kim loại, 80 điểm cho chỉ số, 400 điểm cho Crypto
         switch (profile.assetClass) {
-            case ASSET_FOREX:    return 30.0;
-            case ASSET_METALS:   return 150.0;
-            case ASSET_INDICES:  return 80.0;
-            case ASSET_CRYPTO:   return 400.0;
+            case ASSET_CLASS_FOREX:    return 30.0;
+            case ASSET_CLASS_METALS:   return 150.0;
+            case ASSET_CLASS_INDICES:  return 80.0;
+            case ASSET_CLASS_CRYPTO:   return 400.0;
             default:             return 80.0;
         }
     }
@@ -880,8 +873,8 @@ double CAssetProfileManager::GetAcceptableSpreadPoints(string symbol) {
     if (symbol == "") symbol = m_CurrentSymbol;
     
     // Lấy profile
-    AssetProfileData *profile = GetAssetProfile(symbol);
-    if (profile == NULL) return 0;
+    AssetProfileData profile;
+    if (!GetAssetProfile(symbol, profile)) return 0;
     
     // Trả về ngưỡng spread chấp nhận được
     return profile.acceptableSpread;
@@ -895,8 +888,8 @@ double CAssetProfileManager::GetRecommendedRiskPercent(string symbol, double bas
     if (symbol == "") symbol = m_CurrentSymbol;
     
     // Lấy profile
-    AssetProfileData *profile = GetAssetProfile(symbol);
-    if (profile == NULL) return baseRisk;
+    AssetProfileData profile;
+    if (!GetAssetProfile(symbol, profile)) return baseRisk;
     
     // Nếu baseRisk > 0, điều chỉnh dựa trên tỷ lệ so với risk mặc định
     if (baseRisk > 0) {
@@ -914,8 +907,8 @@ int CAssetProfileManager::GetOptimalTradingSession(string symbol) {
     if (symbol == "") symbol = m_CurrentSymbol;
     
     // Lấy profile
-    AssetProfileData *profile = GetAssetProfile(symbol);
-    if (profile == NULL) {
+    AssetProfileData profile;
+    if (!GetAssetProfile(symbol, profile)) {
         // Mặc định là London + NY
         return 6; // 2 + 4
     }
@@ -931,8 +924,8 @@ double CAssetProfileManager::GetAverageATR(string symbol) {
     if (symbol == "") symbol = m_CurrentSymbol;
     
     // Lấy profile
-    AssetProfileData *profile = GetAssetProfile(symbol);
-    if (profile == NULL) return 0;
+    AssetProfileData profile;
+    if (!GetAssetProfile(symbol, profile)) return 0;
     
     return profile.averageATR;
 }
@@ -945,8 +938,8 @@ double CAssetProfileManager::GetAverageATRPoints(string symbol) {
     if (symbol == "") symbol = m_CurrentSymbol;
     
     // Lấy profile
-    AssetProfileData *profile = GetAssetProfile(symbol);
-    if (profile == NULL) return 0;
+    AssetProfileData profile;
+    if (!GetAssetProfile(symbol, profile)) return 0;
     
     return profile.averageATRPoints;
 }
@@ -1353,7 +1346,6 @@ double CAssetProfileManager::CalculateYearlyVolatility(string symbol) {
 double CAssetProfileManager::GetDefaultAcceptableSpread(ENUM_ASSET_CLASS assetClass) {
     int index = (int)assetClass;
     if (index < 0 || index >= 5) index = 0;
-    
     return m_DefaultSpreadThresholds[index];
 }
 
@@ -1412,6 +1404,8 @@ void CAssetProfileManager::LogInfo(string message, bool important) {
 string CAssetProfileManager::GetProfileFilename(string symbol) {
     return m_StorageFolder + "//" + symbol + ".bin";
 }
+
+#endif // _ASSET_PROFILE_MANAGER_MQH_
 
 //+------------------------------------------------------------------+
 //| End of CAssetProfileManager class                                |

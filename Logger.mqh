@@ -2,22 +2,11 @@
 //|                                                     Logger.mqh |
 //|              APEX Pullback EA v14.0 - Hệ thống ghi nhật ký      |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2025, APEX Forex Systems"
-#property link      "https://www.apexpullback.com"
-#property version   "14.0"
-#property strict
 
+#include "Enums.mqh"
 //+------------------------------------------------------------------+
 //| Enum và cấu trúc hỗ trợ                                          |
 //+------------------------------------------------------------------+
-
-// Định nghĩa các cấp độ log - Kiểm soát lượng thông tin được ghi lại
-enum ENUM_LOG_LEVEL {
-   LOG_LEVEL_ERROR = 0,    // Chỉ ghi log lỗi nghiêm trọng
-   LOG_LEVEL_WARNING = 1,  // Ghi lỗi và cảnh báo
-   LOG_LEVEL_INFO = 2,     // Ghi lỗi, cảnh báo và thông tin chung
-   LOG_LEVEL_DEBUG = 3     // Ghi tất cả, bao gồm thông tin gỡ lỗi chi tiết
-};
 
 // Định nghĩa đầu ra của log - Nơi ghi nhật ký
 enum ENUM_LOG_OUTPUT {
@@ -90,7 +79,7 @@ CLogger::CLogger() {
    // Khởi tạo các biến thành viên với giá trị mặc định
    m_symbol = _Symbol;
    m_prefix = "APEX";
-   m_log_level = LOG_LEVEL_INFO;
+   m_log_level = LOG_INFO;
    m_log_output = LOG_OUTPUT_PRINT;
    m_log_file_name = "";
    m_log_file_handle = INVALID_HANDLE;
@@ -123,7 +112,7 @@ bool CLogger::Initialize(string prefix, bool enableDetailedLogs = false,
    // Lưu thông tin cơ bản
    m_symbol = _Symbol;
    m_prefix = prefix;
-   m_log_level = enableDetailedLogs ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO;
+   m_log_level = enableDetailedLogs ? LOG_DEBUG : LOG_INFO;
    m_log_output = enableCsvLog ? LOG_OUTPUT_BOTH : LOG_OUTPUT_PRINT;
    
    // Thiết lập Telegram nếu được kích hoạt
@@ -280,7 +269,7 @@ void CLogger::DisableTelegram() {
 //+------------------------------------------------------------------+
 void CLogger::LogDebug(string message) {
    // Chỉ ghi log nếu cấp độ log hiện tại cho phép
-   if(m_log_level >= LOG_LEVEL_DEBUG && m_is_initialized) {
+   if(m_log_level >= LOG_DEBUG && m_is_initialized) {
       string formatted_message;
       FormatLogMessage(formatted_message, "DEBUG", message);
       
@@ -299,7 +288,7 @@ void CLogger::LogDebug(string message) {
 //+------------------------------------------------------------------+
 void CLogger::LogInfo(string message) {
    // Chỉ ghi log nếu cấp độ log hiện tại cho phép
-   if(m_log_level >= LOG_LEVEL_INFO && m_is_initialized) {
+   if(m_log_level >= LOG_INFO && m_is_initialized) {
       string formatted_message;
       FormatLogMessage(formatted_message, "INFO", message);
       
@@ -322,7 +311,7 @@ void CLogger::LogInfo(string message) {
 //+------------------------------------------------------------------+
 void CLogger::LogWarning(string message) {
    // Chỉ ghi log nếu cấp độ log hiện tại cho phép
-   if(m_log_level >= LOG_LEVEL_WARNING && m_is_initialized) {
+   if(m_log_level >= LOG_WARNING && m_is_initialized) {
       string formatted_message;
       FormatLogMessage(formatted_message, "WARNING", message);
       

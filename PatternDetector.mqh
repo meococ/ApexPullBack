@@ -5,8 +5,9 @@
 //+------------------------------------------------------------------+
 #property strict
 
-#include "../CommonStructs.mqh"
-#include "../Logger.mqh"
+#include "CommonStructs.mqh"
+#include "Logger.mqh"
+#include "Enums.mqh"
 
 // Định nghĩa các tỷ lệ Fibonacci phổ biến
 #define FIB_0_236 0.236
@@ -35,7 +36,7 @@
 
 // Khai báo struct để lưu trữ mẫu hình đã phát hiện
 struct DetectedPattern {
-    ENUM_ENTRY_SCENARIO type;     // Loại mẫu hình
+    ENUM_PATTERN_TYPE type;     // Loại mẫu hình
     bool isValid;                 // Mẫu hình có hợp lệ không
     bool isBullish;               // Xu hướng tăng hay giảm
     double strength;              // Độ mạnh (0.0 - 1.0)
@@ -48,7 +49,7 @@ struct DetectedPattern {
     
     // Constructor để khởi tạo giá trị mặc định
     DetectedPattern() {
-        type = SCENARIO_NONE;
+        type = PATTERN_NONE;
         isValid = false;
         isBullish = false;
         strength = 0.0;
@@ -124,7 +125,7 @@ public:
     }
     
     // Hàm chính để phát hiện mẫu hình
-    bool DetectPattern(ENUM_ENTRY_SCENARIO& scenario, double& strength);
+    bool DetectPattern(ENUM_PATTERN_TYPE& scenario, double& strength);
     
     // Hàm phát hiện các loại mẫu hình cụ thể
     bool IsPullback(bool isBullish, double& strength);
@@ -338,7 +339,7 @@ void CPatternDetector::SetATR(double atr) {
 //+------------------------------------------------------------------+
 //| Phát hiện mẫu hình và trả về thông tin                           |
 //+------------------------------------------------------------------+
-bool CPatternDetector::DetectPattern(ENUM_ENTRY_SCENARIO& scenario, double& strength) {
+bool CPatternDetector::DetectPattern(ENUM_PATTERN_TYPE& scenario, double& strength) {
     if (!m_isInitialized || m_atr <= 0) {
         if (m_logger) m_logger.LogError("PatternDetector chưa được khởi tạo đúng cách hoặc ATR không hợp lệ");
         scenario = SCENARIO_NONE;

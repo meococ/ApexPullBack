@@ -3,8 +3,13 @@
 //| Purpose: Chuẩn hóa toàn bộ phép tính chỉ báo cho Apex Pullback EA |
 //| Version: 14.0                                                     |
 //+------------------------------------------------------------------+
+
 #ifndef INDICATOR_UTILS_MQH
 #define INDICATOR_UTILS_MQH
+
+#include "Enums.mqh"                        // Định nghĩa enums
+#include "CommonStructs.mqh"                // Định nghĩa structs
+#include "Constants.mqh"                    // Định nghĩa constants
 
 // Đưa tất cả vào namespace IndicatorUtils để tránh xung đột tên
 namespace ApexPullback {
@@ -19,19 +24,19 @@ private:
     bool m_VerboseLogging;          // Bật log chi tiết
     
     // === Các Handle chỉ báo - Timeframe chính ===
-    int m_MA_Handles[10];           // Lưu handle của các MA (EMA chủ yếu)
-    int m_ADX_Handle;               // ADX
-    int m_RSI_Handle;               // RSI
-    int m_ATR_Handle;               // ATR
+    long m_MA_Handles[10];          // Lưu handle của các MA (EMA chủ yếu)
+    long m_ADX_Handle;              // ADX
+    long m_RSI_Handle;              // RSI
+    long m_ATR_Handle;              // ATR
     long m_Volume_Handle;           // Volume
-    int m_MACD_Handle;              // MACD
-    int m_BB_Handle;                // Bollinger Bands
+    long m_MACD_Handle;             // MACD
+    long m_BB_Handle;               // Bollinger Bands
     
     // === Các Handle chỉ báo - Timeframe cao hơn (H4) ===
-    int m_HTF_MA_Handles[10];       // EMA trên H4
-    int m_HTF_ADX_Handle;           // ADX trên H4
-    int m_HTF_RSI_Handle;           // RSI trên H4
-    int m_HTF_ATR_Handle;           // ATR trên H4
+    long m_HTF_MA_Handles[10];      // EMA trên H4
+    long m_HTF_ADX_Handle;          // ADX trên H4
+    long m_HTF_RSI_Handle;          // RSI trên H4
+    long m_HTF_ATR_Handle;          // ATR trên H4
     
     // === Bộ đệm cache cho tối ưu hóa ===
     bool m_UseCache;                // Bật/tắt cache
@@ -157,7 +162,7 @@ CIndicatorUtils::CIndicatorUtils()
     m_ADX_Handle = INVALID_HANDLE;
     m_RSI_Handle = INVALID_HANDLE;
     m_ATR_Handle = INVALID_HANDLE;
-    m_Volume_Handle = (long)INVALID_HANDLE;
+    m_Volume_Handle = INVALID_HANDLE;
     m_MACD_Handle = INVALID_HANDLE;
     m_BB_Handle = INVALID_HANDLE;
     
@@ -245,60 +250,60 @@ void CIndicatorUtils::Deinitialize()
     // Giải phóng handle MA
     for(int i = 0; i < m_MACount; i++) {
         if (m_MA_Handles[i] != INVALID_HANDLE) {
-            IndicatorRelease(m_MA_Handles[i]);
+            IndicatorRelease((int)m_MA_Handles[i]);
             m_MA_Handles[i] = INVALID_HANDLE;
         }
         
         if (m_HTF_MA_Handles[i] != INVALID_HANDLE) {
-            IndicatorRelease(m_HTF_MA_Handles[i]);
+            IndicatorRelease((int)m_HTF_MA_Handles[i]);
             m_HTF_MA_Handles[i] = INVALID_HANDLE;
         }
     }
     
     // Giải phóng các handle khác
     if (m_ADX_Handle != INVALID_HANDLE) {
-        IndicatorRelease(m_ADX_Handle);
+        IndicatorRelease((int)m_ADX_Handle);
         m_ADX_Handle = INVALID_HANDLE;
     }
     
     if (m_RSI_Handle != INVALID_HANDLE) {
-        IndicatorRelease(m_RSI_Handle);
+        IndicatorRelease((int)m_RSI_Handle);
         m_RSI_Handle = INVALID_HANDLE;
     }
     
     if (m_ATR_Handle != INVALID_HANDLE) {
-        IndicatorRelease(m_ATR_Handle);
+        IndicatorRelease((int)m_ATR_Handle);
         m_ATR_Handle = INVALID_HANDLE;
     }
     
     if (m_Volume_Handle != INVALID_HANDLE) {
-        IndicatorRelease(m_Volume_Handle);
-        m_Volume_Handle = (long)INVALID_HANDLE;
+        IndicatorRelease((int)m_Volume_Handle);
+        m_Volume_Handle = INVALID_HANDLE;
     }
     
     if (m_MACD_Handle != INVALID_HANDLE) {
-        IndicatorRelease(m_MACD_Handle);
+        IndicatorRelease((int)m_MACD_Handle);
         m_MACD_Handle = INVALID_HANDLE;
     }
     
     if (m_BB_Handle != INVALID_HANDLE) {
-        IndicatorRelease(m_BB_Handle);
+        IndicatorRelease((int)m_BB_Handle);
         m_BB_Handle = INVALID_HANDLE;
     }
     
     // Giải phóng handle timeframe cao hơn
     if (m_HTF_ADX_Handle != INVALID_HANDLE) {
-        IndicatorRelease(m_HTF_ADX_Handle);
+        IndicatorRelease((int)m_HTF_ADX_Handle);
         m_HTF_ADX_Handle = INVALID_HANDLE;
     }
     
     if (m_HTF_RSI_Handle != INVALID_HANDLE) {
-        IndicatorRelease(m_HTF_RSI_Handle);
+        IndicatorRelease((int)m_HTF_RSI_Handle);
         m_HTF_RSI_Handle = INVALID_HANDLE;
     }
     
     if (m_HTF_ATR_Handle != INVALID_HANDLE) {
-        IndicatorRelease(m_HTF_ATR_Handle);
+        IndicatorRelease((int)m_HTF_ATR_Handle);
         m_HTF_ATR_Handle = INVALID_HANDLE;
     }
     
@@ -333,15 +338,15 @@ bool CIndicatorUtils::RegisterMA(int period, ENUM_MA_METHOD maMethod,
     }
     
     // Khởi tạo MA mới
-    int maHandle = iMA(m_Symbol, m_Timeframe, period, 0, maMethod, appliedPrice);
-    int htfMaHandle = iMA(m_Symbol, m_HigherTF, period, 0, maMethod, appliedPrice);
+    long maHandle = iMA(m_Symbol, m_Timeframe, period, 0, maMethod, appliedPrice);
+    long htfMaHandle = iMA(m_Symbol, m_HigherTF, period, 0, maMethod, appliedPrice);
     
     if (maHandle == INVALID_HANDLE || htfMaHandle == INVALID_HANDLE) {
         LogMessage("LỖI: Không thể khởi tạo MA chu kỳ " + IntegerToString(period));
         
         // Giải phóng handle nếu một trong hai thành công nhưng cái còn lại thất bại
-        if (maHandle != INVALID_HANDLE) IndicatorRelease(maHandle);
-        if (htfMaHandle != INVALID_HANDLE) IndicatorRelease(htfMaHandle);
+        if (maHandle != INVALID_HANDLE) IndicatorRelease((int)maHandle);
+        if (htfMaHandle != INVALID_HANDLE) IndicatorRelease((int)htfMaHandle);
         
         return false;
     }
@@ -428,7 +433,7 @@ double CIndicatorUtils::GetMA(int period, int shift)
     
     // Lấy giá trị từ handle
     double value[];
-    if (CopyBuffer(m_MA_Handles[index], 0, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_MA_Handles[index], 0, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu từ handle MA " + IntegerToString(period));
         return EMPTY_VALUE;
     }
@@ -463,7 +468,7 @@ double CIndicatorUtils::GetHTF_MA(int period, int shift)
     
     // Lấy giá trị từ handle
     double value[];
-    if (CopyBuffer(m_HTF_MA_Handles[index], 0, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_HTF_MA_Handles[index], 0, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu từ handle MA HTF " + IntegerToString(period));
         return EMPTY_VALUE;
     }
@@ -479,7 +484,7 @@ double CIndicatorUtils::GetADX(int shift)
     if (!m_IsInitialized || m_ADX_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_ADX_Handle, 0, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_ADX_Handle, 0, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu ADX");
         return EMPTY_VALUE;
     }
@@ -495,7 +500,7 @@ double CIndicatorUtils::GetADXSlope(int periods)
     if (!m_IsInitialized || m_ADX_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double values[];
-    if (CopyBuffer(m_ADX_Handle, 0, 0, periods + 1, values) <= 0) {
+    if (CopyBuffer((int)m_ADX_Handle, 0, 0, periods + 1, values) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu ADX cho tính slope");
         return EMPTY_VALUE;
     }
@@ -520,7 +525,7 @@ double CIndicatorUtils::GetPlusDI(int shift)
     if (!m_IsInitialized || m_ADX_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_ADX_Handle, 1, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_ADX_Handle, 1, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu +DI");
         return EMPTY_VALUE;
     }
@@ -536,7 +541,7 @@ double CIndicatorUtils::GetMinusDI(int shift)
     if (!m_IsInitialized || m_ADX_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_ADX_Handle, 2, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_ADX_Handle, 2, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu -DI");
         return EMPTY_VALUE;
     }
@@ -552,7 +557,7 @@ double CIndicatorUtils::GetHTF_ADX(int shift)
     if (!m_IsInitialized || m_HTF_ADX_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_HTF_ADX_Handle, 0, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_HTF_ADX_Handle, 0, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu ADX HTF");
         return EMPTY_VALUE;
     }
@@ -568,7 +573,7 @@ double CIndicatorUtils::GetRSI(int shift)
     if (!m_IsInitialized || m_RSI_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_RSI_Handle, 0, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_RSI_Handle, 0, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu RSI");
         return EMPTY_VALUE;
     }
@@ -584,7 +589,7 @@ double CIndicatorUtils::GetRSISlope(int periods)
     if (!m_IsInitialized || m_RSI_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double values[];
-    if (CopyBuffer(m_RSI_Handle, 0, 0, periods + 1, values) <= 0) {
+    if (CopyBuffer((int)m_RSI_Handle, 0, 0, periods + 1, values) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu RSI cho tính slope");
         return EMPTY_VALUE;
     }
@@ -609,7 +614,7 @@ double CIndicatorUtils::GetHTF_RSI(int shift)
     if (!m_IsInitialized || m_HTF_RSI_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_HTF_RSI_Handle, 0, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_HTF_RSI_Handle, 0, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu RSI HTF");
         return EMPTY_VALUE;
     }
@@ -625,7 +630,7 @@ double CIndicatorUtils::GetATR(int shift)
     if (!m_IsInitialized || m_ATR_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_ATR_Handle, 0, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_ATR_Handle, 0, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu ATR");
         return EMPTY_VALUE;
     }
@@ -641,7 +646,7 @@ double CIndicatorUtils::GetAverageATR(int periods)
     if (!m_IsInitialized || m_ATR_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double values[];
-    if (CopyBuffer(m_ATR_Handle, 0, 0, periods, values) <= 0) {
+    if (CopyBuffer((int)m_ATR_Handle, 0, 0, periods, values) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu ATR cho tính trung bình");
         return EMPTY_VALUE;
     }
@@ -678,7 +683,7 @@ double CIndicatorUtils::GetHTF_ATR(int shift)
     if (!m_IsInitialized || m_HTF_ATR_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_HTF_ATR_Handle, 0, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_HTF_ATR_Handle, 0, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu ATR HTF");
         return EMPTY_VALUE;
     }
@@ -694,7 +699,7 @@ double CIndicatorUtils::GetMACDMain(int shift)
     if (!m_IsInitialized || m_MACD_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_MACD_Handle, 0, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_MACD_Handle, 0, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu MACD Main");
         return EMPTY_VALUE;
     }
@@ -710,7 +715,7 @@ double CIndicatorUtils::GetMACDSignal(int shift)
     if (!m_IsInitialized || m_MACD_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_MACD_Handle, 1, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_MACD_Handle, 1, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu MACD Signal");
         return EMPTY_VALUE;
     }
@@ -771,7 +776,7 @@ double CIndicatorUtils::GetBBUpper(int shift)
     if (!m_IsInitialized || m_BB_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_BB_Handle, 1, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_BB_Handle, 1, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu BB Upper");
         return EMPTY_VALUE;
     }
@@ -787,7 +792,7 @@ double CIndicatorUtils::GetBBMiddle(int shift)
     if (!m_IsInitialized || m_BB_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_BB_Handle, 0, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_BB_Handle, 0, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu BB Middle");
         return EMPTY_VALUE;
     }
@@ -803,7 +808,7 @@ double CIndicatorUtils::GetBBLower(int shift)
     if (!m_IsInitialized || m_BB_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
-    if (CopyBuffer(m_BB_Handle, 2, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_BB_Handle, 2, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu BB Lower");
         return EMPTY_VALUE;
     }
