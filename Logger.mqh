@@ -3,7 +3,12 @@
 //|              APEX Pullback EA v14.0 - Hệ thống ghi nhật ký      |
 //+------------------------------------------------------------------+
 
+#ifndef _LOGGER_MQH_
+#define _LOGGER_MQH_
+
 #include "Enums.mqh"
+
+namespace ApexPullback {
 //+------------------------------------------------------------------+
 //| Enum và cấu trúc hỗ trợ                                          |
 //+------------------------------------------------------------------+
@@ -333,32 +338,29 @@ void CLogger::LogWarning(string message) {
 //| Ghi log ở cấp độ ERROR - Lỗi nghiêm trọng cần xử lý ngay         |
 //+------------------------------------------------------------------+
 void CLogger::LogError(string message) {
-   // Luôn ghi log lỗi nếu đã khởi tạo
-   if(m_is_initialized) {
-      string formatted_message;
-      FormatLogMessage(formatted_message, "ERROR", message);
-      
-      // Hiển thị trong cửa sổ "Experts"
-      if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH)
-         Print(formatted_message);
-         
-      // Ghi vào file
-      if(m_log_output == LOG_OUTPUT_FILE || m_log_output == LOG_OUTPUT_BOTH)
-         WriteToFile(formatted_message);
-      
-      // Gửi thông báo Telegram cho tất cả các lỗi
-      if(m_enable_telegram)
-         SendTelegramMessage(formatted_message);
+   // Nếu chưa khởi tạo thì in ra màn hình
+   if(!m_is_initialized) {
+      Print("ERROR: " + message);
+      return;
    }
-}
-
-//+------------------------------------------------------------------+
-//| Thiết lập cấp độ log - Điều chỉnh lượng thông tin ghi lại        |
-//+------------------------------------------------------------------+
-void CLogger::SetLogLevel(ENUM_LOG_LEVEL log_level) {
-   if(m_is_initialized) {
-      m_log_level = log_level;
-      LogInfo("Đã thay đổi cấp độ log thành: " + EnumToString(log_level));
+   
+   // Định dạng thông điệp
+   string formatted_message;
+   FormatLogMessage(formatted_message, "ERROR", message);
+   
+   // In ra màn hình nếu cần
+   if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH) {
+      Print(formatted_message);
+   }
+   
+   // Ghi vào file nếu cần
+   if(m_log_output == LOG_OUTPUT_FILE || m_log_output == LOG_OUTPUT_BOTH) {
+      WriteToFile(formatted_message);
+   }
+   
+   // Gửi thông báo Telegram (lỗi luôn được đẩy đi bất kể cài đặt)
+   if(m_enable_telegram) {
+      SendTelegramMessage("[ERROR] " + message);
    }
 }
 
@@ -409,3 +411,7 @@ StringReplace(m_log_file_name, ".", "_");
       LogInfo("Đã thay đổi chế độ xuất log thành: " + EnumToString(log_output));
    }
 }
+
+} // namespace ApexPullback
+
+#endif // _LOGGER_MQH_

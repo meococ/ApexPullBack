@@ -19,12 +19,12 @@
 
 // Định nghĩa hằng số
 #define MAX_ASSETS_PROFILE 50     // Số lượng tài sản tối đa có thể quản lý
+
+// Sử dụng namespace ApexPullback để đảm bảo tính nhất quán với EA chính
+namespace ApexPullback {
 #define MAX_HISTORY_DAYS 30       // Số ngày lịch sử lưu trữ dữ liệu
 #define TRADING_DAYS_PER_YEAR 252 // Số ngày giao dịch trong năm
 #define DEFAULT_ATR_PERIOD 14     // Số nến mặc định cho ATR
-
-// FIX: Khai báo namespace để tránh xung đột
-namespace ApexPullback {
 
 //+------------------------------------------------------------------+
 //| Cấu trúc dữ liệu Asset Profile                                   |
@@ -1404,6 +1404,8 @@ void CAssetProfileManager::LogInfo(string message, bool important) {
 string CAssetProfileManager::GetProfileFilename(string symbol) {
     return m_StorageFolder + "//" + symbol + ".bin";
 }
+
+} // Đóng namespace ApexPullback
 
 #endif // _ASSET_PROFILE_MANAGER_MQH_
 

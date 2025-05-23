@@ -8,96 +8,19 @@
 //| tối ưu trailing stop đa chiến lược, tích hợp quản lý rủi ro động |
 //+------------------------------------------------------------------+
 
-#property strict
+#ifndef _SWING_POINT_DETECTOR_MQH_
+#define _SWING_POINT_DETECTOR_MQH_
 
 #include <Trade\Trade.mqh>
-#include "Logger.mqh"
 #include "Enums.mqh" // Đảm bảo Enums được include trước
 #include "CommonStructs.mqh"
-#include "AssetProfiler.mqh" // Tích hợp AssetProfiler - Cải tiến v14
-#include "AssetProfileManager.mqh"
+#include "Logger.mqh"
 
-// Đảm bảo các cấu trúc cần thiết được định nghĩa
-#ifndef AssetProfile_Defined
-#define AssetProfile_Defined
+namespace ApexPullback {
 
-// Định nghĩa cấu trúc VolatilityCharacteristics nếu chưa có trong CommonStructs.mqh
-struct VolatilityCharacteristics {
-   double swingDetectionAtrFactor;
-   double majorSwingMultiplier;
-   double trailingStopAtrMultiplier;
-   double volatilityThreshold;
-   double volumeFactor;
-};
-
-// Định nghĩa cấu trúc AssetProfile nếu chưa có trong CommonStructs.mqh
-struct AssetProfile {
-   string symbol;
-   VolatilityCharacteristics volatilityCharacteristics;
-   // Các thuộc tính khác có thể cần
-};
-
-#endif
-
-// Đảm bảo ENUM_MARKET_REGIME được định nghĩa
-#ifndef ENUM_MARKET_REGIME_Defined
-#define ENUM_MARKET_REGIME_Defined
-
-#endif
-
-// Đảm bảo enum cho swing point type được định nghĩa
-#ifndef ENUM_SWING_POINT_TYPE_Defined
-#define ENUM_SWING_POINT_TYPE_Defined
-enum ENUM_SWING_POINT_TYPE {
-   SWING_UNKNOWN,   // Chưa xác định
-   SWING_HIGH,      // Đỉnh
-   SWING_LOW        // Đáy
-};
-#endif
-
-// Đảm bảo enum cho swing importance được định nghĩa
-#ifndef ENUM_SWING_IMPORTANCE_Defined
-#define ENUM_SWING_IMPORTANCE_Defined
-enum ENUM_SWING_IMPORTANCE {
-   SWING_MINOR,     // Đỉnh/đáy nhỏ
-   SWING_MAJOR,     // Đỉnh/đáy lớn
-   SWING_CRITICAL   // Đỉnh/đáy quan trọng
-};
-#endif
-
-// Định nghĩa cấu trúc SwingPoint đầy đủ
-struct SwingPoint {
-   datetime time;                    // Thời gian của swing point
-   double price;                     // Giá của swing point
-   ENUM_SWING_POINT_TYPE type;      // Loại: High hoặc Low
-   int strength;                     // Độ mạnh
-   int barIndex;                     // Index của nến
-   bool confirmed;                   // Đã được xác nhận
-   ENUM_SWING_IMPORTANCE importance; // Mức độ quan trọng
-   bool higherTimeframeAlign;        // Phù hợp với timeframe cao hơn
-   double deviation;                 // Độ lệch so với giá trung bình
-   bool isValidForTrading;           // Hợp lệ cho giao dịch
-   double reliability;               // Độ tin cậy (0.0-1.0)
-   bool isStructurallySignificant;   // Có ý nghĩa về cấu trúc
-   string description;               // Mô tả
-   
-   // Constructor với giá trị mặc định
-   SwingPoint() {
-      time = 0;
-      price = 0.0;
-      type = SWING_UNKNOWN;
-      strength = 0;
-      barIndex = 0;
-      confirmed = false;
-      importance = SWING_MINOR;
-      higherTimeframeAlign = false;
-      deviation = 0.0;
-      isValidForTrading = false;
-      reliability = 0.0;
-      isStructurallySignificant = false;
-      description = "";
-   }
-};
+// Forward declarations
+class CAssetProfiler;
+class CAssetProfileManager;
 
 // Cấu trúc lưu trữ cấu hình phát hiện Swing - Cải tiến v14
 struct SwingDetectorConfig {
@@ -135,7 +58,7 @@ struct SwingDetectorConfig {
 
 // Cấu trúc lưu trữ cấu hình trailing stop - Mới v14
 struct TrailingStopConfig {
-   ENUM_TRAILING_MODE;  // Chiến lược trailing
+   ENUM_TRAILING_MODE strategy;  // Chiến lược trailing
    double atrMultiplier;             // Hệ số ATR
    int chandelierPeriod;             // Chu kỳ Chandelier
    double chandelierMultiplier;      // Hệ số Chandelier
@@ -758,7 +681,7 @@ void CSwingPointDetector::SetTrailingStopConfig(const TrailingStopConfig &config
 //+------------------------------------------------------------------+
 //| Thiết lập chiến lược trailing - Mới v14                           |
 //+------------------------------------------------------------------+
-void CSwingPointDetector::SetTrailingStrategy(ENUM_TRAILING_MODE)
+void CSwingPointDetector::SetTrailingStrategy(ENUM_TRAILING_MODE strategy)
 {
    m_TrailingConfig.strategy = strategy;
    
@@ -2955,6 +2878,7 @@ double CSwingPointDetector::GetOptimalTrailingStop(bool isLong, double currentPr
          return GetChandelierTrailingStop(isLong, currentPrice, m_TrailingConfig.chandelierPeriod, m_TrailingConfig.chandelierMultiplier);
          
       case TRAILING_SWING_BASED:
+      case TRAILING_STRUCTURAL:
          return GetStructuralTrailingStop(isLong, currentPrice);
          
       case TRAILING_HYBRID:
@@ -2964,274 +2888,49 @@ double CSwingPointDetector::GetOptimalTrailingStop(bool isLong, double currentPr
          return CalculateAdaptiveTrailingStop(isLong, currentPrice, currentSL, m_TrailingConfig);
          
       default:
-         // Mặc định sử dụng ATR-based trailing
+         // Mặc định sử dụng trailing ATR
          return GetSmartTrailingStop(isLong, currentPrice, currentSL, m_TrailingConfig.atrMultiplier);
    }
 }
 
 //+------------------------------------------------------------------+
-//| Lấy giá Trailing Stop thông minh theo ATR                        |
+//| Lấy tỷ lệ R:R tối ưu theo chế độ thị trường                      |
 //+------------------------------------------------------------------+
-double CSwingPointDetector::GetSmartTrailingStop(bool isLong, double currentPrice, double currentSL, double atrMultiplier = 1.0)
+double CSwingPointDetector::GetOptimalRiskRewardRatio(ENUM_MARKET_REGIME regime)
 {
-   double atr = GetValidATR();
-   
-   if(atr <= 0) {
-      return currentSL;
-   }
-   
-   // Tính vị trí trailing dựa trên ATR
-   double trailingStop = isLong ? currentPrice - atr * atrMultiplier : currentPrice + atr * atrMultiplier;
-   
-   // Đảm bảo trailing không trở về sau so với SL hiện tại
-   if(isLong) {
-      trailingStop = MathMax(trailingStop, currentSL);
-   } else {
-      trailingStop = MathMin(trailingStop, currentSL);
-   }
-   
-   // Chuẩn hóa giá trailing stop
-   trailingStop = NormalizeDouble(trailingStop, _Digits);
-   
-   return trailingStop;
-}
-
-//+------------------------------------------------------------------+
-//| Lấy giá Trailing Stop theo Chandelier Exit                       |
-//+------------------------------------------------------------------+
-double CSwingPointDetector::GetChandelierTrailingStop(bool isLong, double currentPrice, int lookbackPeriod, double atrMultiplier)
-{
-   double atr = GetValidATR();
-   
-   if(atr <= 0) {
-      return 0.0;
-   }
-   
-   // Lấy giá cao nhất/thấp nhất trong khoảng nhìn lại
-   double highestHigh = 0.0;
-   double lowestLow = DBL_MAX;
-   
-   double highArray[], lowArray[];
-   ArraySetAsSeries(highArray, true);
-   ArraySetAsSeries(lowArray, true);
-   
-   if(CopyHigh(m_Symbol, m_Timeframe, 0, lookbackPeriod, highArray) == lookbackPeriod &&
-      CopyLow(m_Symbol, m_Timeframe, 0, lookbackPeriod, lowArray) == lookbackPeriod) {
-      
-      // Tìm giá cao nhất và thấp nhất
-      for(int i = 0; i < lookbackPeriod; i++) {
-         if(highArray[i] > highestHigh) {
-            highestHigh = highArray[i];
-         }
-         
-         if(lowArray[i] < lowestLow) {
-            lowestLow = lowArray[i];
-         }
-      }
-   }
-   
-   // Nếu không lấy được dữ liệu giá, sử dụng giá hiện tại
-   if(highestHigh <= 0) {
-      highestHigh = currentPrice;
-   }
-   
-   if(lowestLow >= DBL_MAX) {
-      lowestLow = currentPrice;
-   }
-   
-   // Tính Chandelier Exit
-   double chandelierExit = 0.0;
-   
-   if(isLong) {
-      chandelierExit = highestHigh - atr * atrMultiplier;
-   } else {
-      chandelierExit = lowestLow + atr * atrMultiplier;
-   }
-   
-   // Chuẩn hóa giá trailing stop
-   chandelierExit = NormalizeDouble(chandelierExit, _Digits);
-   
-   return chandelierExit;
-}
-
-//+------------------------------------------------------------------+
-//| Lấy giá Trailing Stop theo cấu trúc thị trường                   |
-//+------------------------------------------------------------------+
-double CSwingPointDetector::GetStructuralTrailingStop(bool isLong, double currentPrice)
-{
-   // Dựa trên swing points
-   double trailingStop = 0.0;
-   
-   if(isLong) {
-      // Cho lệnh Long, sử dụng swing low gần nhất có strength > min
-      for(int i = 0; i < m_SwingPointCount; i++) {
-         if(m_SwingPoints[i].type == SWING_LOW && 
-            m_SwingPoints[i].strength >= m_TrailingConfig.minSwingStrength) {
-            
-            // Nếu swing low ở dưới giá hiện tại
-            if(m_SwingPoints[i].price < currentPrice) {
-               // Nếu chưa có trailing stop hoặc swing này cao hơn trailing hiện tại
-               if(trailingStop <= 0 || m_SwingPoints[i].price > trailingStop) {
-                  trailingStop = m_SwingPoints[i].price;
-               }
-            }
-         }
-      }
-      
-      // Thêm buffer bảo vệ dưới swing low
-      if(trailingStop > 0) {
-         double atr = GetValidATR();
-         if(atr > 0) {
-            trailingStop -= atr * m_TrailingConfig.swingTrailingBuffer;
-         }
-      }
-   } else {
-      // Cho lệnh Short, sử dụng swing high gần nhất có strength > min
-      for(int i = 0; i < m_SwingPointCount; i++) {
-         if(m_SwingPoints[i].type == SWING_HIGH && 
-            m_SwingPoints[i].strength >= m_TrailingConfig.minSwingStrength) {
-            
-            // Nếu swing high ở trên giá hiện tại
-            if(m_SwingPoints[i].price > currentPrice) {
-               // Nếu chưa có trailing stop hoặc swing này thấp hơn trailing hiện tại
-               if(trailingStop <= 0 || m_SwingPoints[i].price < trailingStop) {
-                  trailingStop = m_SwingPoints[i].price;
-               }
-            }
-         }
-      }
-      
-      // Thêm buffer bảo vệ trên swing high
-      if(trailingStop > 0) {
-         double atr = GetValidATR();
-         if(atr > 0) {
-            trailingStop += atr * m_TrailingConfig.swingTrailingBuffer;
-         }
-      }
-   }
-   
-   // Nếu không tìm thấy swing point thích hợp, sử dụng ATR
-   if(trailingStop <= 0) {
-      trailingStop = GetSmartTrailingStop(isLong, currentPrice, 0, m_TrailingConfig.atrMultiplier);
-   }
-   
-   // Chuẩn hóa giá trailing stop
-   trailingStop = NormalizeDouble(trailingStop, _Digits);
-   
-   return trailingStop;
-}
-
-//+------------------------------------------------------------------+
-//| Lấy giá Trailing Stop kết hợp                                    |
-//+------------------------------------------------------------------+
-double CSwingPointDetector::GetHybridTrailingStop(bool isLong, double currentPrice, double currentSL)
-{
-   // Tính các loại trailing stop
-   double atrTrailing = GetSmartTrailingStop(isLong, currentPrice, currentSL, m_TrailingConfig.atrMultiplier);
-   double chandelierTrailing = GetChandelierTrailingStop(isLong, currentPrice, m_TrailingConfig.chandelierPeriod, m_TrailingConfig.chandelierMultiplier);
-   double structuralTrailing = GetStructuralTrailingStop(isLong, currentPrice);
-   
-   // Chọn trailing stop tốt nhất (bảo vệ lợi nhuận nhất)
-   double bestTrailing = 0.0;
-   
-   if(isLong) {
-      // Cho lệnh Long, chọn trailing cao nhất
-      bestTrailing = MathMax(atrTrailing, MathMax(chandelierTrailing, structuralTrailing));
-   } else {
-      // Cho lệnh Short, chọn trailing thấp nhất
-      bestTrailing = chandelierTrailing;
-      if(structuralTrailing > 0) {
-         bestTrailing = (bestTrailing > 0) ? MathMin(bestTrailing, structuralTrailing) : structuralTrailing;
-      }
-      bestTrailing = (bestTrailing > 0) ? MathMin(bestTrailing, atrTrailing) : atrTrailing;
-   }
-   
-   // Đảm bảo trailing không trở về sau so với SL hiện tại
-   if(isLong) {
-      bestTrailing = MathMax(bestTrailing, currentSL);
-   } else {
-      bestTrailing = MathMin(bestTrailing, currentSL);
-   }
-   
-   // Chuẩn hóa giá trailing stop
-   bestTrailing = NormalizeDouble(bestTrailing, _Digits);
-   
-   return bestTrailing;
-}
-
-//+------------------------------------------------------------------+
-//| Tính Trailing Stop thích ứng theo chế độ thị trường              |
-//+------------------------------------------------------------------+
-double CSwingPointDetector::CalculateAdaptiveTrailingStop(bool isLong, double currentPrice, double currentSL, const TrailingStopConfig &config)
-{
-   // Lấy chế độ thị trường hiện tại
-   ENUM_MARKET_REGIME regime = m_RegimeInfo.regime;
-   
-   // Tính trailing stop tối ưu theo chế độ
-   double optimalTrailing = CalculateOptimalTrailingStop(isLong, currentPrice, currentSL, regime);
-   
-   // Đảm bảo trailing không trở về sau so với SL hiện tại
-   if(isLong) {
-      optimalTrailing = MathMax(optimalTrailing, currentSL);
-   } else {
-      optimalTrailing = MathMin(optimalTrailing, currentSL);
-   }
-   
-   // Chuẩn hóa giá trailing stop
-   optimalTrailing = NormalizeDouble(optimalTrailing, _Digits);
-   
-   return optimalTrailing;
-}
-
-//+------------------------------------------------------------------+
-//| Tính Trailing Stop tối ưu theo chế độ thị trường                 |
-//+------------------------------------------------------------------+
-double CSwingPointDetector::CalculateOptimalTrailingStop(bool isLong, double currentPrice, double currentSL, ENUM_MARKET_REGIME regime)
-{
-   double trailingStop = 0.0;
-   
    switch(regime) {
       case REGIME_TRENDING_BULL:
+      case REGIME_TRENDING:
+         // Trong xu hướng tăng, R:R lớn hơn
+         return 3.0;
+         
       case REGIME_TRENDING_BEAR:
-         // Trong xu hướng mạnh, sử dụng Chandelier Exit
-         if(m_TrailingConfig.chandelierPeriod > 0) {
-            trailingStop = GetChandelierTrailingStop(isLong, currentPrice, m_TrailingConfig.chandelierPeriod, m_TrailingConfig.chandelierMultiplier);
-         } else {
-            // Fallback to ATR với hệ số lớn hơn
-            double atrMult = GetDynamicAtrMultiplier(regime);
-            trailingStop = GetSmartTrailingStop(isLong, currentPrice, currentSL, atrMult);
-         }
-         break;
+         // Trong xu hướng giảm, R:R lớn hơn 
+         return 3.0;
          
+      case REGIME_RANGING:
       case REGIME_RANGING_STABLE:
-         // Trong sideway ổn định, sử dụng swing-based trailing
-         trailingStop = GetStructuralTrailingStop(isLong, currentPrice);
+         // Trong sideway ổn định, R:R vừa phải
+         return 2.0;
          
-         // Nếu không có swing point phù hợp, sử dụng ATR
-         if(trailingStop <= 0) {
-            double atrMult = GetDynamicAtrMultiplier(regime);
-            trailingStop = GetSmartTrailingStop(isLong, currentPrice, currentSL, atrMult);
-         }
-         break;
-         
-      case REGIME_RANGING_VOLATILE:
+      case REGIME_VOLATILE:
       case REGIME_VOLATILE_EXPANSION:
-         // Trong biến động cao, sử dụng ATR với hệ số nhỏ hơn (SL chặt chẽ hơn)
-         double atrMult = GetDynamicAtrMultiplier(regime);
-         trailingStop = GetSmartTrailingStop(isLong, currentPrice, currentSL, atrMult);
-         break;
-         
       case REGIME_VOLATILE_CONTRACTION:
-         // Trong biến động thu hẹp, sử dụng Hybrid (kết hợp)
-         trailingStop = GetHybridTrailingStop(isLong, currentPrice, currentSL);
-         break;
+         // Trong biến động cao, R:R nhỏ hơn
+         return 1.5;
+         
+      case REGIME_LOW_VOLATILITY:
+      case REGIME_BREAKOUT:
+      case REGIME_REVERSAL:
+         // Trong biến động thấp, R:R vừa phải
+         return 2.0;
          
       default:
-         // Mặc định sử dụng trailing ATR
-         trailingStop = GetSmartTrailingStop(isLong, currentPrice, currentSL, m_TrailingConfig.atrMultiplier);
+         return 2.0;
    }
-   
-   return trailingStop;
+}
+
+//+------------------------------------------------------------------+
 //| Lấy hệ số ATR động dựa trên chế độ thị trường                    |
 //+------------------------------------------------------------------+
 double CSwingPointDetector::GetDynamicAtrMultiplier(ENUM_MARKET_REGIME regime)
@@ -3240,6 +2939,7 @@ double CSwingPointDetector::GetDynamicAtrMultiplier(ENUM_MARKET_REGIME regime)
    
    switch(regime) {
       case REGIME_TRENDING_BULL:
+      case REGIME_TRENDING:
          // Xu hướng mạnh, trailing lỏng hơn
          return baseMultiplier * 1.5;
          
@@ -3247,6 +2947,7 @@ double CSwingPointDetector::GetDynamicAtrMultiplier(ENUM_MARKET_REGIME regime)
          // Xu hướng mạnh, trailing lỏng hơn
          return baseMultiplier * 1.5;
          
+      case REGIME_RANGING:
       case REGIME_RANGING_STABLE:
          // Sideway ổn định, trailing bình thường
          return baseMultiplier;
@@ -3255,6 +2956,7 @@ double CSwingPointDetector::GetDynamicAtrMultiplier(ENUM_MARKET_REGIME regime)
          // Sideway biến động, trailing chặt hơn
          return baseMultiplier * 0.8;
          
+      case REGIME_VOLATILE:
       case REGIME_VOLATILE_EXPANSION:
          // Biến động mở rộng, trailing rất chặt
          return baseMultiplier * 0.6;
@@ -3262,6 +2964,10 @@ double CSwingPointDetector::GetDynamicAtrMultiplier(ENUM_MARKET_REGIME regime)
       case REGIME_VOLATILE_CONTRACTION:
          // Biến động thu hẹp, trailing chặt vừa phải
          return baseMultiplier * 0.7;
+         
+      case REGIME_LOW_VOLATILITY:
+         // Biến động thấp, trailing bình thường
+         return baseMultiplier * 1.0;
          
       default:
          return baseMultiplier;
@@ -3288,134 +2994,6 @@ double CSwingPointDetector::GetOptimalRiskPercentPerTrade(ENUM_MARKET_REGIME reg
          
       case REGIME_RANGING_STABLE:
          // Sideway ổn định, risk bình thường
-         riskMultiplier = 1.0;
-         break;
-         
-      case REGIME_RANGING_VOLATILE:
-         // Sideway biến động, risk thấp hơn
-         riskMultiplier = 0.7;
-         break;
-         
-      case REGIME_VOLATILE_EXPANSION:
-         // Biến động mở rộng, risk thấp hơn
-         riskMultiplier = 0.7;
-         break;
-         
-      case REGIME_VOLATILE_CONTRACTION:
-         // Biến động thu hẹp, risk thấp hơn
-         riskMultiplier = 0.7;
-         break;
-         
-      default:
-         riskMultiplier = 1.0;
-   }
-   
-   return baseRisk * riskMultiplier;
-}
-
-//+------------------------------------------------------------------+
-//| Lấy tỷ lệ R:R tối ưu theo chế độ thị trường                      |
-//+------------------------------------------------------------------+
-double CSwingPointDetector::GetOptimalRiskRewardRatio(ENUM_MARKET_REGIME regime)
-{
-   switch(regime) {
-      case REGIME_TRENDING_BULL:
-         // Trong xu hướng tăng, R:R lớn hơn
-         return 3.0;
-         
-      case REGIME_TRENDING_BEAR:
-         // Trong xu hướng giảm, R:R lớn hơn 
-         return 3.0;
-         
-      case REGIME_RANGING_STABLE:
-         // Trong sideway ổn định, R:R vừa phải
-         return 2.0;
-         
-      case REGIME_VOLATILE:
-         // Trong biến động cao, R:R nhỏ hơn
-         return 1.5;
-         
-      case REGIME_LOW_VOLATILITY:
-         // Trong biến động thấp, R:R vừa phải
-         return 2.0;
-         
-      default:
-         return 2.0;
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Tính điểm breakout của swing                                     |
-//+------------------------------------------------------------------+
-double CSwingPointDetector::CalculateSwingBreakoutLevel(bool isLong, int swingsBack = 2)
-{
-   double breakoutLevel = 0.0;
-   int count = 0;
-   
-   if(isLong) {
-      // Tìm kiếm swing high
-      for(int i = 0; i < m_SwingPointCount; i++) {
-         if(m_SwingPoints[i].type == SWING_HIGH) {
-            if(count == 0 || (breakoutLevel > 0 && m_SwingPoints[i].price > breakoutLevel)) {
-               breakoutLevel = m_SwingPoints[i].price;
-            }
-            
-            count++;
-            if(count >= swingsBack) break;
-         }
-      }
-   } else {
-      // Tìm kiếm swing low
-      for(int i = 0; i < m_SwingPointCount; i++) {
-         if(m_SwingPoints[i].type == SWING_LOW) {
-            if(count == 0 || (breakoutLevel > 0 && m_SwingPoints[i].price < breakoutLevel)) {
-               breakoutLevel = m_SwingPoints[i].price;
-            }
-            
-            count++;
-            if(count >= swingsBack) break;
-         }
-      }
-   }
-   
-   return breakoutLevel;
-}
-
-//+------------------------------------------------------------------+
-//| Xác thực chất lượng của swing point                              |
-//+------------------------------------------------------------------+
-bool CSwingPointDetector::ValidateSwingQuality(const SwingPoint &point, double currentPrice, bool isLong)
-{
-   // Kiểm tra loại điểm swing
-   if(isLong && point.type != SWING_LOW) return false;
-   if(!isLong && point.type != SWING_HIGH) return false;
-   
-   // Kiểm tra độ tin cậy
-   if(point.reliability < m_SwingConfirmationThreshold) return false;
-   
-   // Kiểm tra khoảng cách
-   double distance = MathAbs(currentPrice - point.price);
-   double atr = GetValidATR();
-   
-   if(atr > 0) {
-      double relativeDistance = distance / atr;
-      
-      // Khoảng cách quá xa
-      if(relativeDistance > 3.0) return false;
-      
-      // Khoảng cách quá gần
-      if(relativeDistance < 0.5) return false;
-   }
-   
-   // Kiểm tra strength
-   if(point.strength < m_TrailingConfig.minSwingStrength) return false;
-   
-   // Kiểm tra tầm quan trọng
-   if(m_TrailingConfig.useOnlyMajorSwings && point.importance < SWING_MAJOR) return false;
-   
-   return true;
-}
-
          riskMultiplier = 1.0;
          break;
          
@@ -3483,7 +3061,7 @@ double CSwingPointDetector::CalculateAdaptiveStopLoss(bool isLong, double entryP
 //+------------------------------------------------------------------+
 double CSwingPointDetector::CalculateAdaptiveTakeProfit(bool isLong, double entryPrice, double stopLoss)
 {
-   double rrRatio = GetSuggestedRRRatio();
+   double rrRatio = GetOptimalRiskRewardRatio(m_RegimeInfo.regime);
    double slDistance = MathAbs(entryPrice - stopLoss);
    
    double takeProfit = isLong ? entryPrice + slDistance * rrRatio : entryPrice - slDistance * rrRatio;
@@ -3941,3 +3519,5 @@ double CSwingPointDetector::GetMinSwingLowInRange(int bars)
    
    return minLow;
 }
+
+} // đóng namespace ApexPullback
