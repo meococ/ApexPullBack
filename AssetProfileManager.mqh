@@ -3,10 +3,9 @@
 //|                              APEX Pullback EA v14.0 - Module Code |
 //|                        © 2024 APEX Trading Software               |
 //+------------------------------------------------------------------+
-#property copyright " 2024 APEX Trading Software"
-#property link      "https://www.apexpullback.com"
-#property version   "14.0"
-#property strict
+// Copyright 2024 APEX Trading Software
+// Link: https://www.apexpullback.com
+// Version: 14.0
 
 // FIX: Thêm bảo vệ include để tránh trùng lặp định nghĩa
 #ifndef _ASSET_PROFILE_MANAGER_MQH_
@@ -15,100 +14,17 @@
 // Include cần thiết
 #include "Logger.mqh"
 #include "Enums.mqh"
-#include "CommonStructs.mqh"
+#include "CommonStructs.mqh" // Đảm bảo CommonStructs được include
 
 // Định nghĩa hằng số
-#define MAX_ASSETS_PROFILE 50     // Số lượng tài sản tối đa có thể quản lý
 
 // Sử dụng namespace ApexPullback để đảm bảo tính nhất quán với EA chính
 namespace ApexPullback {
-#define MAX_HISTORY_DAYS 30       // Số ngày lịch sử lưu trữ dữ liệu
-#define TRADING_DAYS_PER_YEAR 252 // Số ngày giao dịch trong năm
-#define DEFAULT_ATR_PERIOD 14     // Số nến mặc định cho ATR
+const int MAX_ASSETS_PROFILE = 50;     // Số lượng tài sản tối đa có thể quản lý
+// const int MAX_HISTORY_DAYS = 30;    // Đã được định nghĩa trong CommonStructs.mqh (nếu có, hoặc cần thêm vào Constants.mqh)
+const int TRADING_DAYS_PER_YEAR = 252; // Số ngày giao dịch trong năm
 
-//+------------------------------------------------------------------+
-//| Cấu trúc dữ liệu Asset Profile                                   |
-//+------------------------------------------------------------------+
-struct AssetProfileData {
-    string symbol;                 // Biểu tượng tài sản
-    ENUM_ASSET_CLASS assetClass;   // Phân loại tài sản (Forex, Gold, Indices, ...)
-    ENUM_SYMBOL_GROUP symbolGroup; // Nhóm cặp tiền (Major, Minor, Exotic, ...)
-    ENUM_ASSET_VOLATILITY volatilityLevel; // Mức độ biến động (Low, Medium, High, ...)
-    
-    // Các thông số thống kê
-    double averageATR;            // ATR trung bình 14 ngày
-    double averageATRPoints;      // ATR trung bình tính theo điểm
-    double yearlyVolatility;      // Biến động hàng năm (%)
-    double minSpread;             // Spread tối thiểu
-    double maxSpread;             // Spread tối đa
-    double averageSpread;         // Spread trung bình
-    double acceptableSpread;      // Ngưỡng spread chấp nhận được
-    double swingMagnitude;        // Biên độ swing trung bình
-    double dailyRange;            // Phạm vi giá trung bình hàng ngày
-    
-    // Thông số tối ưu cho giao dịch
-    double optimalSLATRMulti;     // Hệ số ATR tối ưu cho SL
-    double optimalTRAtrMulti;     // Hệ số ATR tối ưu cho Trailing
-    double optimalRRRatio;        // Tỷ lệ R:R tối ưu
-    double recommendedRiskPercent; // % Risk khuyến nghị
-    
-    // Thông tin sessison
-    int bestTradingSession;       // Phiên giao dịch tốt nhất (mask: 1=Asian, 2=London, 4=NewYork)
-    int worstTradingSession;      // Phiên giao dịch kém nhất (mask: 1=Asian, 2=London, 4=NewYork)
-    
-    // Thông tin hiệu suất giao dịch
-    int totalTrades;              // Tổng số giao dịch
-    double winRate;               // Tỷ lệ thắng (%)
-    double profitFactor;          // Profit factor
-    double expectancy;            // Kỳ vọng (R)
-    
-    // Lịch sử dữ liệu gần đây
-    double atrHistory[MAX_HISTORY_DAYS];  // Lịch sử ATR
-    double spreadHistory[MAX_HISTORY_DAYS]; // Lịch sử spread
-    datetime historyDates[MAX_HISTORY_DAYS]; // Ngày tương ứng
-    int historyCount;             // Số lượng mẫu lịch sử
-    datetime lastUpdated;         // Thời gian cập nhật cuối
-    
-    // Constructor để khởi tạo giá trị mặc định
-    void AssetProfileData() {
-        symbol = "";
-        assetClass = ASSET_CLASS_FOREX;
-        symbolGroup = GROUP_UNDEFINED;
-        volatilityLevel = VOLATILITY_MEDIUM;
-        
-        // Khởi tạo các giá trị khác về 0
-        averageATR = 0;
-        averageATRPoints = 0;
-        yearlyVolatility = 0;
-        minSpread = 0;
-        maxSpread = 0;
-        averageSpread = 0;
-        acceptableSpread = 0;
-        swingMagnitude = 0;
-        dailyRange = 0;
-        
-        optimalSLATRMulti = 1.5;
-        optimalTRAtrMulti = 2.0;
-        optimalRRRatio = 2.0;
-        recommendedRiskPercent = 1.0;
-        
-        bestTradingSession = 6;  // Mặc định London+NY (2+4)
-        worstTradingSession = 1;  // Mặc định Asian (1)
-        
-        totalTrades = 0;
-        winRate = 0;
-        profitFactor = 0;
-        expectancy = 0;
-        
-        historyCount = 0;
-        lastUpdated = 0;
-        
-        // Khởi tạo mảng lịch sử
-        ArrayInitialize(atrHistory, 0);
-        ArrayInitialize(spreadHistory, 0);
-        ArrayInitialize(historyDates, 0);
-    }
-};
+// Using AssetProfile from CommonStructs.mqh
 
 //+------------------------------------------------------------------+
 //| Lớp CAssetProfileManager - Quản lý thông tin tài sản             |
@@ -117,9 +33,9 @@ class CAssetProfileManager {
 private:
     string m_CurrentSymbol;                    // Biểu tượng hiện tại
     ENUM_TIMEFRAMES m_MainTimeframe;           // Khung thời gian chính
-    AssetProfileData m_AssetProfiles[MAX_ASSETS_PROFILE]; // Mảng lưu thông tin tài sản
+    AssetProfile m_AssetProfiles[MAX_ASSETS_PROFILE]; // Mảng lưu thông tin tài sản
     int m_ProfileCount;                        // Số lượng profile đã lưu
-    CLogger* m_Logger;                         // Con trỏ đến Logger
+    CLogger *m_Logger;                         // Con trỏ đến Logger
     bool m_isInitialized;                      // Đã khởi tạo chưa
     bool m_AutoUpdateEnabled;                  // Tự động cập nhật profile
     int m_ATRPeriod;                           // Số nến cho ATR
@@ -127,7 +43,7 @@ private:
     string m_StorageFolder;                    // Thư mục lưu trữ
     
     // Biến lưu trữ dữ liệu ưu đãi
-    AssetProfileData m_CurrentAssetProfile;    // Thông tin tài sản hiện tại (cache)
+    AssetProfile m_CurrentAssetProfile;    // Thông tin tài sản hiện tại (cache)
     double m_LastSpread;                       // Giá trị spread lần cuối
     double m_CurrentATR;                       // Giá trị ATR hiện tại
     datetime m_LastATRUpdate;                  // Thời gian cập nhật ATR
@@ -148,7 +64,7 @@ public:
     ~CAssetProfileManager();
     
     // Phương thức khởi tạo
-    bool Initialize(string symbol, ENUM_TIMEFRAMES timeframe, CLogger* logger);
+    bool Initialize(string symbol, ENUM_TIMEFRAMES timeframe, CLogger *logger);
     void SetParameters(int atrPeriod, bool saveProfiles, string storageFolder = "AssetProfiles");
     void SetUpdateParameters(int updateIntervalMins = 60, int spreadSampleCount = 50);
     void EnableAutoUpdate(bool enable);
@@ -156,15 +72,21 @@ public:
     // Phương thức cập nhật và phân tích
     bool Update();
     bool UpdateCurrentSymbol(bool forceUpdate = false);
-    bool AnalyzeSymbol(string symbol, AssetProfileData &profile, bool forceAnalysis = false);
-    bool DetectAssetClass(string symbol, AssetProfileData &profile);
-    bool UpdateHistoricalData(AssetProfileData &profile);
+    bool AnalyzeSymbol(string symbol, AssetProfile &profile, bool forceAnalysis = false);
+    bool DetectAssetClass(string symbol, AssetProfile &profile);
+    bool UpdateHistoricalData(AssetProfile &profile);
     
     // Các phương thức truy vấn thông tin
-    AssetProfileData GetCurrentAssetProfile();
-    bool GetAssetProfile(string symbol, AssetProfileData& profile);
+    bool GetCurrentAssetProfile(AssetProfile &profile);
+    bool GetAssetProfile(string symbol, AssetProfile &profile);
     ENUM_ASSET_CLASS GetAssetClass(string symbol = "");
     ENUM_SYMBOL_GROUP GetSymbolGroup(string symbol = "");
+    
+    // Phương thức kiểm tra sự căn chỉnh của các đường EMA
+    bool IsEMAAligned(bool isLong, string symbol = "");
+    
+    // Phương thức kiểm tra giá nằm ngoài vùng giá trị
+    bool IsPriceOutsideValueArea(double price, bool checkHigh = true, string symbol = "");
     
     // Các phương thức tính toán tối ưu
     double GetOptimalSLPoints(string symbol = "");
@@ -185,8 +107,8 @@ public:
     // Phương thức lưu trữ và tải
     bool SaveAllProfiles();
     bool LoadAllProfiles();
-    bool SaveAssetProfile(const AssetProfileData &profile);
-    bool LoadAssetProfile(string symbol, AssetProfileData &profile);
+    bool SaveAssetProfile(const AssetProfile &profile);
+    bool LoadAssetProfile(string symbol, AssetProfile &profile);
     void CreateProfileFolderIfNotExists();
     
 private:
@@ -245,29 +167,31 @@ CAssetProfileManager::~CAssetProfileManager() {
 //| Khởi tạo các giá trị mặc định theo loại tài sản                  |
 //+------------------------------------------------------------------+
 void CAssetProfileManager::InitializeDefaultValues() {
-    m_DefaultSpreadThresholds[0] = 30.0;   // ASSET_CLASS_FOREX
-    m_DefaultSpreadThresholds[1] = 100.0;  // ASSET_CLASS_METALS
-    m_DefaultSpreadThresholds[2] = 50.0;   // ASSET_CLASS_INDICES
-    m_DefaultSpreadThresholds[3] = 200.0;  // ASSET_CLASS_CRYPTO
-    m_DefaultSpreadThresholds[4] = 50.0;   // ASSET_CLASS_OTHER
+    // Giả định ENUM_ASSET_CLASS có các giá trị ASSET_CLASS_FOREX=0, ASSET_CLASS_METALS=1, ...
+    // Nếu định nghĩa enum khác, cần điều chỉnh chỉ số hoặc sử dụng cấu trúc map/switch.
+    m_DefaultSpreadThresholds[ASSET_CLASS_FOREX] = 30.0;   // ASSET_CLASS_FOREX
+    m_DefaultSpreadThresholds[ASSET_CLASS_METALS] = 100.0;  // ASSET_CLASS_METALS
+    m_DefaultSpreadThresholds[ASSET_CLASS_INDICES] = 50.0;   // ASSET_CLASS_INDICES
+    m_DefaultSpreadThresholds[ASSET_CLASS_CRYPTO] = 200.0;  // ASSET_CLASS_CRYPTO
+    m_DefaultSpreadThresholds[ASSET_CLASS_OTHER] = 50.0;   // ASSET_CLASS_OTHER
 
-    m_DefaultATRMultipliers[0] = 1.5;      // ASSET_CLASS_FOREX
-    m_DefaultATRMultipliers[1] = 1.2;      // ASSET_CLASS_METALS
-    m_DefaultATRMultipliers[2] = 1.3;      // ASSET_CLASS_INDICES
-    m_DefaultATRMultipliers[3] = 2.0;      // ASSET_CLASS_CRYPTO
-    m_DefaultATRMultipliers[4] = 1.5;      // ASSET_CLASS_OTHER
+    m_DefaultATRMultipliers[ASSET_CLASS_FOREX] = 1.5;      // ASSET_CLASS_FOREX
+    m_DefaultATRMultipliers[ASSET_CLASS_METALS] = 1.2;      // ASSET_CLASS_METALS
+    m_DefaultATRMultipliers[ASSET_CLASS_INDICES] = 1.3;      // ASSET_CLASS_INDICES
+    m_DefaultATRMultipliers[ASSET_CLASS_CRYPTO] = 2.0;      // ASSET_CLASS_CRYPTO
+    m_DefaultATRMultipliers[ASSET_CLASS_OTHER] = 1.5;      // ASSET_CLASS_OTHER
 
-    m_DefaultRiskPercents[0] = 1.0;        // ASSET_CLASS_FOREX
-    m_DefaultRiskPercents[1] = 0.75;       // ASSET_CLASS_METALS
-    m_DefaultRiskPercents[2] = 0.75;       // ASSET_CLASS_INDICES
-    m_DefaultRiskPercents[3] = 0.5;        // ASSET_CLASS_CRYPTO
-    m_DefaultRiskPercents[4] = 0.75;       // ASSET_CLASS_OTHER
+    m_DefaultRiskPercents[ASSET_CLASS_FOREX] = 1.0;        // ASSET_CLASS_FOREX
+    m_DefaultRiskPercents[ASSET_CLASS_METALS] = 0.75;       // ASSET_CLASS_METALS
+    m_DefaultRiskPercents[ASSET_CLASS_INDICES] = 0.75;       // ASSET_CLASS_INDICES
+    m_DefaultRiskPercents[ASSET_CLASS_CRYPTO] = 0.5;        // ASSET_CLASS_CRYPTO
+    m_DefaultRiskPercents[ASSET_CLASS_OTHER] = 0.75;       // ASSET_CLASS_OTHER
 }
 
 //+------------------------------------------------------------------+
 //| Khởi tạo Asset Profile Manager                                   |
 //+------------------------------------------------------------------+
-bool CAssetProfileManager::Initialize(string symbol, ENUM_TIMEFRAMES timeframe, CLogger* logger) {
+bool CAssetProfileManager::Initialize(string symbol, ENUM_TIMEFRAMES timeframe, CLogger *logger) {
     // Lưu các tham số
     m_CurrentSymbol = (symbol == "") ? _Symbol : symbol;
     m_MainTimeframe = (timeframe == PERIOD_CURRENT) ? Period() : timeframe;
@@ -714,14 +638,15 @@ bool CAssetProfileManager::UpdateHistoricalData(AssetProfileData &profile) {
 //+------------------------------------------------------------------+
 //| Lấy thông tin profile cho symbol hiện tại                         |
 //+------------------------------------------------------------------+
-AssetProfileData CAssetProfileManager::GetCurrentAssetProfile() {
+bool CAssetProfileManager::GetCurrentAssetProfile(AssetProfileData &profile) {
     if (m_AutoUpdateEnabled) {
         datetime currentTime = TimeCurrent();
         if (currentTime - m_CurrentAssetProfile.lastUpdated > m_UpdateIntervalMinutes * 60) {
             UpdateCurrentSymbol();
         }
     }
-    return m_CurrentAssetProfile;
+    profile = m_CurrentAssetProfile;
+    return true;
 }
 
 //+------------------------------------------------------------------+
@@ -729,8 +654,7 @@ AssetProfileData CAssetProfileManager::GetCurrentAssetProfile() {
 //+------------------------------------------------------------------+
 bool CAssetProfileManager::GetAssetProfile(string symbol, AssetProfileData& profile) {
     if (symbol == "" || symbol == m_CurrentSymbol) {
-        profile = GetCurrentAssetProfile();
-        return true;
+        return GetCurrentAssetProfile(profile);
     }
     int index = GetProfileIndex(symbol);
     if (index >= 0) {
@@ -1161,7 +1085,7 @@ bool CAssetProfileManager::LoadAssetProfile(string symbol, AssetProfileData &pro
     }
     
     // Khởi tạo profile mới
-    profile = AssetProfileData();
+    profile.Initialize();
     
     // Đọc dữ liệu
     // Phiên bản file format
@@ -1402,10 +1326,100 @@ void CAssetProfileManager::LogInfo(string message, bool important) {
 //| Lấy tên file cho profile                                         |
 //+------------------------------------------------------------------+
 string CAssetProfileManager::GetProfileFilename(string symbol) {
-    return m_StorageFolder + "//" + symbol + ".bin";
+    return m_StorageFolder + "/" + symbol + "_profile.json";
 }
 
-} // Đóng namespace ApexPullback
+//+------------------------------------------------------------------+
+//| Kiểm tra sự căn chỉnh của các đường EMA                           |
+//+------------------------------------------------------------------+
+bool CAssetProfileManager::IsEMAAligned(bool isLong, string symbol) {
+    string sym = (symbol == "") ? m_CurrentSymbol : symbol;
+    
+    int ema34Handle = iMA(sym, m_MainTimeframe, 34, 0, MODE_EMA, PRICE_CLOSE);
+    int ema89Handle = iMA(sym, m_MainTimeframe, 89, 0, MODE_EMA, PRICE_CLOSE);
+    int ema200Handle = iMA(sym, m_MainTimeframe, 200, 0, MODE_EMA, PRICE_CLOSE);
+    
+    if(ema34Handle != INVALID_HANDLE && ema89Handle != INVALID_HANDLE && ema200Handle != INVALID_HANDLE) {
+        double ema34Buffer[], ema89Buffer[], ema200Buffer[];
+        ArraySetAsSeries(ema34Buffer, true);
+        ArraySetAsSeries(ema89Buffer, true);
+        ArraySetAsSeries(ema200Buffer, true);
+        
+        if(CopyBuffer(ema34Handle, 0, 0, 1, ema34Buffer) == 1 &&
+           CopyBuffer(ema89Handle, 0, 0, 1, ema89Buffer) == 1 &&
+           CopyBuffer(ema200Handle, 0, 0, 1, ema200Buffer) == 1) {
+            
+            // Giải phóng handles
+            IndicatorRelease(ema34Handle);
+            IndicatorRelease(ema89Handle);
+            IndicatorRelease(ema200Handle);
+            
+            if(isLong) {
+                // Xu hướng tăng
+                return (ema34Buffer[0] > ema89Buffer[0] && ema89Buffer[0] > ema200Buffer[0]);
+            } else {
+                // Xu hướng giảm
+                return (ema34Buffer[0] < ema89Buffer[0] && ema89Buffer[0] < ema200Buffer[0]);
+            }
+        }
+        
+        // Giải phóng handles nếu chưa return
+        IndicatorRelease(ema34Handle);
+        IndicatorRelease(ema89Handle);
+        IndicatorRelease(ema200Handle);
+    }
+    
+    // Mặc định trả về false nếu không thể xác định
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra giá nằm ngoài vùng giá trị                                 |
+//+------------------------------------------------------------------+
+bool CAssetProfileManager::IsPriceOutsideValueArea(double price, bool checkHigh, string symbol) {
+    string sym = (symbol == "") ? m_CurrentSymbol : symbol;
+    
+    // Sử dụng EMA 34 và EMA 89 để xác định vùng giá trị
+    int ema34Handle = iMA(sym, m_MainTimeframe, 34, 0, MODE_EMA, PRICE_CLOSE);
+    int ema89Handle = iMA(sym, m_MainTimeframe, 89, 0, MODE_EMA, PRICE_CLOSE);
+    
+    if(ema34Handle != INVALID_HANDLE && ema89Handle != INVALID_HANDLE) {
+        double ema34Buffer[], ema89Buffer[];
+        ArraySetAsSeries(ema34Buffer, true);
+        ArraySetAsSeries(ema89Buffer, true);
+        
+        if(CopyBuffer(ema34Handle, 0, 0, 1, ema34Buffer) == 1 &&
+           CopyBuffer(ema89Handle, 0, 0, 1, ema89Buffer) == 1) {
+            
+            // Giải phóng handles
+            IndicatorRelease(ema34Handle);
+            IndicatorRelease(ema89Handle);
+            
+            // Xác định vùng giá trị
+            double valueAreaHigh = MathMax(ema34Buffer[0], ema89Buffer[0]);
+            double valueAreaLow = MathMin(ema34Buffer[0], ema89Buffer[0]);
+            
+            // Thêm một khoảng đệm (buffer) xung quanh vùng giá trị
+            double buffer = MathAbs(valueAreaHigh - valueAreaLow) * 0.1; // 10% của khoảng
+            valueAreaHigh += buffer;
+            valueAreaLow -= buffer;
+            
+            // Kiểm tra giá so với vùng giá trị
+            if(checkHigh) {
+                return price > valueAreaHigh; // Giá cao hơn vùng giá trị
+            } else {
+                return price < valueAreaLow; // Giá thấp hơn vùng giá trị
+            }
+        }
+        
+        // Giải phóng handles nếu chưa return
+        IndicatorRelease(ema34Handle);
+        IndicatorRelease(ema89Handle);
+    }
+    
+    // Mặc định trả về false nếu không thể xác định
+    return false;
+}
 
 #endif // _ASSET_PROFILE_MANAGER_MQH_
 

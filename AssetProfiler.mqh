@@ -2,449 +2,382 @@
 //|                                               AssetProfiler.mqh   |
 //|                         APEX Pullback EA v14.0 - Self-Learning   |
 //+------------------------------------------------------------------+
-// Removed #property directives - these are not allowed in .mqh files
-// #property copyright "APEX Forex"
-// #property link      "https://www.apexpullback.com"
-// #property strict
 
-#include "Logger.mqh"  // Thêm include cho Logger
+#ifndef ASSET_PROFILER_MQH_
+#define ASSET_PROFILER_MQH_
+
 #include "CommonStructs.mqh"
 #include "Constants.mqh"
 #include "Enums.mqh"
+#include "Logger.mqh"
 
-// Định nghĩa hằng số
-#define ASSET_PROFILER_VERSION "2.0"
-#define MAX_SCENARIOS 20       // Tăng từ 10 lên 20
-#define DATA_VERSION 2         // Để xác định phiên bản dữ liệu khi cập nhật cấu trúc
-#define AUTO_SAVE_TRADES 5     // Lưu sau mỗi 5 giao dịch, không phải mỗi giao dịch
-#define TRIM_OLD_DATA_DAYS 180 // Dữ liệu cũ hơn 180 ngày sẽ có trọng số thấp
+namespace ApexPullback {
 
-// Các enum đã được di chuyển sang file Enums.mqh
+// Các hằng số cho Asset Profiler
+#define ASSET_PROFILER_VERSION "1.2"
+#define DATA_VERSION 1
+#define PROFILE_LOG_ALL 3
+#define PROFILE_LOG_IMPORTANT 2
+#define PROFILE_LOG_ERRORS 1
+#define PROFILE_LOG_NONE 0
+#define MAX_SCENARIOS 20
 
-//+------------------------------------------------------------------+
-//| Lớp hỗ trợ lưu trữ và tính toán cho profile                      |
-//+------------------------------------------------------------------+
+// Chế độ điều chỉnh profile
+enum ENUM_PROFILE_ADJUSTMENT_MODE {
+    PROFILE_ADJUST_DISABLED = 0,    // Không điều chỉnh
+    PROFILE_ADJUST_BASIC = 1,       // Điều chỉnh cơ bản (theo hướng)
+    PROFILE_ADJUST_ADVANCED = 2,    // Điều chỉnh nâng cao (theo hướng và kịch bản)
+    PROFILE_ADJUST_FULL = 3         // Điều chỉnh đầy đủ (kết hợp cả 2 loại)
+};
+
+
+// Cấu trúc lưu trữ thống kê kịch bản
+struct AssetScenarioStats {
+    string name;          // Tên kịch bản
+    int totalTrades;      // Tổng số giao dịch
+    int winTrades;        // Số giao dịch thắng
+    double winRate;       // Tỷ lệ thắng
+    double avgProfit;     // Lợi nhuận trung bình
+    double avgLoss;       // Tổn thất trung bình
+    double profitFactor;  // Hệ số lợi nhuận
+    double adjustment;    // Điều chỉnh
+    datetime lastUpdate;  // Thời gian cập nhật
+};
+
+// Lớp lưu trữ dữ liệu profile
 class CProfileStorage {
-public:  // Chuyển TradeRecord từ private sang public
-    // Dữ liệu giao dịch theo thời gian để phân tích xu hướng
+public:
+    // Cấu trúc lưu trữ thông tin giao dịch
     struct TradeRecord {
-        datetime time;          // Thời gian giao dịch
-        string scenario;        // Kịch bản
-        bool isLong;            // Hướng giao dịch
-        bool win;               // Kết quả
-        double profit;          // Lợi nhuận (R-multiple)
+        datetime time;      // Thời gian giao dịch
+        string scenario;    // Kịch bản giao dịch
+        bool isLong;        // Hướng giao dịch (long/short)
+        bool win;           // Kết quả (thắng/thua)
+        double profit;      // Lợi nhuận (tính theo R)
     };
-    
+
 private:
-    // Lưu tối đa 500 giao dịch gần nhất
-    TradeRecord m_TradeHistory[500];
+    TradeRecord m_History[];
     int m_HistoryCount;
-    
-    // Dùng đếm để chỉ lưu file sau một số giao dịch, không phải sau mỗi giao dịch
-    int m_UnsavedUpdates;
-    
+
 public:
     // Constructor
-    CProfileStorage() {
-        m_HistoryCount = 0;
-        m_UnsavedUpdates = 0;
-    }
+    CProfileStorage() : m_HistoryCount(0) {}
     
-    // Thêm giao dịch vào lịch sử
-    void AddTradeRecord(datetime time, string scenario, bool isLong, bool win, double profit) {
-        // Nếu lịch sử đã đầy, xóa giao dịch cũ nhất
-        if (m_HistoryCount >= 500) {
-            // Dịch chuyển mảng
-            for (int i = 0; i < m_HistoryCount - 1; i++) {
-                m_TradeHistory[i] = m_TradeHistory[i + 1];
-            }
-            m_HistoryCount--;
-        }
-        
-        // Thêm giao dịch mới
-        m_TradeHistory[m_HistoryCount].time = time;
-        m_TradeHistory[m_HistoryCount].scenario = scenario;
-        m_TradeHistory[m_HistoryCount].isLong = isLong;
-        m_TradeHistory[m_HistoryCount].win = win;
-        m_TradeHistory[m_HistoryCount].profit = profit;
+    // Thêm giao dịch mới vào lịch sử
+    void AddTrade(string scenario, bool isLong, bool win, double profit) {
+        int index = m_HistoryCount;
         m_HistoryCount++;
+        ArrayResize(m_History, m_HistoryCount);
         
-        // Tăng đếm giao dịch chưa lưu
-        m_UnsavedUpdates++;
-    }
-    
-    // Kiểm tra nếu cần lưu dữ liệu
-    bool NeedsSaving() {
-        return (m_UnsavedUpdates >= AUTO_SAVE_TRADES);
-    }
-    
-    // Reset đếm sau khi lưu
-    void ResetSaveCounter() {
-        m_UnsavedUpdates = 0;
+        m_History[index].time = TimeCurrent();
+        m_History[index].scenario = scenario;
+        m_History[index].isLong = isLong;
+        m_History[index].win = win;
+        m_History[index].profit = profit;
     }
     
     // Lấy số lượng giao dịch trong lịch sử
-    int GetHistoryCount() {
+    int GetHistoryCount() const {
         return m_HistoryCount;
     }
     
-    // Lấy thông tin giao dịch tại vị trí index
-    bool GetTradeRecord(int index, CProfileStorage::TradeRecord &record) {
-        if (index >= 0 && index < m_HistoryCount) {
-            record = m_TradeHistory[index];
+    // Lấy thống kê cho kịch bản cụ thể
+    bool GetScenarioStats(string scenarioName, int &totalTrades, int &winTrades, double &winRate, double &avgProfit) {
+        totalTrades = 0;
+        winTrades = 0;
+        double totalProfit = 0.0;
+        
+        // Kiểm tra có dữ liệu nào không
+        if(m_HistoryCount == 0) return false;
+        
+        // Đếm số giao dịch và thắng thua cho kịch bản
+        for(int i = 0; i < m_HistoryCount; i++) {
+            if(m_History[i].scenario == scenarioName) {
+                totalTrades++;
+                if(m_History[i].win) winTrades++;
+                totalProfit += m_History[i].profit;
+            }
+        }
+        
+        // Tính toán tỷ lệ thắng và lợi nhuận trung bình
+        if(totalTrades > 0) {
+            winRate = (double)winTrades / totalTrades;
+            avgProfit = totalProfit / totalTrades;
+            return true;
+        }
+        
+        return false;
+    }
+    
+    // Lấy thông tin giao dịch theo chỉ số
+    bool GetTradeRecord(int index, TradeRecord &record) {
+        if(index >= 0 && index < m_HistoryCount) {
+            record = m_History[index];
             return true;
         }
         return false;
     }
     
-    // Tính thống kê theo thời gian gần đây 
-    // (days = số ngày muốn xem, 0 = tất cả)
-    bool GetRecentStats(int days, int &totalTrades, int &winTrades, double &totalProfit) {
-        totalTrades = 0;
-        winTrades = 0;
-        totalProfit = 0.0;
-        
-        datetime cutoffTime = 0;
-        if (days > 0) {
-            cutoffTime = TimeCurrent() - days * 86400; // 86400 = số giây trong 1 ngày
-        }
-        
-        for (int i = 0; i < m_HistoryCount; i++) {
-            if (cutoffTime == 0 || m_TradeHistory[i].time >= cutoffTime) {
-                totalTrades++;
-                if (m_TradeHistory[i].win) {
-                    winTrades++;
-                }
-                totalProfit += m_TradeHistory[i].profit;
-            }
-        }
-        
-        return (totalTrades > 0);
+    // Xóa toàn bộ lịch sử
+    void ClearHistory() {
+        ArrayFree(m_History);
+        m_HistoryCount = 0;
     }
     
-    // Tính thống kê theo kịch bản và khoảng thời gian
-    bool GetScenarioStats(string scenario, int days, int &totalTrades, int &winTrades, double &avgProfit) {
-        totalTrades = 0;
-        winTrades = 0;
-        double totalProfit = 0.0;
-        
-        datetime cutoffTime = 0;
-        if (days > 0) {
-            cutoffTime = TimeCurrent() - days * 86400;
-        }
-        
-        for (int i = 0; i < m_HistoryCount; i++) {
-            if ((cutoffTime == 0 || m_TradeHistory[i].time >= cutoffTime) && 
-                m_TradeHistory[i].scenario == scenario) {
-                totalTrades++;
-                if (m_TradeHistory[i].win) {
-                    winTrades++;
-                }
-                totalProfit += m_TradeHistory[i].profit;
-            }
-        }
-        
-        avgProfit = (totalTrades > 0) ? totalProfit / totalTrades : 0.0;
-        return (totalTrades > 0);
-    }
-    
-    // Tính thống kê theo hướng giao dịch và khoảng thời gian
-    bool GetDirectionalStats(bool isLong, int days, int &totalTrades, int &winTrades, double &avgProfit) {
-        totalTrades = 0;
-        winTrades = 0;
-        double totalProfit = 0.0;
-        
-        datetime cutoffTime = 0;
-        if (days > 0) {
-            cutoffTime = TimeCurrent() - days * 86400;
-        }
-        
-        for (int i = 0; i < m_HistoryCount; i++) {
-            if ((cutoffTime == 0 || m_TradeHistory[i].time >= cutoffTime) && 
-                m_TradeHistory[i].isLong == isLong) {
-                totalTrades++;
-                if (m_TradeHistory[i].win) {
-                    winTrades++;
-                }
-                totalProfit += m_TradeHistory[i].profit;
-            }
-        }
-        
-        avgProfit = (totalTrades > 0) ? totalProfit / totalTrades : 0.0;
-        return (totalTrades > 0);
-    }
-    
-    // Lưu lịch sử giao dịch vào file
+    // Lưu dữ liệu vào file
     bool SaveHistoryToFile(string filename) {
         int fileHandle = FileOpen(filename, FILE_WRITE|FILE_BIN|FILE_COMMON);
-        if (fileHandle == INVALID_HANDLE) {
+        if(fileHandle == INVALID_HANDLE) {
+            Print("Không thể mở file để lưu: ", GetLastError());
             return false;
         }
         
-        // Lưu phiên bản dữ liệu để tương thích với nâng cấp trong tương lai
+        // Lưu version
         FileWriteInteger(fileHandle, DATA_VERSION);
         
-        // Lưu số lượng giao dịch
+        // Lưu số lượng bản ghi
         FileWriteInteger(fileHandle, m_HistoryCount);
         
-        // Lưu từng giao dịch
-        for (int i = 0; i < m_HistoryCount; i++) {
-            FileWriteInteger(fileHandle, (int)m_TradeHistory[i].time);
-            FileWriteString(fileHandle, m_TradeHistory[i].scenario);
-            FileWriteInteger(fileHandle, m_TradeHistory[i].isLong ? 1 : 0);
-            FileWriteInteger(fileHandle, m_TradeHistory[i].win ? 1 : 0);
-            FileWriteDouble(fileHandle, m_TradeHistory[i].profit);
+        // Lưu từng bản ghi
+        for(int i = 0; i < m_HistoryCount; i++) {
+            FileWriteLong(fileHandle, m_History[i].time);
+            FileWriteString(fileHandle, m_History[i].scenario);
+            FileWriteInteger(fileHandle, m_History[i].isLong);
+            FileWriteInteger(fileHandle, m_History[i].win);
+            FileWriteDouble(fileHandle, m_History[i].profit);
         }
         
         FileClose(fileHandle);
         return true;
     }
     
-    // Nạp lịch sử giao dịch từ file
+    // Nạp dữ liệu từ file
     bool LoadHistoryFromFile(string filename) {
-        if (!FileIsExist(filename, FILE_COMMON)) {
+        if(!FileIsExist(filename, FILE_COMMON)) {
             return false;
         }
         
         int fileHandle = FileOpen(filename, FILE_READ|FILE_BIN|FILE_COMMON);
-        if (fileHandle == INVALID_HANDLE) {
+        if(fileHandle == INVALID_HANDLE) {
+            Print("Không thể mở file để đọc: ", GetLastError());
             return false;
         }
         
-        // Đọc và kiểm tra phiên bản dữ liệu
-        int dataVersion = FileReadInteger(fileHandle);
-        if (dataVersion > DATA_VERSION) {
-            // File từ phiên bản mới hơn, không tương thích
+        // Kiểm tra version
+        int version = FileReadInteger(fileHandle);
+        if(version != DATA_VERSION) {
             FileClose(fileHandle);
-            return false;
+            return false;  // Không tương thích phiên bản
         }
         
-        // Đọc số lượng giao dịch
-        m_HistoryCount = FileReadInteger(fileHandle);
-        if (m_HistoryCount > 500) m_HistoryCount = 500; // Đảm bảo không vượt quá kích thước mảng
+        // Đọc số lượng bản ghi
+        int count = FileReadInteger(fileHandle);
         
-        // Đọc từng giao dịch
-        for (int i = 0; i < m_HistoryCount; i++) {
-            m_TradeHistory[i].time = (datetime)FileReadInteger(fileHandle);
-            m_TradeHistory[i].scenario = FileReadString(fileHandle);
-            m_TradeHistory[i].isLong = (FileReadInteger(fileHandle) != 0);
-            m_TradeHistory[i].win = (FileReadInteger(fileHandle) != 0);
-            m_TradeHistory[i].profit = FileReadDouble(fileHandle);
+        // Xóa dữ liệu cũ
+        ClearHistory();
+        
+        // Đọc từng bản ghi
+        if(count > 0) {
+            ArrayResize(m_History, count);
+            m_HistoryCount = count;
+            
+            for(int i = 0; i < count; i++) {
+                m_History[i].time = (datetime)FileReadLong(fileHandle);
+                m_History[i].scenario = FileReadString(fileHandle);
+                m_History[i].isLong = (bool)FileReadInteger(fileHandle);
+                m_History[i].win = (bool)FileReadInteger(fileHandle);
+                m_History[i].profit = FileReadDouble(fileHandle);
+            }
         }
         
         FileClose(fileHandle);
         return true;
     }
-};
-
-//+------------------------------------------------------------------+
-//| Lớp chính - Asset Profiler                                       |
-//+------------------------------------------------------------------+
-class CAssetProfiler {
-private:
-    string m_Symbol;                 // Biểu tượng cặp tiền
-    CLogger *m_Logger;               // Logger - sửa thành con trỏ
-    int m_MinimumTrades;             // Số lệnh tối thiểu để học
-    double m_AdaptPercent;           // % ảnh hưởng Profile lên quyết định
-    ENUM_PROFILE_LOG_LEVEL m_LogLevel; // Mức độ log
-    ENUM_ADJUSTMENT_MODE m_AdjustmentMode; // Chế độ điều chỉnh
     
-    // Lưu trữ dữ liệu
-    CProfileStorage m_Storage;
-    
-    // Dữ liệu thống kê
-    int m_TotalTrades;               // Tổng số lệnh
-    int m_WinTrades;                 // Số lệnh thắng
-    int m_LossTrades;                // Số lệnh thua
-    
-    // Dữ liệu theo kịch bản
-    struct ScenarioStats {
-        string name;                 // Tên kịch bản
-        int totalTrades;             // Tổng số lệnh
-        int winTrades;               // Số lệnh thắng
-        double winRate;              // Tỷ lệ thắng
-        double avgProfit;            // Lợi nhuận trung bình
-        double adjustment;           // Điều chỉnh điểm tín hiệu
-        datetime lastUpdate;         // Thời gian cập nhật cuối cùng
-    };
-    
-    ScenarioStats m_ScenarioStats[MAX_SCENARIOS]; // Tối đa 20 kịch bản
-    int m_ScenarioCount;              // Số kịch bản đã lưu
-    
-    // Dữ liệu theo hướng
-    double m_LongWinRate;            // Tỷ lệ thắng lệnh mua
-    double m_ShortWinRate;           // Tỷ lệ thắng lệnh bán
-    double m_LongAvgProfit;          // Lợi nhuận trung bình lệnh mua
-    double m_ShortAvgProfit;         // Lợi nhuận trung bình lệnh bán
-    
-    // Điều chỉnh tín hiệu
-    double m_LongAdjustment;         // Điều chỉnh tín hiệu mua
-    double m_ShortAdjustment;        // Điều chỉnh tín hiệu bán
-    
-    // Dữ liệu theo phiên
-    double m_AsianWinRate;           // Tỷ lệ thắng phiên Á
-    double m_LondonWinRate;          // Tỷ lệ thắng phiên London
-    double m_NewYorkWinRate;         // Tỷ lệ thắng phiên New York
-    
-    // Thời gian làm mới cuối cùng
-    datetime m_LastRefreshTime;
-    
-    // Số lượng giao dịch trong lịch sử
-    int m_HistoryCount;
-    
-public:
-    
-    // Khởi tạo
-    CAssetProfiler(void) {
-        m_Symbol = "";
-        m_Logger = NULL;
-        m_MinimumTrades = 20;
-        m_AdaptPercent = 20.0;
-        m_LogLevel = PROFILE_LOG_IMPORTANT;
-        m_AdjustmentMode = ADJ_MODE_ADVANCED;
-        m_TotalTrades = 0;
-        m_WinTrades = 0;
-        m_LossTrades = 0;
-        m_ScenarioCount = 0;
-        m_LongWinRate = 0.5;
-        m_ShortWinRate = 0.5;
-        m_LongAvgProfit = 0.0;
-        m_ShortAvgProfit = 0.0;
-        m_LongAdjustment = 0.0;
-        m_ShortAdjustment = 0.0;
-        m_AsianWinRate = 0.5;
-        m_LondonWinRate = 0.5;
-        m_NewYorkWinRate = 0.5;
-        m_LastRefreshTime = 0;
-        m_HistoryCount = 0;
-    }
-    
-    // Destructor
-    ~CAssetProfiler(void) {
-        // Đảm bảo lưu dữ liệu khi kết thúc
-        if (m_Storage.NeedsSaving()) {
-            SaveProfileData();
-        }
-    }
-    
-    // Khởi tạo với tham số
-    bool Initialize(string symbol, int minimumTrades, double adaptPercent, CLogger *logger) {
-        m_Symbol = symbol;
-        m_Logger = logger;
-        m_MinimumTrades = minimumTrades;
-        m_AdaptPercent = adaptPercent;
+    // Lấy thống kê theo hướng giao dịch (long/short)
+    bool GetDirectionalStats(bool isLong, int &totalTrades, int &winTrades, double &winRate, double &avgProfit) {
+        if(m_HistoryCount == 0) return false;
         
-        // Khởi tạo ra với giá trị mặc định nếu tham số không hợp lệ
-        if (m_MinimumTrades < 5) m_MinimumTrades = 5;
-        if (m_AdaptPercent < 0) m_AdaptPercent = 0;
-        if (m_AdaptPercent > 100) m_AdaptPercent = 100;
+        totalTrades = 0;
+        winTrades = 0;
+        double totalProfit = 0.0;
         
-        // Load dữ liệu nếu có
-        if (!LoadProfileData()) {
-            InitializeDefaultStats();
-            
-            LogMessage("Asset Profiler: Khởi tạo profile mới cho " + m_Symbol, PROFILE_LOG_IMPORTANT);
-        } else {
-            RefreshStats(); // Tính toán lại các chỉ số từ dữ liệu đã nạp
-            
-            LogMessage("Asset Profiler: Đã nạp profile cho " + m_Symbol + 
-                       ", Trades: " + IntegerToString(m_TotalTrades), PROFILE_LOG_IMPORTANT);
+        // Tính toán thống kê từ lịch sử giao dịch
+        for(int i = 0; i < m_HistoryCount; i++) {
+            if(m_History[i].isLong == isLong) {
+                totalTrades++;
+                if(m_History[i].win) winTrades++;
+                totalProfit += m_History[i].profit;
+            }
         }
         
+        // Tính toán tỷ lệ thắng và lợi nhuận trung bình
+        if(totalTrades > 0) {
+            winRate = (double)winTrades / totalTrades;
+            avgProfit = totalProfit / totalTrades;
+            return true;
+        }
+        
+        return false;
+    }
+    
+    // Lấy thống kê tổng quan gần đây
+    bool GetRecentStats(int &totalTrades, int &winTrades, int &lossTrades, double &winRate) {
+        if(m_HistoryCount == 0) return false;
+        
+        totalTrades = 0;
+        winTrades = 0;
+        lossTrades = 0;
+        
+        // Tính toán thống kê từ lịch sử giao dịch
+        for(int i = 0; i < m_HistoryCount; i++) {
+            totalTrades++;
+            if(m_History[i].win) {
+                winTrades++;
+            } else {
+                lossTrades++;
+            }
+        }
+        
+        winRate = (totalTrades > 0) ? (double)winTrades / totalTrades : 0.0;
         return true;
     }
     
-    // Cài đặt tùy chọn nâng cao
-    void SetOptions(ENUM_PROFILE_LOG_LEVEL logLevel, ENUM_ADJUSTMENT_MODE adjustMode) {
-        m_LogLevel = logLevel;
-        m_AdjustmentMode = adjustMode;
-    }
+    // Lấy thống kê theo hướng
+    // Phương thức GetDirectionalStats đã được định nghĩa ở trên
     
-    // Cập nhật profile
-    void UpdateProfile(string scenario, bool isLong, bool win, double profit, string session = "") {
-        m_TotalTrades++;
+    // Lấy thống kê theo kịch bản
+    // Phương thức GetScenarioStats đã được định nghĩa ở trên
+};
+
+// Lớp quản lý hồ sơ tài sản
+class CAssetProfiler {
+private:
+    string m_Symbol;                  // Biểu tượng tiền tệ
+    CProfileStorage m_Storage;        // Đối tượng lưu trữ
+    // Sử dụng con trỏ để phù hợp với cách implement
+    CLogger* m_Logger;   // Con trỏ đến đối tượng logger
+    
+    // Thống kê tổng quan
+    int m_TotalTrades;                // Tổng số giao dịch
+    int m_WinTrades;                  // Số giao dịch thắng
+    int m_LossTrades;                 // Số giao dịch thua
+    double m_LongWinRate;             // Tỷ lệ thắng khi long
+    double m_ShortWinRate;            // Tỷ lệ thắng khi short
+    double m_LongAdjustment;          // Điều chỉnh cho long
+    double m_ShortAdjustment;         // Điều chỉnh cho short
+    double m_LongAvgProfit;           // Lợi nhuận trung bình khi long
+    double m_ShortAvgProfit;          // Lợi nhuận trung bình khi short
+    datetime m_LastRefreshTime;       // Thời điểm làm mới cuối cùng
+    
+    // Thống kê theo phiên
+    double m_AsianWinRate;            // Tỷ lệ thắng phiên Á
+    double m_LondonWinRate;           // Tỷ lệ thắng phiên London
+    double m_NewYorkWinRate;          // Tỷ lệ thắng phiên New York
+    
+    // Thống kê theo kịch bản
+    AssetScenarioStats m_ScenarioStats[]; // Mảng thống kê kịch bản
+    int m_ScenarioCount;              // Số lượng kịch bản
+    
+    // Cài đặt
+    int m_MinimumTrades;              // Số giao dịch tối thiểu cần để tính toán
+    double m_AdaptPercent;            // Phần trăm điều chỉnh
+    int m_LogLevel;                   // Mức độ log
+    ENUM_PROFILE_ADJUSTMENT_MODE m_AdjustmentMode; // Chế độ điều chỉnh
+
+    // Khởi tạo các giá trị thống kê mặc định
+    void InitializeDefaultStats() {
+        m_TotalTrades = 0;
+        m_WinTrades = 0;
+        m_LossTrades = 0;
+        m_LongWinRate = 0.5;
+        m_ShortWinRate = 0.5;
+        m_LongAdjustment = 0.0;
+        m_ShortAdjustment = 0.0;
+        m_LongAvgProfit = 0.0;
+        m_ShortAvgProfit = 0.0;
+        m_LastRefreshTime = 0;
         
-        if (win) {
-            m_WinTrades++;
-        } else {
-            m_LossTrades++;
-        }
+        m_AsianWinRate = 0.5;
+        m_LondonWinRate = 0.5;
+        m_NewYorkWinRate = 0.5;
         
-        // Lưu lại giao dịch trong lịch sử
-        m_Storage.AddTradeRecord(TimeCurrent(), scenario, isLong, win, profit);
-        
-        // Cập nhật theo kịch bản
-        UpdateScenarioStats(scenario, win, profit);
-        
-        // Cập nhật theo hướng
-        if (isLong) {
-            int longTrades = 0, longWins = 0;
-            double avgProfit = 0.0;
-            
-            if (m_Storage.GetDirectionalStats(true, 0, longTrades, longWins, avgProfit)) {
-                m_LongWinRate = (double)longWins / longTrades;
-                m_LongAvgProfit = avgProfit;
+        // Resize mảng thống kê kịch bản nếu cần
+        if (m_ScenarioCount > 0) {
+            ArrayResize(m_ScenarioStats, m_ScenarioCount);
+            for (int i = 0; i < m_ScenarioCount; i++) {
+                m_ScenarioStats[i].name = "Scenario_" + IntegerToString(i+1);
+                m_ScenarioStats[i].totalTrades = 0;
+                m_ScenarioStats[i].winRate = 0.5;
+                m_ScenarioStats[i].avgProfit = 0.0;
+                m_ScenarioStats[i].avgLoss = 0.0;
+                m_ScenarioStats[i].profitFactor = 1.0;
+                m_ScenarioStats[i].adjustment = 0.0;
             }
-        } else {
-            int shortTrades = 0, shortWins = 0;
-            double avgProfit = 0.0;
-            
-            if (m_Storage.GetDirectionalStats(false, 0, shortTrades, shortWins, avgProfit)) {
-                m_ShortWinRate = (double)shortWins / shortTrades;
-                m_ShortAvgProfit = avgProfit;
-            }
-        }
-        
-        // Cập nhật theo phiên nếu cung cấp
-        if (session != "") {
-            UpdateSessionStats(session, win);
-        }
-        
-        // Tính toán lại các điều chỉnh
-        CalculateAdjustments();
-        
-        // Log thông tin
-        LogMessage("Asset Profiler: Đã cập nhật " + (isLong ? "LONG" : "SHORT") + " " + 
-                   scenario + (win ? " WIN " : " LOSS ") + DoubleToString(profit, 2) + "R", 
-                   PROFILE_LOG_ALL);
-        
-        // Lưu dữ liệu nếu cần
-        if (m_Storage.NeedsSaving()) {
-            SaveProfileData();
-            m_Storage.ResetSaveCounter();
         }
     }
+
+public:
+    // Constructor khởi tạo giá trị mặc định
+    CAssetProfiler(string symbol) {
+        m_Symbol = symbol;
+        m_Logger = NULL;
+        m_ScenarioCount = 0;
+        m_MinimumTrades = 10;
+        m_AdaptPercent = 0.5;
+        m_LogLevel = PROFILE_LOG_IMPORTANT;
+        m_AdjustmentMode = PROFILE_ADJUST_BASIC;
+        
+        // Khởi tạo thống kê mặc định
+        InitializeDefaultStats();
+    }
     
-    // Lấy điều chỉnh tín hiệu theo kịch bản/hướng
-    double GetSignalAdjustment(string scenario, bool isLong) {
-        // Nếu chưa đủ dữ liệu, không điều chỉnh
-        if (m_TotalTrades < m_MinimumTrades) {
-            return 0.0;
+    // Lấy R-multiple tối ưu dựa trên dữ liệu lịch sử
+    double GetOptimalRMultiple() {
+        // Mặc định trả về 2.0 nếu không có đủ dữ liệu
+        if (m_TotalTrades < m_MinimumTrades) return 2.0;
+        
+        // Dựa trên tỷ lệ thắng và lợi nhuận trung bình
+        double winRate = (double)m_WinTrades / m_TotalTrades;
+        double avgWin = m_LongAvgProfit > m_ShortAvgProfit ? m_LongAvgProfit : m_ShortAvgProfit;
+        
+        // Công thức: winRate * (1 + avgWin) / (1 - winRate)
+        // Nhưng giới hạn trong khoảng 1.5 đến 3.0
+        double rMultiple = winRate * (1.0 + avgWin) / MathMax(1.0 - winRate, 0.1);
+        return MathMin(MathMax(rMultiple, 1.5), 3.0);
+    }
+    
+    // Lấy giá trị ATR dựa trên dữ liệu thị trường
+    double GetATR(int period = 14) {
+        // Sử dụng indicator iATR để tính ATR
+        int handle = iATR(m_Symbol, PERIOD_D1, period);
+        if (handle == INVALID_HANDLE) return 0.0;
+        
+        double atrValues[];
+        ArraySetAsSeries(atrValues, true);
+        int copied = CopyBuffer(handle, 0, 0, 3, atrValues);
+        IndicatorRelease(handle);
+        
+        if (copied > 0) {
+            return atrValues[0]; // Trả về giá trị ATR mới nhất
         }
-        
-        // Lấy điều chỉnh theo kịch bản
-        double scenarioAdjustment = GetScenarioAdjustment(scenario);
-        
-        // Lấy điều chỉnh theo hướng
-        double directionAdjustment = isLong ? m_LongAdjustment : m_ShortAdjustment;
-        
-        // Kết hợp hai điều chỉnh (trọng số 70% theo kịch bản, 30% theo hướng)
-        double finalAdjustment = (scenarioAdjustment * 0.7 + directionAdjustment * 0.3);
-        
-        // Áp dụng % ảnh hưởng
-        finalAdjustment *= (m_AdaptPercent / 100.0);
-        
-        // Giới hạn điều chỉnh trong phạm vi [-0.5, 0.5] để không áp đảo tín hiệu gốc
-        finalAdjustment = MathMax(-0.5, MathMin(0.5, finalAdjustment));
-        
-        return finalAdjustment;
+        return 0.0;
     }
     
-    // Kiểm tra profile có đủ độ tin cậy chưa
-    bool IsProfileReliable() {
-        return (m_TotalTrades >= m_MinimumTrades);
+    // Xác định chế độ thị trường (xu hướng, sideway, v.v.)
+    int GetRegime() {
+        // Mặc định là chế độ neutral (0)
+        // Các giá trị có thể trả về:
+        // 1 = Xu hướng tăng mạnh
+        // 0 = Thị trường sideway/không rõ xu hướng
+        // -1 = Xu hướng giảm mạnh
+        
+        // Đây là triển khai đơn giản, có thể mở rộng logic phức tạp hơn
+        if (m_LongWinRate > 0.6 && m_LongAvgProfit > 1.5) return 1;
+        if (m_ShortWinRate > 0.6 && m_ShortAvgProfit > 1.5) return -1;
+        return 0;
     }
-    
     // Lấy điểm mạnh profile (hướng và kịch bản phù hợp nhất)
     bool GetProfileStrengths(string &bestScenario, bool &preferLong) {
         if (m_TotalTrades < m_MinimumTrades) {
@@ -485,35 +418,36 @@ public:
     
     // Lấy thống kê profile
     string GetProfileStats() {
-        string stats = "===== ASSET PROFILE: " + m_Symbol + " =====\n";
-        stats += "Version: " + ASSET_PROFILER_VERSION + "\n";
-        stats += "Total Trades: " + IntegerToString(m_TotalTrades) + "\n";
+        string stats = StringFormat("===== ASSET PROFILE: %s =====\n", m_Symbol);
+        stats += StringFormat("Version: %s\n", ASSET_PROFILER_VERSION);
+        stats += StringFormat("Total Trades: %d\n", m_TotalTrades);
         
         if (m_TotalTrades > 0) {
             double winRate = (double)m_WinTrades / m_TotalTrades * 100;
-            stats += "Win Rate: " + DoubleToString(winRate, 2) + "%\n";
-            stats += "Long Win Rate: " + DoubleToString(m_LongWinRate * 100, 2) + "%\n";
-            stats += "Short Win Rate: " + DoubleToString(m_ShortWinRate * 100, 2) + "%\n";
-            stats += "Long Adjustment: " + DoubleToString(m_LongAdjustment, 3) + "\n";
-            stats += "Short Adjustment: " + DoubleToString(m_ShortAdjustment, 3) + "\n";
+            stats += StringFormat("Win Rate: %.2f%%\n", winRate);
+            stats += StringFormat("Long Win Rate: %.2f%%\n", m_LongWinRate * 100);
+            stats += StringFormat("Short Win Rate: %.2f%%\n", m_ShortWinRate * 100);
+            stats += StringFormat("Long Adjustment: %.3f\n", m_LongAdjustment);
+            stats += StringFormat("Short Adjustment: %.3f\n", m_ShortAdjustment);
             
             // Thêm thông tin kịch bản
             stats += "\n--- SCENARIO STATS ---\n";
             for (int i = 0; i < m_ScenarioCount; i++) {
                 if (m_ScenarioStats[i].totalTrades > 0) {
-                    stats += m_ScenarioStats[i].name + ": " + 
-                             IntegerToString(m_ScenarioStats[i].totalTrades) + " trades, " +
-                             DoubleToString(m_ScenarioStats[i].winRate * 100, 2) + "% win, " +
-                             "Avg: " + DoubleToString(m_ScenarioStats[i].avgProfit, 2) + "R, " +
-                             "Adj: " + DoubleToString(m_ScenarioStats[i].adjustment, 3) + "\n";
+                    stats += StringFormat("%s: %d trades, %.2f%% win, Avg: %.2fR, Adj: %.3f\n", 
+                              m_ScenarioStats[i].name,
+                              m_ScenarioStats[i].totalTrades,
+                              m_ScenarioStats[i].winRate * 100,
+                              m_ScenarioStats[i].avgProfit,
+                              m_ScenarioStats[i].adjustment);
                 }
             }
             
             // Thêm thông tin phiên
             stats += "\n--- SESSION STATS ---\n";
-            stats += "Asian: " + DoubleToString(m_AsianWinRate * 100, 2) + "%\n";
-            stats += "London: " + DoubleToString(m_LondonWinRate * 100, 2) + "%\n";
-            stats += "New York: " + DoubleToString(m_NewYorkWinRate * 100, 2) + "%\n";
+            stats += StringFormat("Asian: %.2f%%\n", m_AsianWinRate * 100);
+            stats += StringFormat("London: %.2f%%\n", m_LondonWinRate * 100);
+            stats += StringFormat("New York: %.2f%%\n", m_NewYorkWinRate * 100);
         }
         
         return stats;
@@ -523,7 +457,10 @@ public:
     bool ExportToCsv(string filename) {
         int fileHandle = FileOpen(filename, FILE_WRITE|FILE_CSV|FILE_COMMON, ",");
         if (fileHandle == INVALID_HANDLE) {
-            LogMessage("Không thể tạo file CSV: " + filename, PROFILE_LOG_ERRORS);
+            if (m_Logger != NULL) {
+                string logMessage = StringFormat("[Asset Profiler] Không thể tạo file CSV: %s", filename);
+                m_Logger.LogError(logMessage);
+            }
             return false;
         }
         
@@ -552,7 +489,7 @@ public:
         }
         
         FileClose(fileHandle);
-        LogMessage("Đã xuất dữ liệu sang: " + filename, PROFILE_LOG_IMPORTANT);
+        if (m_Logger != NULL) m_Logger.LogInfo(StringFormat("[Asset Profiler] Đã xuất dữ liệu sang: %s", filename));
         return true;
     }
     
@@ -561,204 +498,181 @@ public:
         RefreshStats();
     }
     
-private:
-    // Khởi tạo thống kê mặc định
-    void InitializeDefaultStats() {
-        m_TotalTrades = 0;
-        m_WinTrades = 0;
-        m_LossTrades = 0;
-        m_ScenarioCount = 0;
-        m_LongWinRate = 0.5;
-        m_ShortWinRate = 0.5;
-        m_LongAvgProfit = 0.0;
-        m_ShortAvgProfit = 0.0;
-        m_LongAdjustment = 0.0;
-        m_ShortAdjustment = 0.0;
-        m_AsianWinRate = 0.5;
-        m_LondonWinRate = 0.5;
-        m_NewYorkWinRate = 0.5;
-        m_LastRefreshTime = TimeCurrent();
-    }
-    
-    // Làm mới thống kê từ dữ liệu lịch sử
+    // Cập nhật thống kê từ dữ liệu lịch sử
     void RefreshStats() {
-        // Reset các thống kê
-        m_TotalTrades = 0;
-        m_WinTrades = 0;
+        // Khởi tạo lại thống kê mặc định
+        InitializeDefaultStats();
         
-        // Lấy thống kê từ dữ liệu
-        int totalTrades = 0;
-        int winTrades = 0;
-        double totalProfit = 0.0;
+        // Lấy thống kê tổng quan
+        int totalTrades = 0, winTrades = 0, lossTrades = 0;
+        double winRate = 0.0;
         
-        if (m_Storage.GetRecentStats(0, totalTrades, winTrades, totalProfit)) {
+        if(m_Storage.GetRecentStats(totalTrades, winTrades, lossTrades, winRate)) {
             m_TotalTrades = totalTrades;
             m_WinTrades = winTrades;
-            m_LossTrades = totalTrades - winTrades;
+            m_LossTrades = lossTrades;
         }
         
-        // Làm mới thống kê theo hướng
-        int longTrades = 0, longWins = 0, shortTrades = 0, shortWins = 0;
-        double longProfit = 0.0, shortProfit = 0.0;
+        // Lấy thống kê theo hướng
+        int longTrades = 0, longWins = 0;
+        double longWinRate = 0.0, longAvgProfit = 0.0;
         
-        if (m_Storage.GetDirectionalStats(true, 0, longTrades, longWins, longProfit)) {
-            m_LongWinRate = (double)longWins / longTrades;
-            m_LongAvgProfit = longProfit;
+        if(m_Storage.GetDirectionalStats(true, longTrades, longWins, longWinRate, longAvgProfit)) {
+            m_LongWinRate = longWinRate;
+            m_LongAvgProfit = longAvgProfit;
         }
         
-        if (m_Storage.GetDirectionalStats(false, 0, shortTrades, shortWins, shortProfit)) {
-            m_ShortWinRate = (double)shortWins / shortTrades;
-            m_ShortAvgProfit = shortProfit;
+        int shortTrades = 0, shortWins = 0;
+        double shortWinRate = 0.0, shortAvgProfit = 0.0;
+        
+        if(m_Storage.GetDirectionalStats(false, shortTrades, shortWins, shortWinRate, shortAvgProfit)) {
+            m_ShortWinRate = shortWinRate;
+            m_ShortAvgProfit = shortAvgProfit;
         }
-        
-        // Làm mới thống kê kịch bản 
-        RefreshScenarioStats();
-        
-        // Tính toán các điều chỉnh
-        CalculateAdjustments();
         
         m_LastRefreshTime = TimeCurrent();
-        LogMessage("Đã làm mới thống kê AssetProfiler", PROFILE_LOG_ALL);
+        
+        // Cập nhật thống kê kịch bản
+        UpdateScenarioStats();
     }
     
-    // Làm mới thống kê kịch bản
-    void RefreshScenarioStats() {
-        // Reset count
-        m_ScenarioCount = 0;
-        
-        // Duyệt qua lịch sử để lấy tất cả kịch bản duy nhất
-        string scenarios[MAX_SCENARIOS];
-        int scenarioCount = 0;
-        
-        for (int i = 0; i < m_Storage.GetHistoryCount(); i++) {
-            CProfileStorage::TradeRecord record;
-            if (m_Storage.GetTradeRecord(i, record)) {
-                // Kiểm tra xem kịch bản đã có trong danh sách chưa
-                bool found = false;
-                for (int j = 0; j < scenarioCount; j++) {
-                    if (scenarios[j] == record.scenario) {
-                        found = true;
-                        break;
-                    }
-                }
-                
-                // Nếu chưa có, thêm mới
-                if (!found && scenarioCount < MAX_SCENARIOS) {
-                    scenarios[scenarioCount] = record.scenario;
-                    scenarioCount++;
-                }
-            }
-        }
-        
-        // Tính thống kê cho từng kịch bản
-        for (int i = 0; i < scenarioCount; i++) {
-            int totalTrades = 0, winTrades = 0;
-            double avgProfit = 0.0;
-            
-            if (m_Storage.GetScenarioStats(scenarios[i], 0, totalTrades, winTrades, avgProfit)) {
-                if (totalTrades > 0) {
-                    m_ScenarioStats[m_ScenarioCount].name = scenarios[i];
-                    m_ScenarioStats[m_ScenarioCount].totalTrades = totalTrades;
-                    m_ScenarioStats[m_ScenarioCount].winTrades = winTrades;
-                    m_ScenarioStats[m_ScenarioCount].winRate = (double)winTrades / totalTrades;
-                    m_ScenarioStats[m_ScenarioCount].avgProfit = avgProfit;
-                    m_ScenarioStats[m_ScenarioCount].adjustment = 0.0; // Sẽ tính sau
-                    m_ScenarioStats[m_ScenarioCount].lastUpdate = TimeCurrent();
-                    
-                    m_ScenarioCount++;
-                }
-            }
-        }
-    }
-    
-    // Cập nhật thống kê theo kịch bản
-    void UpdateScenarioStats(string scenario, bool win, double profit) {
-        // Tìm kịch bản
-        int index = -1;
+    // Lấy điều chỉnh theo kịch bản
+    double GetScenarioAdjustment(string scenario) {
         for (int i = 0; i < m_ScenarioCount; i++) {
-            if (m_ScenarioStats[i].name == scenario) {
-                index = i;
-                break;
+            if (m_ScenarioStats[i].name == scenario && m_ScenarioStats[i].totalTrades >= 5) {
+                return m_ScenarioStats[i].adjustment;
             }
         }
         
-        // Nếu chưa có, thêm mới
-        if (index == -1) {
-            if (m_ScenarioCount < MAX_SCENARIOS) {
-                index = m_ScenarioCount;
-                m_ScenarioStats[index].name = scenario;
-                m_ScenarioStats[index].totalTrades = 0;
-                m_ScenarioStats[index].winTrades = 0;
-                m_ScenarioStats[index].winRate = 0.5;
-                m_ScenarioStats[index].avgProfit = 0.0;
-                m_ScenarioStats[index].adjustment = 0.0;
-                m_ScenarioCount++;
-            } else {
-                // Tìm kịch bản ít giao dịch nhất để thay thế
-                int leastUsedIndex = 0;
-                int minTrades = m_ScenarioStats[0].totalTrades;
-                
-                for (int i = 1; i < m_ScenarioCount; i++) {
-                    if (m_ScenarioStats[i].totalTrades < minTrades) {
-                        minTrades = m_ScenarioStats[i].totalTrades;
-                        leastUsedIndex = i;
-                    }
-                }
-                
-                index = leastUsedIndex;
-                m_ScenarioStats[index].name = scenario;
-                m_ScenarioStats[index].totalTrades = 0;
-                m_ScenarioStats[index].winTrades = 0;
-                m_ScenarioStats[index].winRate = 0.5;
-                m_ScenarioStats[index].avgProfit = 0.0;
-                m_ScenarioStats[index].adjustment = 0.0;
-            }
-        }
-        
-        // Cập nhật thống kê
-        m_ScenarioStats[index].totalTrades++;
-        if (win) {
-            m_ScenarioStats[index].winTrades++;
-        }
-        
-        // Cập nhật tỉ lệ thắng và lợi nhuận trung bình
-        m_ScenarioStats[index].winRate = (double)m_ScenarioStats[index].winTrades / m_ScenarioStats[index].totalTrades;
-        
-        // Điều chỉnh lợi nhuận trung bình
-        double oldTotal = m_ScenarioStats[index].avgProfit * (m_ScenarioStats[index].totalTrades - 1);
-        m_ScenarioStats[index].avgProfit = (oldTotal + profit) / m_ScenarioStats[index].totalTrades;
-        
-        // Cập nhật thời gian
-        m_ScenarioStats[index].lastUpdate = TimeCurrent();
+        return 0.0;
     }
     
-    // Cập nhật thống kê theo phiên
-    void UpdateSessionStats(string session, bool win) {
-        // Kiểm tra giá trị session và cập nhật tương ứng
-        if (session == "Asian") {
-            // Cập nhật tỷ lệ thắng phiên Á
-            // Logic cập nhật tỷ lệ thắng Asian phiên sẽ được triển khai sau
-            // Hiện tại giữ cài đặt đơn giản để minh họa
-            if (win) {
-                m_AsianWinRate = (m_AsianWinRate * 9 + 1) / 10; // Trọng số 10% cho kết quả mới
-            } else {
-                m_AsianWinRate = (m_AsianWinRate * 9 + 0) / 10;
+    //+------------------------------------------------------------------+
+    //| Nạp dữ liệu profile                                              |
+    //+------------------------------------------------------------------+
+    bool LoadProfileData() {
+        string historyFile = "AP_History_" + m_Symbol + ".dat";
+        string configFile = "AP_Config_" + m_Symbol + ".dat";
+        
+        bool historyExists = FileIsExist(historyFile, FILE_COMMON);
+        bool configExists = FileIsExist(configFile, FILE_COMMON);
+        
+        bool historyLoaded = m_Storage.LoadHistoryFromFile(historyFile);
+        if (!historyLoaded) {
+            LogMessage(StringFormat("Không thể nạp lịch sử từ file: %s", historyFile), PROFILE_LOG_ERRORS);
+            return false;
+        }
+        
+        if (configExists) {
+            int fileHandle = FileOpen(configFile, FILE_READ|FILE_BIN|FILE_COMMON);
+            if (fileHandle != INVALID_HANDLE) {
+                int configVersion = FileReadInteger(fileHandle);
+                m_MinimumTrades = FileReadInteger(fileHandle);
+                m_AdaptPercent = FileReadDouble(fileHandle);
+                m_LogLevel = (ENUM_PROFILE_LOG_LEVEL)FileReadInteger(fileHandle);
+                m_AdjustmentMode = (ENUM_PROFILE_ADJUSTMENT_MODE)FileReadInteger(fileHandle);
+                FileClose(fileHandle);
             }
-        } 
-        else if (session == "London") {
-            // Cập nhật tỷ lệ thắng phiên London
-            if (win) {
-                m_LondonWinRate = (m_LondonWinRate * 9 + 1) / 10;
+        }
+        return true;
+    }
+    
+    //+------------------------------------------------------------------+
+    //| Lưu dữ liệu profile                                          |
+    //+------------------------------------------------------------------+
+    bool SaveProfileData() {
+        string historyFile = "AP_History_" + m_Symbol + ".dat";
+        string configFile = "AP_Config_" + m_Symbol + ".dat";
+        
+        bool historySaved = m_Storage.SaveHistoryToFile(historyFile);
+        if (!historySaved) {
+            LogMessage(StringFormat("Không thể lưu lịch sử vào file: %s", historyFile), PROFILE_LOG_ERRORS);
+            return false;
+        }
+        
+        int fileHandle = FileOpen(configFile, FILE_WRITE|FILE_BIN|FILE_COMMON);
+        if (fileHandle == INVALID_HANDLE) {
+            LogMessage(StringFormat("Không thể mở file để lưu dữ liệu: %s", configFile), PROFILE_LOG_ERRORS);
+            return false;
+        }
+        
+        FileWriteInteger(fileHandle, DATA_VERSION);
+        FileWriteInteger(fileHandle, m_MinimumTrades);
+        FileWriteDouble(fileHandle, m_AdaptPercent);
+        FileWriteInteger(fileHandle, (int)m_LogLevel);
+        FileWriteInteger(fileHandle, (int)m_AdjustmentMode);
+        
+        FileClose(fileHandle);
+        LogMessage("Đã lưu profile dữ liệu thành công", PROFILE_LOG_ALL);
+        return true;
+    }
+    
+    // Hàm log chỉ khi cần thiết
+    void LogMessage(string message, int level) {
+        if(level <= m_LogLevel) {
+            if(m_Logger != NULL) {
+                string formattedMessage = StringFormat("[Asset Profiler] %s", message);
+                switch(level) {
+                    case PROFILE_LOG_ERRORS:
+                        m_Logger.LogError(formattedMessage);
+                        break;
+                    case PROFILE_LOG_IMPORTANT:
+                        m_Logger.LogWarning(formattedMessage);
+                        break;
+                    case PROFILE_LOG_ALL:
+                        m_Logger.LogInfo(formattedMessage);
+                        break;
+                    default:
+                        // Không làm gì
+                        break;
+                }
             } else {
-                m_LondonWinRate = (m_LondonWinRate * 9 + 0) / 10;
+                // Fallback nếu Logger chưa được khởi tạo
+                Print("[Asset Profiler] " + message);
             }
-        } 
-        else if (session == "NewYork") {
-            // Cập nhật tỷ lệ thắng phiên NewYork
-            if (win) {
-                m_NewYorkWinRate = (m_NewYorkWinRate * 9 + 1) / 10;
-            } else {
-                m_NewYorkWinRate = (m_NewYorkWinRate * 9 + 0) / 10;
+        }
+    }
+
+
+    
+    // Khởi tạo thống kê đã được định nghĩa trong phần private
+    
+    // Cập nhật thống kê kịch bản
+    void UpdateScenarioStats() {
+        // Tạo mảng kịch bản
+        if (m_ScenarioCount == 0) {
+            // Khởi tạo các kịch bản mặc định
+            m_ScenarioCount = 5;
+            ArrayResize(m_ScenarioStats, m_ScenarioCount);
+            
+            m_ScenarioStats[0].name = "Pullback_Strong";
+            m_ScenarioStats[1].name = "Pullback_Shallow";
+            m_ScenarioStats[2].name = "Breakout";
+            m_ScenarioStats[3].name = "Reversal";
+            m_ScenarioStats[4].name = "RangeBreak";
+            
+            // Khởi tạo giá trị mặc định cho tất cả
+            for (int i = 0; i < m_ScenarioCount; i++) {
+                m_ScenarioStats[i].totalTrades = 0;
+                m_ScenarioStats[i].winTrades = 0;
+                m_ScenarioStats[i].winRate = 0.5;
+                m_ScenarioStats[i].avgProfit = 0.0;
+                m_ScenarioStats[i].adjustment = 0.0;
+                m_ScenarioStats[i].lastUpdate = TimeCurrent();
+            }
+        }
+        
+        // Cập nhật thống kê cho từng kịch bản
+        for (int i = 0; i < m_ScenarioCount; i++) {
+            int scenarioTrades = 0, scenarioWins = 0;
+            double scenarioWinRate = 0.0, scenarioAvgProfit = 0.0;
+            
+            if (m_Storage.GetScenarioStats(m_ScenarioStats[i].name, scenarioTrades, scenarioWins, scenarioWinRate, scenarioAvgProfit)) {
+                m_ScenarioStats[i].totalTrades = scenarioTrades;
+                m_ScenarioStats[i].winTrades = scenarioWins;
+                m_ScenarioStats[i].winRate = scenarioWinRate;
+                m_ScenarioStats[i].avgProfit = scenarioAvgProfit;
+                m_ScenarioStats[i].lastUpdate = TimeCurrent();
             }
         }
     }
@@ -767,215 +681,53 @@ private:
     void CalculateAdjustments() {
         // Chỉ tính toán lại nếu đủ dữ liệu
         if (m_TotalTrades < m_MinimumTrades) {
+            // Không đủ dữ liệu, thiết lập các giá trị mặc định
+            m_LongAdjustment = 0.0;
+            m_ShortAdjustment = 0.0;
+            
+            // Xóa điều chỉnh cho các kịch bản
+            for (int i = 0; i < m_ScenarioCount; i++) {
+                m_ScenarioStats[i].adjustment = 0.0;
+            }
             return;
         }
+        
+        // Tính toán điều chỉnh cơ bản theo hướng
+        // Điều chỉnh long: 50% = 0, 100% = +0.3, 0% = -0.3
+        m_LongAdjustment = (m_LongWinRate - 0.5) * 0.6;
+        
+        // Điều chỉnh short: 50% = 0, 100% = +0.3, 0% = -0.3
+        m_ShortAdjustment = (m_ShortWinRate - 0.5) * 0.6;
+        
+        // Giới hạn điều chỉnh trong khoảng [-0.3, +0.3]
+        m_LongAdjustment = MathMax(-0.3, MathMin(0.3, m_LongAdjustment));
+        m_ShortAdjustment = MathMax(-0.3, MathMin(0.3, m_ShortAdjustment));
         
         // Tính toán điều chỉnh cho các kịch bản
         for (int i = 0; i < m_ScenarioCount; i++) {
             if (m_ScenarioStats[i].totalTrades >= 5) {
-                // Điều chỉnh dựa trên mode
-                if (m_AdjustmentMode == ADJ_MODE_BASIC) {
-                    // Tính toán đơn giản: 50% win rate = 0 adjustment, 75%+ win rate = +0.15, 25%- win rate = -0.15
-                    m_ScenarioStats[i].adjustment = (m_ScenarioStats[i].winRate - 0.5) * 0.6;
-                }
-                else if (m_AdjustmentMode == ADJ_MODE_ADVANCED) {
-                    // Dùng hàm sigmoid cho điều chỉnh mượt mà hơn
-                    double winRateOffset = m_ScenarioStats[i].winRate - 0.5; // -0.5 đến +0.5
-                    double profitFactor = m_ScenarioStats[i].avgProfit / 0.5; // Chuẩn hóa theo R
-                    
-                    // Giới hạn profitFactor trong khoảng [0.5, 2.0]
-                    profitFactor = MathMax(0.5, MathMin(2.0, profitFactor));
-                    
-                    // Áp dụng công thức sigmoid
-                    double sigmoid = 2.0 / (1.0 + MathExp(-4.0 * winRateOffset)) - 1.0; // -1 đến +1
-                    
-                    // Điều chỉnh cuối cùng
-                    m_ScenarioStats[i].adjustment = sigmoid * 0.3 * profitFactor; // Max ±0.3 * profitFactor
-                }
-                else if (m_AdjustmentMode == ADJ_MODE_TIME_WEIGHTED) {
-                    // Điều chỉnh có trọng số theo thời gian
-                    double winRateOffset = m_ScenarioStats[i].winRate - 0.5;
-                    
-                    // Tính số ngày từ lần cập nhật cuối
-                    datetime currentTime = TimeCurrent();
-                    double daysSinceUpdate = (currentTime - m_ScenarioStats[i].lastUpdate) / 86400.0;
-                    
-                    // Giảm dần trọng số theo thời gian (giảm 50% sau 30 ngày)
-                    double timeFactor = MathExp(-daysSinceUpdate / 30.0);
-                    
-                    // Điều chỉnh cuối cùng
-                    m_ScenarioStats[i].adjustment = winRateOffset * 0.6 * timeFactor;
-                }
+                // Điều chỉnh dựa trên tỷ lệ thắng và lợi nhuận trung bình
+                double winRateComponent = (m_ScenarioStats[i].winRate - 0.5) * 0.5;
+                double profitComponent = m_ScenarioStats[i].avgProfit * 0.2;
+                
+                // Kết hợp hai thành phần
+                m_ScenarioStats[i].adjustment = winRateComponent + profitComponent;
+                
+                // Giới hạn điều chỉnh trong khoảng [-0.25, +0.25]
+                m_ScenarioStats[i].adjustment = MathMax(-0.25, MathMin(0.25, m_ScenarioStats[i].adjustment));
             }
         }
         
-        // Tính toán điều chỉnh cho lệnh mua/bán
-        // Cách tiếp cận tương tự kịch bản
-        if (m_AdjustmentMode == ADJ_MODE_BASIC) {
-            m_LongAdjustment = (m_LongWinRate - 0.5) * 0.4;
-            m_ShortAdjustment = (m_ShortWinRate - 0.5) * 0.4;
-        }
-        else if (m_AdjustmentMode == ADJ_MODE_ADVANCED) {
-            // Kết hợp win rate và avg profit
-            double longSigmoid = 2.0 / (1.0 + MathExp(-4.0 * (m_LongWinRate - 0.5))) - 1.0;
-            double shortSigmoid = 2.0 / (1.0 + MathExp(-4.0 * (m_ShortWinRate - 0.5))) - 1.0;
-            
-            double longProfitFactor = MathMax(0.5, MathMin(2.0, m_LongAvgProfit / 0.5));
-            double shortProfitFactor = MathMax(0.5, MathMin(2.0, m_ShortAvgProfit / 0.5));
-            
-            m_LongAdjustment = longSigmoid * 0.2 * longProfitFactor;
-            m_ShortAdjustment = shortSigmoid * 0.2 * shortProfitFactor;
-        }
-        else if (m_AdjustmentMode == ADJ_MODE_TIME_WEIGHTED) {
-            // Các điều chỉnh có thể thêm tại đây
-            m_LongAdjustment = (m_LongWinRate - 0.5) * 0.4;
-            m_ShortAdjustment = (m_ShortWinRate - 0.5) * 0.4;
-        }
+        LogMessage("Đã tính toán điều chỉnh: Long " + DoubleToString(m_LongAdjustment, 3) + 
+                  ", Short " + DoubleToString(m_ShortAdjustment, 3), PROFILE_LOG_ALL);
     }
     
-//+------------------------------------------------------------------+
-//| Nạp dữ liệu profile                                              |
-//+------------------------------------------------------------------+
-/* Hàm nạp profile - đã khai báo ở phần public */
-bool CAssetProfiler::LoadProfileData() {
-    string historyFile = "AP_History_" + m_Symbol + ".dat";
-    string configFile = "AP_Config_" + m_Symbol + ".dat";
-    
-    bool historyExists = FileIsExist(historyFile, FILE_COMMON);
-    bool configExists = FileIsExist(configFile, FILE_COMMON);
-    
-    bool historyLoaded = m_Storage.LoadHistoryFromFile(historyFile);
-    if (!historyLoaded) {
-        LogMessage("Không thể nạp lịch sử từ file: " + historyFile, PROFILE_LOG_ERRORS);
-        return false;
+    // Phương thức để thiết lập logger từ bên ngoài
+    void SetLogger(CLogger *logger) {
+        m_Logger = logger;
     }
-    
-    if (configExists) {
-        int fileHandle = FileOpen(configFile, FILE_READ|FILE_BIN|FILE_COMMON);
-        if (fileHandle != INVALID_HANDLE) {
-            int configVersion = FileReadInteger(fileHandle);
-            m_MinimumTrades = FileReadInteger(fileHandle);
-            m_AdaptPercent = FileReadDouble(fileHandle);
-            m_LogLevel = (ENUM_PROFILE_LOG_LEVEL)FileReadInteger(fileHandle);
-            m_AdjustmentMode = (ENUM_ADJUSTMENT_MODE)FileReadInteger(fileHandle);
-            FileClose(fileHandle);
-        }
-    }
-    return true;
-}
-        
-//+------------------------------------------------------------------+
-//| Lưu dữ liệu profile                                          |
-//+------------------------------------------------------------------+
-bool CAssetProfiler::SaveProfileData() {
-    string historyFile = "AP_History_" + m_Symbol + ".dat";
-    string configFile = "AP_Config_" + m_Symbol + ".dat";
-    
-    bool historySaved = m_Storage.SaveHistoryToFile(historyFile);
-    if (!historySaved) {
-        LogMessage("Không thể lưu lịch sử vào file: " + historyFile, PROFILE_LOG_ERRORS);
-        return false;
-    }
-    
-    int fileHandle = FileOpen(configFile, FILE_WRITE|FILE_BIN|FILE_COMMON);
-    if (fileHandle == INVALID_HANDLE) {
-        LogMessage("Không thể mở file để lưu dữ liệu: " + configFile, PROFILE_LOG_ERRORS);
-        return false;
-    }
-    
-    FileWriteInteger(fileHandle, DATA_VERSION);
-    FileWriteInteger(fileHandle, m_MinimumTrades);
-    FileWriteDouble(fileHandle, m_AdaptPercent);
-    FileWriteInteger(fileHandle, (int)m_LogLevel);
-    FileWriteInteger(fileHandle, (int)m_AdjustmentMode);
-    
-    FileClose(fileHandle);
-    LogMessage("Đã lưu profile dữ liệu thành công", PROFILE_LOG_ALL);
-    return true;
-}
-    // Hàm log chỉ khi cần thiết
-void CAssetProfiler::LogMessage(string message, ENUM_PROFILE_LOG_LEVEL level) {
-    if (m_Logger == NULL || level > m_LogLevel) {
-        return;
-    }
-    
-    switch (level) {
-        case PROFILE_LOG_ERRORS:
-            m_Logger.LogError(message);
-            break;
-            
-        case PROFILE_LOG_IMPORTANT:
-            m_Logger.LogInfo(message);
-            break;
-            
-        case PROFILE_LOG_ALL:
-            m_Logger.LogDebug(message);
-            break;
-    }
-}
-    
-//+------------------------------------------------------------------+
-//| Phương thức lưu thông tin profile tài sản                        |
-//+------------------------------------------------------------------+
-bool CAssetProfiler::SaveAssetProfile(const AssetProfile &profile) {
-        // Cài đặt giá trị thiết lập từ profile
-        m_Symbol = profile.symbol;
-        
-        // Lưu dữ liệu vào file nếu cần
-        string filename = "AP_Config_" + m_Symbol + ".dat";
-        int fileHandle = FileOpen(filename, FILE_WRITE|FILE_BIN|FILE_COMMON);
-        if (fileHandle == INVALID_HANDLE) {
-            LogMessage("Không thể mở file để lưu dữ liệu: " + filename, PROFILE_LOG_ERRORS);
-            return false;
-        }
-        
-        // Lưu phiên bản dữ liệu
-        FileWriteInteger(fileHandle, DATA_VERSION);
-        
-        // Đóng file
-        FileClose(fileHandle);
-        
-        return true;
-    }
-    
-//+------------------------------------------------------------------+
-//| Kiểm tra xem các EMA có xếp hàng theo đúng chiều giao dịch       |
-//+------------------------------------------------------------------+
-bool CAssetProfiler::IsEMAAligned(bool isLong) {
-    double ema34 = iMA(_Symbol, PERIOD_CURRENT, 34, 0, MODE_EMA, PRICE_CLOSE);
-    double ema89 = iMA(_Symbol, PERIOD_CURRENT, 89, 0, MODE_EMA, PRICE_CLOSE);
-    double ema200 = iMA(_Symbol, PERIOD_CURRENT, 200, 0, MODE_EMA, PRICE_CLOSE);
-    
-    if (isLong) {
-        return (ema34 > ema89 && ema89 > ema200);
-    } else {
-        return (ema34 < ema89 && ema89 < ema200);
-    }
-}
-//+------------------------------------------------------------------+
-//| Kiểm tra xem giá có nằm ngoài vùng giá trị không                 |
-//+------------------------------------------------------------------+
-bool CAssetProfiler::IsPriceOutsideValueArea(double price, bool checkHigh) {
-    // Xác định vùng giá trị dựa trên giá cao/thấp nhất của ngày
-    double valueAreaHigh = iHigh(_Symbol, PERIOD_D1, 0) * 0.99; // 99% giá cao nhất
-    double valueAreaLow = iLow(_Symbol, PERIOD_D1, 0) * 1.01;   // 101% giá thấp nhất
-    
-    if (checkHigh) {
-            // Kiểm tra xem giá có cao hơn vùng giá trị cao không
-            return (price > valueAreaHigh);
-        } else {
-            // Kiểm tra xem giá có thấp hơn vùng giá trị thấp không
-            return (price < valueAreaLow);
-        }
-    }
-        
-        // Lấy điều chỉnh theo kịch bản
-        double GetScenarioAdjustment(string scenario) {
-            for (int i = 0; i < m_ScenarioCount; i++) {
-                if (m_ScenarioStats[i].name == scenario && m_ScenarioStats[i].totalTrades >= 5) {
-                    return m_ScenarioStats[i].adjustment;
-                }
-            }
-            
-            return 0.0;
-        }
+};
+
+} // namespace ApexPullback
+
+#endif // ASSET_PROFILER_MQH_

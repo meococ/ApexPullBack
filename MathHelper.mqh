@@ -4,10 +4,9 @@
 //|                            Hàm toán học tiện ích cho EA         |
 //|                          Copyright 2023-2024, APEX Forex        |
 //+------------------------------------------------------------------+
-#property copyright "APEX Forex"
-#property link      "https://www.apexpullback.com"
-#property version   "1.0"
-#property strict
+
+#ifndef _MATH_HELPER_MQH_
+#define _MATH_HELPER_MQH_
 
 // Để tránh xung đột namespace
 namespace ApexPullback {
@@ -1168,3 +1167,5 @@ void FindPriceClusters(const double &prices[], double &clusters[], int maxCluste
 }
 
 } // Kết thúc namespace ApexPullback
+
+#endif // _MATH_HELPER_MQH_

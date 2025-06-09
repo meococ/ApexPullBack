@@ -3,9 +3,10 @@
 //|              APEX Pullback EA v14.0 - Hệ thống ghi nhật ký      |
 //+------------------------------------------------------------------+
 
-#ifndef _LOGGER_MQH_
-#define _LOGGER_MQH_
+#ifndef LOGGER_MQH
+#define LOGGER_MQH
 
+#include <Files\FileTxt.mqh>
 #include "Enums.mqh"
 
 namespace ApexPullback {
@@ -14,11 +15,19 @@ namespace ApexPullback {
 //+------------------------------------------------------------------+
 
 // Định nghĩa đầu ra của log - Nơi ghi nhật ký
-enum ENUM_LOG_OUTPUT {
+enum ENUM_LOG_OUTPUT
+{
    LOG_OUTPUT_PRINT = 0,    // Chỉ hiển thị trong cửa sổ "Experts" của MT5
    LOG_OUTPUT_FILE = 1,     // Chỉ ghi vào file (không hiển thị trên màn hình)
    LOG_OUTPUT_BOTH = 2      // Hiển thị trên màn hình và ghi vào file
 };
+
+// Sử dụng ENUM_LOG_LEVEL từ Enums.mqh
+// Bảng tương ứng giữa LOG_LEVEL cũ và mới (các hằng để tương thích ngược)
+#define LOG_LEVEL_ERROR   LOG_ERROR
+#define LOG_LEVEL_WARNING LOG_WARNING
+#define LOG_LEVEL_INFO    LOG_INFO
+#define LOG_LEVEL_DEBUG   LOG_DEBUG
 
 //+------------------------------------------------------------------+
 //| Lớp CLogger - Quản lý ghi log chuyên nghiệp cho EA              |
@@ -41,7 +50,7 @@ private:
    // Phương thức private
    void           FormatLogMessage(string &formatted_message, string level, string message);
    void           WriteToFile(string message);
-   bool           SendTelegramMessage(string message);
+   bool           SendTelegramMessage(string message, bool important = false);
 
 public:
    // Constructor và Destructor
@@ -72,6 +81,13 @@ public:
    void           SetLogOutput(ENUM_LOG_OUTPUT log_output);
    ENUM_LOG_OUTPUT GetLogOutput() { return m_log_output; }
    
+   // Phương thức kiểm tra cấp độ log
+   bool           IsDebugEnabled() { return m_log_level >= LOG_DEBUG; }
+   bool           IsInfoEnabled() { return m_log_level >= LOG_INFO; }
+   bool           IsWarningEnabled() { return m_log_level >= LOG_WARNING; }
+   bool           IsErrorEnabled() { return m_log_level >= LOG_ERROR; }
+   bool           IsVerboseEnabled() { return m_log_level >= LOG_VERBOSE; }
+   
    // Phương thức thông báo Telegram
    bool           EnableTelegram(string token, string chatId, bool importantOnly = true);
    void           DisableTelegram();
@@ -81,90 +97,83 @@ public:
 //| Constructor - Khởi tạo giá trị mặc định                          |
 //+------------------------------------------------------------------+
 CLogger::CLogger() {
-   // Khởi tạo các biến thành viên với giá trị mặc định
-   m_symbol = _Symbol;
-   m_prefix = "APEX";
-   m_log_level = LOG_INFO;
-   m_log_output = LOG_OUTPUT_PRINT;
-   m_log_file_name = "";
-   m_log_file_handle = INVALID_HANDLE;
-   m_is_initialized = false;
-   m_enable_telegram = false;
-   m_telegram_token = "";
-   m_telegram_chat_id = "";
-   m_important_only = true;
+    m_symbol = Symbol();
+    m_prefix = "ApexPullback";
+    m_log_level = LOG_INFO;     // Mặc định: Chỉ log thông tin bình thường
+    m_log_output = LOG_OUTPUT_PRINT; // Mặc định: Chỉ hiển thị trên màn hình
+    m_log_file_name = "";
+    m_log_file_handle = INVALID_HANDLE;
+    m_is_initialized = false;
+    m_enable_telegram = false;
+    m_telegram_token = "";
+    m_telegram_chat_id = "";
+    m_important_only = true;
 }
 
 //+------------------------------------------------------------------+
-//| Destructor - Đảm bảo giải phóng tài nguyên                       |
+//| Destructor - Dọn dẹp trước khi hủy đối tượng                     |
 //+------------------------------------------------------------------+
 CLogger::~CLogger() {
-   // Đảm bảo dọn dẹp tài nguyên khi đối tượng bị hủy
-   Deinitialize();
+    Deinitialize();
 }
 
 //+------------------------------------------------------------------+
-//| Khởi tạo Logger với các tham số cơ bản và nâng cao              |
+//| Initialize - Khởi tạo đối tượng logger với các tham số mở rộng   |
 //+------------------------------------------------------------------+
 bool CLogger::Initialize(string prefix, bool enableDetailedLogs = false, 
                        bool enableCsvLog = false, string csvFileName = "LogFile.csv",
                        bool enableTelegram = false, string telegramToken = "", 
                        string telegramChatId = "", bool importantOnly = true) {
-   // Nếu đã khởi tạo thì không làm gì
-   if(m_is_initialized)
-      return true;
-      
-   // Lưu thông tin cơ bản
-   m_symbol = _Symbol;
-   m_prefix = prefix;
-   m_log_level = enableDetailedLogs ? LOG_DEBUG : LOG_INFO;
-   m_log_output = enableCsvLog ? LOG_OUTPUT_BOTH : LOG_OUTPUT_PRINT;
-   
-   // Thiết lập Telegram nếu được kích hoạt
-   m_enable_telegram = enableTelegram;
-   m_telegram_token = telegramToken;
-   m_telegram_chat_id = telegramChatId;
-   m_important_only = importantOnly;
-   
-   // Tạo tên file log nếu cần
-   if(enableCsvLog) {
-      // Nếu không có tên file được chỉ định, tạo tên mặc định theo định dạng
-      if(csvFileName == "LogFile.csv") {
-         // Tạo tên file log theo định dạng: Prefix_Symbol_YYYYMMDD.log
-         m_log_file_name = m_prefix + "_" + m_symbol + "_" + TimeToString(TimeCurrent(), TIME_DATE) + ".log";
-Print("File handle: ", IntegerToString(m_log_file_handle));
-LogError("Lỗi: " + IntegerToString(GetLastError()));
-      } else {
-         // Sử dụng tên file được chỉ định
-         m_log_file_name = csvFileName;
-      }
-      
-      // Kiểm tra tên file và thêm đuôi .log nếu cần
-      if(StringFind(m_log_file_name, ".log") < 0 && StringFind(m_log_file_name, ".csv") < 0) {
-         m_log_file_name = m_log_file_name + ".log";
-      }
-      
-      // Mở file log (tạo mới hoặc thêm vào file hiện có)
-      m_log_file_handle = FileOpen(m_log_file_name, FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_COMMON);
-      
-      // Kiểm tra nếu không mở được file
-      if(m_log_file_handle == INVALID_HANDLE) {
-         // Ghi log lỗi khi không mở được file
-         m_log_output = LOG_OUTPUT_PRINT; // Chuyển sang chế độ chỉ in ra màn hình
-         Print("LOGGER ERROR: Không thể mở file log: ", m_log_file_name, ", error: ", IntegerToString(GetLastError()));
-         return false;
-      }
-      
-      // Di chuyển con trỏ đến cuối file
-      FileSeek(m_log_file_handle, 0, SEEK_END);
-   }
-   
-   // Đánh dấu đã khởi tạo
-   m_is_initialized = true;
-   
-   // Ghi log thông báo khởi tạo thành công
-   LogInfo("APEX Pullback EA v14.0 Logger được khởi tạo thành công.");
-   return true;
+    // Đặt tiền tố cho logger
+    if (prefix != "") m_prefix = prefix;
+    
+    // Thiết lập cấp độ log
+    m_log_level = enableDetailedLogs ? LOG_DEBUG : LOG_INFO;
+    
+    // Cấu hình file log nếu cần
+    if (enableCsvLog) {
+        m_log_output = LOG_OUTPUT_BOTH;
+        
+        // Nếu không có tên file được chỉ định, tạo tên mặc định theo định dạng
+        if(csvFileName == "LogFile.csv") {
+            // Tạo tên file log theo định dạng: Prefix_Symbol_YYYYMMDD.log
+            m_log_file_name = m_prefix + "_" + m_symbol + "_" + TimeToString(TimeCurrent(), TIME_DATE) + ".log";
+        } else {
+            // Sử dụng tên file được chỉ định
+            m_log_file_name = csvFileName;
+        }
+        
+        // Kiểm tra tên file và thêm đuôi .log nếu cần
+        if(StringFind(m_log_file_name, ".log") < 0 && StringFind(m_log_file_name, ".csv") < 0) {
+            m_log_file_name = m_log_file_name + ".log";
+        }
+        
+        // Mở file log (tạo mới hoặc thêm vào file hiện có)
+        m_log_file_handle = FileOpen(m_log_file_name, FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_COMMON);
+        
+        // Kiểm tra nếu không mở được file
+        if(m_log_file_handle == INVALID_HANDLE) {
+            // Ghi log lỗi khi không mở được file
+            m_log_output = LOG_OUTPUT_PRINT; // Chuyển sang chế độ chỉ in ra màn hình
+            Print("LOGGER ERROR: Không thể mở file log: ", m_log_file_name, ", error: ", IntegerToString(GetLastError()));
+            return false;
+        }
+        
+        // Di chuyển con trỏ đến cuối file
+        FileSeek(m_log_file_handle, 0, SEEK_END);
+    }
+    
+    // Cấu hình Telegram nếu cần
+    if (enableTelegram && telegramToken != "" && telegramChatId != "") {
+        EnableTelegram(telegramToken, telegramChatId, importantOnly);
+    }
+    
+    // Đánh dấu đã khởi tạo
+    m_is_initialized = true;
+    
+    // Ghi log thông báo khởi tạo thành công
+    LogInfo("APEX Pullback EA v14.0 Logger được khởi tạo thành công.");
+    return m_is_initialized;
 }
 
 //+------------------------------------------------------------------+
@@ -186,6 +195,97 @@ void CLogger::Deinitialize() {
    
    // Đánh dấu chưa khởi tạo
    m_is_initialized = false;
+}
+
+//+------------------------------------------------------------------+
+//| Ghi log ở cấp độ DEBUG - Thông tin chi tiết cho gỡ lỗi           |
+//+------------------------------------------------------------------+
+void CLogger::LogDebug(string message) {
+   // Chỉ ghi log nếu cấp độ log hiện tại cho phép
+   if(m_log_level >= LOG_DEBUG && m_is_initialized) {
+      string formatted_message;
+      FormatLogMessage(formatted_message, "DEBUG", message);
+      
+      // Hiển thị trong cửa sổ "Experts"
+      if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH)
+         Print(formatted_message);
+         
+      // Ghi vào file
+      if(m_log_output == LOG_OUTPUT_FILE || m_log_output == LOG_OUTPUT_BOTH)
+         WriteToFile(formatted_message);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Ghi log ở cấp độ INFO - Thông tin chung                         |
+//+------------------------------------------------------------------+
+void CLogger::LogInfo(string message) {
+   // Chỉ ghi log nếu cấp độ log hiện tại cho phép
+   if(m_log_level >= LOG_INFO && m_is_initialized) {
+      string formatted_message;
+      FormatLogMessage(formatted_message, "INFO", message);
+      
+      // Hiển thị trong cửa sổ "Experts"
+      if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH)
+         Print(formatted_message);
+         
+      // Ghi vào file
+      if(m_log_output == LOG_OUTPUT_FILE || m_log_output == LOG_OUTPUT_BOTH)
+         WriteToFile(formatted_message);
+         
+      // Gửi thông báo qua Telegram nếu được cấu hình và không chỉ thông báo quan trọng
+      if(m_enable_telegram && !m_important_only)
+         SendTelegramMessage(formatted_message);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Ghi log ở cấp độ WARNING - Cảnh báo                             |
+//+------------------------------------------------------------------+
+void CLogger::LogWarning(string message) {
+   // Chỉ ghi log nếu cấp độ log hiện tại cho phép
+   if(m_log_level >= LOG_WARNING && m_is_initialized) {
+      string formatted_message;
+      FormatLogMessage(formatted_message, "WARNING", message);
+      
+      // Hiển thị trong cửa sổ "Experts"
+      if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH)
+         Print(formatted_message);
+         
+      // Ghi vào file
+      if(m_log_output == LOG_OUTPUT_FILE || m_log_output == LOG_OUTPUT_BOTH)
+         WriteToFile(formatted_message);
+         
+      // Gửi thông báo qua Telegram nếu được cấu hình (cảnh báo luôn được coi là quan trọng)
+      if(m_enable_telegram)
+         SendTelegramMessage(formatted_message);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Ghi log ở cấp độ ERROR - Lỗi nghiêm trọng                       |
+//+------------------------------------------------------------------+
+void CLogger::LogError(string message) {
+   // Lỗi luôn được ghi log bất kể cấp độ log nếu đã khởi tạo
+   if(m_is_initialized) {
+      string formatted_message;
+      FormatLogMessage(formatted_message, "ERROR", message);
+      
+      // Hiển thị trong cửa sổ "Experts"
+      if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH)
+         Print(formatted_message);
+         
+      // Ghi vào file
+      if(m_log_output == LOG_OUTPUT_FILE || m_log_output == LOG_OUTPUT_BOTH)
+         WriteToFile(formatted_message);
+         
+      // Gửi thông báo qua Telegram nếu được cấu hình (lỗi luôn được coi là quan trọng)
+      if(m_enable_telegram)
+         SendTelegramMessage(formatted_message);
+   } else {
+      // Nếu logger chưa khởi tạo, vẫn hiển thị lỗi trên màn hình
+      Print("[ERROR] " + message);
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -214,9 +314,13 @@ void CLogger::WriteToFile(string message) {
 //+------------------------------------------------------------------+
 //| Gửi thông báo qua Telegram                                       |
 //+------------------------------------------------------------------+
-bool CLogger::SendTelegramMessage(string message) {
+bool CLogger::SendTelegramMessage(string message, bool important = false) {
    // Chỉ gửi nếu Telegram được kích hoạt
    if(!m_enable_telegram || m_telegram_token == "" || m_telegram_chat_id == "")
+      return false;
+   
+   // Nếu chỉ gửi tin quan trọng và tin này không quan trọng thì bỏ qua
+   if(m_important_only && !important)
       return false;
    
    // Xây dựng URL API Telegram
@@ -270,148 +374,24 @@ void CLogger::DisableTelegram() {
 }
 
 //+------------------------------------------------------------------+
-//| Ghi log ở cấp độ DEBUG - Thông tin chi tiết cho gỡ lỗi           |
+//| Thiết lập cấp độ log                                             |
 //+------------------------------------------------------------------+
-void CLogger::LogDebug(string message) {
-   // Chỉ ghi log nếu cấp độ log hiện tại cho phép
-   if(m_log_level >= LOG_DEBUG && m_is_initialized) {
-      string formatted_message;
-      FormatLogMessage(formatted_message, "DEBUG", message);
-      
-      // Hiển thị trong cửa sổ "Experts"
-      if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH)
-         Print(formatted_message);
-         
-      // Ghi vào file
-      if(m_log_output == LOG_OUTPUT_FILE || m_log_output == LOG_OUTPUT_BOTH)
-         WriteToFile(formatted_message);
+void CLogger::SetLogLevel(ENUM_LOG_LEVEL log_level) {
+   m_log_level = log_level;
+   if(m_is_initialized) {
+      LogInfo("Đã thay đổi cấp độ log thành: " + EnumToString(log_level));
    }
 }
 
 //+------------------------------------------------------------------+
-//| Ghi log ở cấp độ INFO - Thông tin hoạt động bình thường          |
-//+------------------------------------------------------------------+
-void CLogger::LogInfo(string message) {
-   // Chỉ ghi log nếu cấp độ log hiện tại cho phép
-   if(m_log_level >= LOG_INFO && m_is_initialized) {
-      string formatted_message;
-      FormatLogMessage(formatted_message, "INFO", message);
-      
-      // Hiển thị trong cửa sổ "Experts"
-      if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH)
-         Print(formatted_message);
-         
-      // Ghi vào file
-      if(m_log_output == LOG_OUTPUT_FILE || m_log_output == LOG_OUTPUT_BOTH)
-         WriteToFile(formatted_message);
-      
-      // Gửi thông báo Telegram nếu được cấu hình
-      if(m_enable_telegram && !m_important_only)
-         SendTelegramMessage(formatted_message);
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Ghi log ở cấp độ WARNING - Cảnh báo người dùng vấn đề tiềm ẩn    |
-//+------------------------------------------------------------------+
-void CLogger::LogWarning(string message) {
-   // Chỉ ghi log nếu cấp độ log hiện tại cho phép
-   if(m_log_level >= LOG_WARNING && m_is_initialized) {
-      string formatted_message;
-      FormatLogMessage(formatted_message, "WARNING", message);
-      
-      // Hiển thị trong cửa sổ "Experts"
-      if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH)
-         Print(formatted_message);
-         
-      // Ghi vào file
-      if(m_log_output == LOG_OUTPUT_FILE || m_log_output == LOG_OUTPUT_BOTH)
-         WriteToFile(formatted_message);
-      
-      // Gửi thông báo Telegram nếu được cấu hình
-      if(m_enable_telegram && !m_important_only)
-         SendTelegramMessage(formatted_message);
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Ghi log ở cấp độ ERROR - Lỗi nghiêm trọng cần xử lý ngay         |
-//+------------------------------------------------------------------+
-void CLogger::LogError(string message) {
-   // Nếu chưa khởi tạo thì in ra màn hình
-   if(!m_is_initialized) {
-      Print("ERROR: " + message);
-      return;
-   }
-   
-   // Định dạng thông điệp
-   string formatted_message;
-   FormatLogMessage(formatted_message, "ERROR", message);
-   
-   // In ra màn hình nếu cần
-   if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH) {
-      Print(formatted_message);
-   }
-   
-   // Ghi vào file nếu cần
-   if(m_log_output == LOG_OUTPUT_FILE || m_log_output == LOG_OUTPUT_BOTH) {
-      WriteToFile(formatted_message);
-   }
-   
-   // Gửi thông báo Telegram (lỗi luôn được đẩy đi bất kể cài đặt)
-   if(m_enable_telegram) {
-      SendTelegramMessage("[ERROR] " + message);
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Thiết lập chế độ xuất log - Nơi ghi nhật ký                      |
+//| Thiết lập đầu ra log                                             |
 //+------------------------------------------------------------------+
 void CLogger::SetLogOutput(ENUM_LOG_OUTPUT log_output) {
+   m_log_output = log_output;
    if(m_is_initialized) {
-      // Nếu chuyển sang ghi file mà trước đó không ghi file
-      if((log_output == LOG_OUTPUT_FILE || log_output == LOG_OUTPUT_BOTH) &&
-         (m_log_output != LOG_OUTPUT_FILE && m_log_output != LOG_OUTPUT_BOTH)) {
-         
-         // Tạo và mở file log nếu chưa có
-         if(m_log_file_handle == INVALID_HANDLE) {
-            // Tạo tên file mặc định nếu chưa có
-            if(m_log_file_name == "") {
-               m_log_file_name = m_prefix + "_" + m_symbol + "_" + TimeToString(TimeCurrent(), TIME_DATE) + ".log";
-StringReplace(m_log_file_name, ".", "_");
-               m_log_file_name = m_log_file_name + ".log";
-            }
-            
-            // Mở file log
-            m_log_file_handle = FileOpen(m_log_file_name, FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_COMMON);
-            
-            // Kiểm tra nếu không mở được file
-            if(m_log_file_handle == INVALID_HANDLE) {
-               Print("LOGGER ERROR: Không thể mở file log: ", m_log_file_name, ", error: ", IntegerToString(GetLastError()));
-               return; // Giữ nguyên chế độ xuất hiện tại
-            }
-            
-            // Di chuyển con trỏ đến cuối file
-            FileSeek(m_log_file_handle, 0, SEEK_END);
-         }
-      }
-      // Nếu chuyển sang không ghi file mà trước đó có ghi file
-      else if((log_output != LOG_OUTPUT_FILE && log_output != LOG_OUTPUT_BOTH) &&
-              (m_log_output == LOG_OUTPUT_FILE || m_log_output == LOG_OUTPUT_BOTH)) {
-         
-         // Đóng file log nếu đang mở
-         if(m_log_file_handle != INVALID_HANDLE) {
-            FileClose(m_log_file_handle);
-            m_log_file_handle = INVALID_HANDLE;
-         }
-      }
-      
-      // Cập nhật chế độ xuất log
-      m_log_output = log_output;
-      LogInfo("Đã thay đổi chế độ xuất log thành: " + EnumToString(log_output));
+      LogInfo("Đã thay đổi đầu ra log thành: " + EnumToString(log_output));
    }
 }
 
-} // namespace ApexPullback
-
-#endif // _LOGGER_MQH_
+} // end namespace ApexPullback
+#endif // LOGGER_MQH

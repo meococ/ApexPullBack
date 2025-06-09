@@ -11,7 +11,35 @@
 #include "CommonStructs.mqh"                // Định nghĩa structs
 #include "Constants.mqh"                    // Định nghĩa constants
 
-// Đưa tất cả vào namespace IndicatorUtils để tránh xung đột tên
+// KHÔNG định nghĩa lại IndicatorHandles, đã được định nghĩa trong CommonStructs.mqh
+// struct IndicatorHandles {
+//     int atrHandle;
+//     int maHandle;
+//     int rsiHandle;
+//     int stochHandle;
+//     int bollingerHandle;
+//     int adxHandle;
+//     int macdHandle;
+//     int volumeHandle;
+//     int ichimokuHandle;
+//     
+//     // Hàm khởi tạo
+//     IndicatorHandles() {
+//         atrHandle = INVALID_HANDLE;
+//         maHandle = INVALID_HANDLE;
+//         rsiHandle = INVALID_HANDLE;
+//         stochHandle = INVALID_HANDLE;
+//         bollingerHandle = INVALID_HANDLE;
+//         adxHandle = INVALID_HANDLE;
+//         macdHandle = INVALID_HANDLE;
+//         volumeHandle = INVALID_HANDLE;
+//         ichimokuHandle = INVALID_HANDLE;
+//     }
+// };
+
+
+
+// Đưa tất cả vào namespace ApexPullback để tránh xung đột tên
 namespace ApexPullback {
 
 class CIndicatorUtils {
@@ -22,8 +50,10 @@ private:
     ENUM_TIMEFRAMES m_HigherTF;     // Timeframe cao hơn (thường H4)
     bool m_IsInitialized;           // Trạng thái khởi tạo
     bool m_VerboseLogging;          // Bật log chi tiết
+
+    IndicatorHandles m_IndicatorHandles[1]; // Di chuyển vào đây, kích thước 1 vì logic cũ dùng g_IndicatorHandles[0]
     
-    // === Các Handle chỉ báo - Timeframe chính ===
+        // === Các Handle chỉ báo - Timeframe chính ===
     long m_MA_Handles[10];          // Lưu handle của các MA (EMA chủ yếu)
     long m_ADX_Handle;              // ADX
     long m_RSI_Handle;              // RSI
@@ -50,7 +80,7 @@ private:
     // Log lỗi và thông báo
     void LogMessage(string message);
     
-    // Mảng lưu giá High/Low/Close/Volume cho tính toán
+        // Mảng lưu giá High/Low/Close/Volume cho tính toán
     double m_PriceBuffer[];
     double m_HighBuffer[];
     double m_LowBuffer[];
@@ -60,6 +90,7 @@ private:
     // Hàm Cache và quản lý bộ đệm
     bool UpdatePriceBuffers(int bars);
     int GetCacheIndex(string indicator, int period = 0);
+    bool InitializeGlobalIndicatorCache(bool forceRefresh=false); // Chuyển GlobalInitializeIndicatorCache thành phương thức riêng
     
 public:
     // Constructor và Destructor
@@ -69,7 +100,7 @@ public:
     // === Khởi tạo và giải phóng ===
     bool Initialize(string symbol, ENUM_TIMEFRAMES mainTimeframe, 
                    ENUM_TIMEFRAMES higherTimeframe = PERIOD_H4, 
-                   bool useCache = true, bool verboseLogging = false);
+                   bool useCache = true, bool verboseLogging = false, bool forceRefreshCache = false);
     void Deinitialize();
     
     // === Đăng ký Moving Averages (EMA) ===
@@ -78,25 +109,24 @@ public:
     
     // === Đọc giá trị Moving Averages ===
     double GetMA(int period, int shift = 0);
-    double GetHTF_MA(int period, int shift = 0);
+    double GetMAOnHigherTF(int period, int shift = 0);
+    double CheckHTF_MASlope(int period1, int period2, int period3, int period4);
+    IndicatorHandles GetGlobalHandles() { return m_IndicatorHandles[0]; } // Hàm truy cập m_IndicatorHandles
     
     // === ADX và các thành phần ===
     double GetADX(int shift = 0);
-    double GetADXSlope(int periods = 5);
-    double GetPlusDI(int shift = 0);
-    double GetMinusDI(int shift = 0);
-    double GetHTF_ADX(int shift = 0);
+    double GetADXPlus(int shift = 0);
+    double GetADXMinus(int shift = 0);
+    double GetADXOnHigherTF(int shift = 0);
     
     // === RSI và các dẫn xuất ===
     double GetRSI(int shift = 0);
-    double GetRSISlope(int periods = 5);
-    double GetHTF_RSI(int shift = 0);
+    double GetRSIOnHigherTF(int shift = 0);
     
     // === ATR và các dẫn xuất ===
     double GetATR(int shift = 0);
-    double GetAverageATR(int periods = 20);
-    double GetATRRatio();
-    double GetHTF_ATR(int shift = 0);
+    double GetATROnHigherTF(int shift = 0);
+    double GetATRRatio(int lookbackPeriods = 10);
     
     // === MACD ===
     double GetMACDMain(int shift = 0);
@@ -109,7 +139,6 @@ public:
     double GetBBMiddle(int shift = 0);
     double GetBBLower(int shift = 0);
     double GetBBWidth(int shift = 0);
-    double GetAverageBBWidth(int periods = 20);
     
     // === Volume ===
     double GetVolume(int shift = 0);
@@ -140,6 +169,61 @@ public:
     bool IsBearishPinbar(int shift = 0);
     bool IsDoji(int shift = 0);
 };
+
+//+------------------------------------------------------------------+
+//| Khởi tạo bộ nhớ đệm indicator cache (giờ là phương thức của lớp) |
+//+------------------------------------------------------------------+
+bool CIndicatorUtils::InitializeGlobalIndicatorCache(bool forceRefresh=false) {
+    LogMessage("Khởi tạo bộ nhớ đệm indicator cache..."); // Sử dụng LogMessage của lớp
+    
+    // Kích thước m_IndicatorHandles đã cố định là 1 trong khai báo lớp
+
+    // Khởi tạo các indicator handle trong struct IndicatorHandles
+    if (m_IndicatorHandles[0].atrHandle == INVALID_HANDLE || forceRefresh) {
+        m_IndicatorHandles[0].atrHandle = iATR(m_Symbol, m_Timeframe, 14); // Sử dụng m_Symbol, m_Timeframe
+    }
+    
+    if (m_IndicatorHandles[0].maHandle == INVALID_HANDLE || forceRefresh) { 
+        m_IndicatorHandles[0].maHandle = iMA(m_Symbol, m_Timeframe, 50, 0, MODE_EMA, PRICE_CLOSE);
+    }
+    
+    if (m_IndicatorHandles[0].rsiHandle == INVALID_HANDLE || forceRefresh) { 
+        m_IndicatorHandles[0].rsiHandle = iRSI(m_Symbol, m_Timeframe, 14, PRICE_CLOSE);
+    }
+    
+    if (m_IndicatorHandles[0].stochHandle == INVALID_HANDLE || forceRefresh) { 
+        m_IndicatorHandles[0].stochHandle = iStochastic(m_Symbol, m_Timeframe, 14, 3, 3, MODE_SMA, STO_LOWHIGH);
+    }
+    
+    if (m_IndicatorHandles[0].bollingerHandle == INVALID_HANDLE || forceRefresh) { 
+        m_IndicatorHandles[0].bollingerHandle = iBands(m_Symbol, m_Timeframe, 20, 2, 0, PRICE_CLOSE);
+    }
+    
+    if (m_IndicatorHandles[0].adxHandle == INVALID_HANDLE || forceRefresh) { 
+        m_IndicatorHandles[0].adxHandle = iADX(m_Symbol, m_Timeframe, 14);
+    }
+    
+    if (m_IndicatorHandles[0].macdHandle == INVALID_HANDLE || forceRefresh) { 
+        m_IndicatorHandles[0].macdHandle = iMACD(m_Symbol, m_Timeframe, 12, 26, 9, PRICE_CLOSE);
+    }
+
+    // Kiểm tra tất cả các handle đã được khởi tạo thành công chưa
+    if (m_IndicatorHandles[0].atrHandle == INVALID_HANDLE ||
+        m_IndicatorHandles[0].maHandle == INVALID_HANDLE ||
+        m_IndicatorHandles[0].rsiHandle == INVALID_HANDLE ||
+        m_IndicatorHandles[0].stochHandle == INVALID_HANDLE ||
+        m_IndicatorHandles[0].bollingerHandle == INVALID_HANDLE ||
+        m_IndicatorHandles[0].adxHandle == INVALID_HANDLE ||
+        m_IndicatorHandles[0].macdHandle == INVALID_HANDLE) {
+        LogMessage("Lỗi: Không thể khởi tạo một hoặc nhiều indicator handles trong InitializeGlobalIndicatorCache.");
+        return false;
+    }
+    
+    LogMessage("Bộ nhớ đệm indicator cache đã được khởi tạo thành công.");
+    return true;
+}
+
+// Commented out InitializeIndicators function removed as its logic is integrated into CIndicatorUtils.
 
 //+------------------------------------------------------------------+
 //| Constructor                                                      |
@@ -185,19 +269,23 @@ CIndicatorUtils::~CIndicatorUtils()
 //+------------------------------------------------------------------+
 //| Khởi tạo tất cả các indicator                                    |
 //+------------------------------------------------------------------+
-bool CIndicatorUtils::Initialize(string symbol, ENUM_TIMEFRAMES mainTimeframe, 
-                              ENUM_TIMEFRAMES higherTimeframe, 
-                              bool useCache, bool verboseLogging) 
-{
+bool CIndicatorUtils::Initialize(
+    string symbol,
+    ENUM_TIMEFRAMES mainTimeframe, 
+    ENUM_TIMEFRAMES higherTimeframe=PERIOD_H4, 
+    bool useCache=true,
+    bool verboseLogging=false,
+    bool forceRefreshCache=false // Thêm tham số mới
+) {
     // Lưu thông số
     m_Symbol = symbol;
     m_Timeframe = mainTimeframe;
     m_HigherTF = higherTimeframe;
     m_UseCache = useCache;
     m_VerboseLogging = verboseLogging;
+    m_IsInitialized = false;
     
     // Reset trạng thái
-    m_IsInitialized = false;
     m_MACount = 0;
     
     // Khởi tạo các chỉ báo cơ bản
@@ -236,6 +324,13 @@ bool CIndicatorUtils::Initialize(string symbol, ENUM_TIMEFRAMES mainTimeframe,
     
     // Cập nhật buffer ban đầu
     UpdatePriceBuffers(100);
+
+    // Khởi tạo global indicator cache nếu cần
+    if (!InitializeGlobalIndicatorCache(forceRefreshCache)) {
+        LogMessage("LỖI: Không thể khởi tạo global indicator cache trong CIndicatorUtils::Initialize");
+        Deinitialize(); // Dọn dẹp
+        return false;
+    }
     
     return true;
 }
@@ -306,6 +401,17 @@ void CIndicatorUtils::Deinitialize()
         IndicatorRelease((int)m_HTF_ATR_Handle);
         m_HTF_ATR_Handle = INVALID_HANDLE;
     }
+
+    // Giải phóng các handles trong m_IndicatorHandles (thường được khởi tạo bởi InitializeGlobalIndicatorCache)
+    if (m_IndicatorHandles[0].atrHandle != INVALID_HANDLE) { IndicatorRelease(m_IndicatorHandles[0].atrHandle); m_IndicatorHandles[0].atrHandle = INVALID_HANDLE; }
+    if (m_IndicatorHandles[0].maHandle != INVALID_HANDLE) { IndicatorRelease(m_IndicatorHandles[0].maHandle); m_IndicatorHandles[0].maHandle = INVALID_HANDLE; }
+    if (m_IndicatorHandles[0].rsiHandle != INVALID_HANDLE) { IndicatorRelease(m_IndicatorHandles[0].rsiHandle); m_IndicatorHandles[0].rsiHandle = INVALID_HANDLE; }
+    if (m_IndicatorHandles[0].stochHandle != INVALID_HANDLE) { IndicatorRelease(m_IndicatorHandles[0].stochHandle); m_IndicatorHandles[0].stochHandle = INVALID_HANDLE; }
+    if (m_IndicatorHandles[0].bollingerHandle != INVALID_HANDLE) { IndicatorRelease(m_IndicatorHandles[0].bollingerHandle); m_IndicatorHandles[0].bollingerHandle = INVALID_HANDLE; }
+    if (m_IndicatorHandles[0].adxHandle != INVALID_HANDLE) { IndicatorRelease(m_IndicatorHandles[0].adxHandle); m_IndicatorHandles[0].adxHandle = INVALID_HANDLE; }
+    if (m_IndicatorHandles[0].macdHandle != INVALID_HANDLE) { IndicatorRelease(m_IndicatorHandles[0].macdHandle); m_IndicatorHandles[0].macdHandle = INVALID_HANDLE; }
+    if (m_IndicatorHandles[0].volumeHandle != INVALID_HANDLE) { IndicatorRelease(m_IndicatorHandles[0].volumeHandle); m_IndicatorHandles[0].volumeHandle = INVALID_HANDLE; }
+    if (m_IndicatorHandles[0].ichimokuHandle != INVALID_HANDLE) { IndicatorRelease(m_IndicatorHandles[0].ichimokuHandle); m_IndicatorHandles[0].ichimokuHandle = INVALID_HANDLE; }
     
     m_IsInitialized = false;
     LogMessage("Đã giải phóng tất cả các handle chỉ báo");
@@ -314,9 +420,7 @@ void CIndicatorUtils::Deinitialize()
 //+------------------------------------------------------------------+
 //| Đăng ký một MA mới (thường là EMA)                               |
 //+------------------------------------------------------------------+
-bool CIndicatorUtils::RegisterMA(int period, ENUM_MA_METHOD maMethod,
-                              ENUM_APPLIED_PRICE appliedPrice) 
-{
+bool CIndicatorUtils::RegisterMA(int period, ENUM_MA_METHOD maMethod, ENUM_APPLIED_PRICE appliedPrice) {
     // Kiểm tra xem đã khởi tạo chưa
     if (!m_IsInitialized) {
         LogMessage("LỖI: Không thể đăng ký MA - chưa khởi tạo");
@@ -364,8 +468,7 @@ bool CIndicatorUtils::RegisterMA(int period, ENUM_MA_METHOD maMethod,
 //+------------------------------------------------------------------+
 //| Cập nhật buffer giá                                              |
 //+------------------------------------------------------------------+
-bool CIndicatorUtils::UpdatePriceBuffers(int bars) 
-{
+bool CIndicatorUtils::UpdatePriceBuffers(int bars=100) {
     // Set up các mảng dữ liệu
     ArraySetAsSeries(m_HighBuffer, true);
     ArraySetAsSeries(m_LowBuffer, true);
@@ -409,8 +512,7 @@ bool CIndicatorUtils::UpdatePriceBuffers(int bars)
 //+------------------------------------------------------------------+
 //| Lấy giá trị MA                                                   |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetMA(int period, int shift) 
-{
+double CIndicatorUtils::GetMA(int period, int shift=0) {
     // Kiểm tra xem đã khởi tạo chưa
     if (!m_IsInitialized) {
         LogMessage("LỖI: Không thể lấy giá trị MA - chưa khởi tạo");
@@ -418,22 +520,22 @@ double CIndicatorUtils::GetMA(int period, int shift)
     }
     
     // Tìm MA trong danh sách đã đăng ký
-    int index = -1;
+    int indexFound = -1;
     for(int i = 0; i < m_MACount; i++) {
         if (m_MAPeriods[i] == period) {
-            index = i;
+            indexFound = i;
             break;
         }
     }
     
-    if (index == -1) {
+    if (indexFound == -1) {
         LogMessage("LỖI: Không tìm thấy MA chu kỳ " + IntegerToString(period) + " - cần đăng ký trước");
         return EMPTY_VALUE;
     }
     
     // Lấy giá trị từ handle
     double value[];
-    if (CopyBuffer((int)m_MA_Handles[index], 0, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_MA_Handles[indexFound], 0, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu từ handle MA " + IntegerToString(period));
         return EMPTY_VALUE;
     }
@@ -444,8 +546,7 @@ double CIndicatorUtils::GetMA(int period, int shift)
 //+------------------------------------------------------------------+
 //| Lấy giá trị MA trên timeframe cao hơn                            |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetHTF_MA(int period, int shift) 
-{
+double CIndicatorUtils::GetMAOnHigherTF(int period, int shift=0) {
     // Kiểm tra xem đã khởi tạo chưa
     if (!m_IsInitialized) {
         LogMessage("LỖI: Không thể lấy giá trị MA HTF - chưa khởi tạo");
@@ -453,22 +554,22 @@ double CIndicatorUtils::GetHTF_MA(int period, int shift)
     }
     
     // Tìm MA trong danh sách đã đăng ký
-    int index = -1;
+    int indexFound = -1;
     for(int i = 0; i < m_MACount; i++) {
         if (m_MAPeriods[i] == period) {
-            index = i;
+            indexFound = i;
             break;
         }
     }
     
-    if (index == -1) {
+    if (indexFound == -1) {
         LogMessage("LỖI: Không tìm thấy MA HTF chu kỳ " + IntegerToString(period) + " - cần đăng ký trước");
         return EMPTY_VALUE;
     }
     
     // Lấy giá trị từ handle
     double value[];
-    if (CopyBuffer((int)m_HTF_MA_Handles[index], 0, shift, 1, value) <= 0) {
+    if (CopyBuffer((int)m_HTF_MA_Handles[indexFound], 0, shift, 1, value) <= 0) {
         LogMessage("LỖI: Không thể copy dữ liệu từ handle MA HTF " + IntegerToString(period));
         return EMPTY_VALUE;
     }
@@ -479,8 +580,7 @@ double CIndicatorUtils::GetHTF_MA(int period, int shift)
 //+------------------------------------------------------------------+
 //| Lấy giá trị ADX                                                  |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetADX(int shift) 
-{
+double CIndicatorUtils::GetADX(int shift=0) {
     if (!m_IsInitialized || m_ADX_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
@@ -493,35 +593,9 @@ double CIndicatorUtils::GetADX(int shift)
 }
 
 //+------------------------------------------------------------------+
-//| Lấy độ dốc (slope) của ADX                                       |
-//+------------------------------------------------------------------+
-double CIndicatorUtils::GetADXSlope(int periods) 
-{
-    if (!m_IsInitialized || m_ADX_Handle == INVALID_HANDLE) return EMPTY_VALUE;
-    
-    double values[];
-    if (CopyBuffer((int)m_ADX_Handle, 0, 0, periods + 1, values) <= 0) {
-        LogMessage("LỖI: Không thể copy dữ liệu ADX cho tính slope");
-        return EMPTY_VALUE;
-    }
-    
-    // Đảm bảo dữ liệu được sắp xếp giảm dần theo thời gian
-    ArraySetAsSeries(values, true);
-    
-    // Tính slope (trung bình)
-    double slope = 0;
-    for (int i = 0; i < periods; i++) {
-        slope += (values[i] - values[i+1]);
-    }
-    
-    return slope / periods;
-}
-
-//+------------------------------------------------------------------+
 //| Lấy giá trị +DI                                                  |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetPlusDI(int shift) 
-{
+double CIndicatorUtils::GetADXPlus(int shift=0) {
     if (!m_IsInitialized || m_ADX_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
@@ -536,8 +610,7 @@ double CIndicatorUtils::GetPlusDI(int shift)
 //+------------------------------------------------------------------+
 //| Lấy giá trị -DI                                                  |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetMinusDI(int shift) 
-{
+double CIndicatorUtils::GetADXMinus(int shift=0) {
     if (!m_IsInitialized || m_ADX_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
@@ -552,13 +625,12 @@ double CIndicatorUtils::GetMinusDI(int shift)
 //+------------------------------------------------------------------+
 //| Lấy giá trị ADX trên timeframe cao hơn                           |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetHTF_ADX(int shift) 
-{
+double CIndicatorUtils::GetADXOnHigherTF(int shift=0) {
     if (!m_IsInitialized || m_HTF_ADX_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
     if (CopyBuffer((int)m_HTF_ADX_Handle, 0, shift, 1, value) <= 0) {
-        LogMessage("LỖI: Không thể copy dữ liệu ADX HTF");
+        LogMessage("LỖI: Không thể copy dữ liệu từ handle ADX HTF");
         return EMPTY_VALUE;
     }
     
@@ -568,8 +640,7 @@ double CIndicatorUtils::GetHTF_ADX(int shift)
 //+------------------------------------------------------------------+
 //| Lấy giá trị RSI                                                  |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetRSI(int shift) 
-{
+double CIndicatorUtils::GetRSI(int shift=0) {
     if (!m_IsInitialized || m_RSI_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
@@ -582,40 +653,14 @@ double CIndicatorUtils::GetRSI(int shift)
 }
 
 //+------------------------------------------------------------------+
-//| Lấy độ dốc (slope) của RSI                                       |
-//+------------------------------------------------------------------+
-double CIndicatorUtils::GetRSISlope(int periods) 
-{
-    if (!m_IsInitialized || m_RSI_Handle == INVALID_HANDLE) return EMPTY_VALUE;
-    
-    double values[];
-    if (CopyBuffer((int)m_RSI_Handle, 0, 0, periods + 1, values) <= 0) {
-        LogMessage("LỖI: Không thể copy dữ liệu RSI cho tính slope");
-        return EMPTY_VALUE;
-    }
-    
-    // Đảm bảo dữ liệu được sắp xếp giảm dần theo thời gian
-    ArraySetAsSeries(values, true);
-    
-    // Tính slope (trung bình)
-    double slope = 0;
-    for (int i = 0; i < periods; i++) {
-        slope += (values[i] - values[i+1]);
-    }
-    
-    return slope / periods;
-}
-
-//+------------------------------------------------------------------+
 //| Lấy giá trị RSI trên timeframe cao hơn                           |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetHTF_RSI(int shift) 
-{
+double CIndicatorUtils::GetRSIOnHigherTF(int shift=0) {
     if (!m_IsInitialized || m_HTF_RSI_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
     if (CopyBuffer((int)m_HTF_RSI_Handle, 0, shift, 1, value) <= 0) {
-        LogMessage("LỖI: Không thể copy dữ liệu RSI HTF");
+        LogMessage("LỖI: Không thể copy dữ liệu từ handle RSI HTF");
         return EMPTY_VALUE;
     }
     
@@ -625,8 +670,7 @@ double CIndicatorUtils::GetHTF_RSI(int shift)
 //+------------------------------------------------------------------+
 //| Lấy giá trị ATR                                                  |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetATR(int shift) 
-{
+double CIndicatorUtils::GetATR(int shift=0) {
     if (!m_IsInitialized || m_ATR_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
@@ -639,79 +683,49 @@ double CIndicatorUtils::GetATR(int shift)
 }
 
 //+------------------------------------------------------------------+
-//| Lấy ATR trung bình trong một khoảng thời gian                    |
+//| Lấy giá trị ATR trên timeframe cao hơn                           |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetAverageATR(int periods) 
-{
-    if (!m_IsInitialized || m_ATR_Handle == INVALID_HANDLE) return EMPTY_VALUE;
+double CIndicatorUtils::GetATROnHigherTF(int shift=0) {
+    if (!m_IsInitialized || m_HTF_ATR_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
-    double values[];
-    if (CopyBuffer((int)m_ATR_Handle, 0, 0, periods, values) <= 0) {
-        LogMessage("LỖI: Không thể copy dữ liệu ATR cho tính trung bình");
+    double value[];
+    if (CopyBuffer((int)m_HTF_ATR_Handle, 0, shift, 1, value) <= 0) {
+        LogMessage("LỖI: Không thể copy dữ liệu từ handle ATR HTF");
         return EMPTY_VALUE;
     }
     
-    // Tính trung bình
-    double sum = 0;
-    for (int i = 0; i < periods; i++) {
-        sum += values[i];
-    }
-    
-    return sum / periods;
+    return value[0];
 }
 
 //+------------------------------------------------------------------+
-//| Lấy tỷ lệ ATR hiện tại so với trung bình                         |
+//| Lấy tỷ lệ ATR hiện tại so với trung bình                        |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetATRRatio() 
-{
+double CIndicatorUtils::GetATRRatio(int lookbackPeriods=10) {
     double currentATR = GetATR(0);
-    double avgATR = GetAverageATR(20);
+    if (currentATR == EMPTY_VALUE) return EMPTY_VALUE;
     
-    if (currentATR == EMPTY_VALUE || avgATR == EMPTY_VALUE || avgATR == 0) {
-        return EMPTY_VALUE;
+    // Tính trung bình ATR
+    double sumATR = 0.0;
+    int validCount = 0;
+    
+    for (int i = 1; i <= lookbackPeriods; i++) {
+        double atr = GetATR(i);
+        if (atr != EMPTY_VALUE) {
+            sumATR += atr;
+            validCount++;
+        }
     }
+    
+    if (validCount == 0 || sumATR == 0) return EMPTY_VALUE;
+    double avgATR = sumATR / validCount;
     
     return currentATR / avgATR;
 }
 
 //+------------------------------------------------------------------+
-//| Lấy giá trị ATR trên timeframe cao hơn                           |
-//+------------------------------------------------------------------+
-double CIndicatorUtils::GetHTF_ATR(int shift) 
-{
-    if (!m_IsInitialized || m_HTF_ATR_Handle == INVALID_HANDLE) return EMPTY_VALUE;
-    
-    double value[];
-    if (CopyBuffer((int)m_HTF_ATR_Handle, 0, shift, 1, value) <= 0) {
-        LogMessage("LỖI: Không thể copy dữ liệu ATR HTF");
-        return EMPTY_VALUE;
-    }
-    
-    return value[0];
-}
-
-//+------------------------------------------------------------------+
-//| Lấy giá trị MACD Main                                           |
-//+------------------------------------------------------------------+
-double CIndicatorUtils::GetMACDMain(int shift) 
-{
-    if (!m_IsInitialized || m_MACD_Handle == INVALID_HANDLE) return EMPTY_VALUE;
-    
-    double value[];
-    if (CopyBuffer((int)m_MACD_Handle, 0, shift, 1, value) <= 0) {
-        LogMessage("LỖI: Không thể copy dữ liệu MACD Main");
-        return EMPTY_VALUE;
-    }
-    
-    return value[0];
-}
-
-//+------------------------------------------------------------------+
 //| Lấy giá trị MACD Signal                                         |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetMACDSignal(int shift) 
-{
+double CIndicatorUtils::GetMACDSignal(int shift=0) {
     if (!m_IsInitialized || m_MACD_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
@@ -726,8 +740,7 @@ double CIndicatorUtils::GetMACDSignal(int shift)
 //+------------------------------------------------------------------+
 //| Lấy giá trị MACD Histogram                                      |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetMACDHistogram(int shift) 
-{
+double CIndicatorUtils::GetMACDHistogram(int shift=0) {
     if (!m_IsInitialized || m_MACD_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     // MACD Histogram = MACD Main - MACD Signal
@@ -742,37 +755,9 @@ double CIndicatorUtils::GetMACDHistogram(int shift)
 }
 
 //+------------------------------------------------------------------+
-//| Lấy độ dốc (slope) của MACD Histogram                           |
-//+------------------------------------------------------------------+
-double CIndicatorUtils::GetMACDHistogramSlope(int periods) 
-{
-    if (!m_IsInitialized || m_MACD_Handle == INVALID_HANDLE) return EMPTY_VALUE;
-    
-    double histValues[];
-    ArrayResize(histValues, periods + 1);
-    
-    // Tính histogram cho mỗi shift
-    for (int i = 0; i <= periods; i++) {
-        histValues[i] = GetMACDHistogram(i);
-        if (histValues[i] == EMPTY_VALUE) {
-            return EMPTY_VALUE;
-        }
-    }
-    
-    // Tính slope (trung bình)
-    double slope = 0;
-    for (int i = 0; i < periods; i++) {
-        slope += (histValues[i] - histValues[i+1]);
-    }
-    
-    return slope / periods;
-}
-
-//+------------------------------------------------------------------+
 //| Lấy giá trị Bollinger Band Upper                                |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetBBUpper(int shift) 
-{
+double CIndicatorUtils::GetBBUpper(int shift=0) {
     if (!m_IsInitialized || m_BB_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
@@ -787,8 +772,7 @@ double CIndicatorUtils::GetBBUpper(int shift)
 //+------------------------------------------------------------------+
 //| Lấy giá trị Bollinger Band Middle                               |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetBBMiddle(int shift) 
-{
+double CIndicatorUtils::GetBBMiddle(int shift=0) {
     if (!m_IsInitialized || m_BB_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
@@ -803,8 +787,7 @@ double CIndicatorUtils::GetBBMiddle(int shift)
 //+------------------------------------------------------------------+
 //| Lấy giá trị Bollinger Band Lower                                |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetBBLower(int shift) 
-{
+double CIndicatorUtils::GetBBLower(int shift=0) {
     if (!m_IsInitialized || m_BB_Handle == INVALID_HANDLE) return EMPTY_VALUE;
     
     double value[];
@@ -819,8 +802,7 @@ double CIndicatorUtils::GetBBLower(int shift)
 //+------------------------------------------------------------------+
 //| Lấy độ rộng của Bollinger Bands                                 |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetBBWidth(int shift) 
-{
+double CIndicatorUtils::GetBBWidth(int shift=0) {
     double upper = GetBBUpper(shift);
     double lower = GetBBLower(shift);
     double middle = GetBBMiddle(shift);
@@ -833,148 +815,20 @@ double CIndicatorUtils::GetBBWidth(int shift)
 }
 
 //+------------------------------------------------------------------+
-//| Lấy độ rộng trung bình của Bollinger Bands                      |
+//| Lấy độ dốc của MA trên TF cao hơn                                |
 //+------------------------------------------------------------------+
-double CIndicatorUtils::GetAverageBBWidth(int periods) 
+double CIndicatorUtils::CheckHTF_MASlope(int period1, int period2, int period3, int period4) 
 {
-    double sum = 0;
-    int count = 0;
+    double ma1 = GetMAOnHigherTF(period1, 0);
+    double ma2 = GetMAOnHigherTF(period2, 0);
+    double ma3 = GetMAOnHigherTF(period3, 0);
+    double ma4 = GetMAOnHigherTF(period4, 0);
     
-    for (int i = 0; i < periods; i++) {
-        double width = GetBBWidth(i);
-        if (width != EMPTY_VALUE) {
-            sum += width;
-            count++;
-        }
-    }
-    
-    if (count == 0) return EMPTY_VALUE;
-    
-    return sum / count;
-}
-
-//+------------------------------------------------------------------+
-//| Lấy giá trị Volume                                              |
-//+------------------------------------------------------------------+
-double CIndicatorUtils::GetVolume(int shift) 
-{
-    if (!m_IsInitialized) return EMPTY_VALUE;
-    
-    // Cố gắng lấy từ buffer internal trước
-    if (shift < ArraySize(m_VolumeBuffer)) {
-        return m_VolumeBuffer[shift];
-    }
-    
-    // Nếu không có trong buffer hoặc handle không hợp lệ, lấy trực tiếp
-    long volume = 0;
-    if (!HistorySelect(TimeCurrent() - shift * PeriodSeconds(m_Timeframe), TimeCurrent())) {
+    if (ma1 == EMPTY_VALUE || ma2 == EMPTY_VALUE || ma3 == EMPTY_VALUE || ma4 == EMPTY_VALUE) {
         return EMPTY_VALUE;
     }
     
-    volume = HistoryDealsTotal();
-    return (double)volume;
-}
-
-//+------------------------------------------------------------------+
-//| Lấy Volume trung bình                                           |
-//+------------------------------------------------------------------+
-double CIndicatorUtils::GetAverageVolume(int periods) 
-{
-    if (!m_IsInitialized) return EMPTY_VALUE;
-    
-    double sum = 0;
-    int count = 0;
-    
-    for (int i = 0; i < periods; i++) {
-        double vol = GetVolume(i);
-        if (vol != EMPTY_VALUE && vol > 0) {
-            sum += vol;
-            count++;
-        }
-    }
-    
-    if (count == 0) return EMPTY_VALUE;
-    
-    return sum / count;
-}
-
-//+------------------------------------------------------------------+
-//| Lấy tỷ lệ Volume hiện tại so với trung bình                     |
-//+------------------------------------------------------------------+
-double CIndicatorUtils::GetVolumeRatio() 
-{
-    double currentVolume = GetVolume(0);
-    double avgVolume = GetAverageVolume(20);
-    
-    if (currentVolume == EMPTY_VALUE || avgVolume == EMPTY_VALUE || avgVolume == 0) {
-        return EMPTY_VALUE;
-    }
-    
-    return currentVolume / avgVolume;
-}
-
-//+------------------------------------------------------------------+
-//| Lấy Spread hiện tại                                             |
-//+------------------------------------------------------------------+
-double CIndicatorUtils::GetCurrentSpread() 
-{
-    return SymbolInfoInteger(m_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
-}
-
-//+------------------------------------------------------------------+
-//| Lấy Spread trung bình                                           |
-//+------------------------------------------------------------------+
-double CIndicatorUtils::GetAverageSpread(int periods) 
-{
-    // Không có handle riêng cho spread, phải tính theo cách khác
-    double sum = 0;
-    for (int i = 0; i < periods; i++) {
-        sum += (double)SymbolInfoInteger(m_Symbol, SYMBOL_SPREAD);
-    }
-    
-    return (sum / periods) * SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra xem indicator1 có cắt lên trên indicator2 không        |
-//+------------------------------------------------------------------+
-bool CIndicatorUtils::IsCrossUp(int indicator1, int indicator2, int shift) 
-{
-    // Lấy giá trị cho shift hiện tại và trước đó
-    double ind1Current = GetMA(indicator1, shift);
-    double ind2Current = GetMA(indicator2, shift);
-    double ind1Previous = GetMA(indicator1, shift + 1);
-    double ind2Previous = GetMA(indicator2, shift + 1);
-    
-    // Kiểm tra giá trị hợp lệ
-    if (ind1Current == EMPTY_VALUE || ind2Current == EMPTY_VALUE || 
-        ind1Previous == EMPTY_VALUE || ind2Previous == EMPTY_VALUE) {
-        return false;
-    }
-    
-    // Kiểm tra cắt lên
-    return (ind1Previous < ind2Previous) && (ind1Current >= ind2Current);
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra xem indicator1 có cắt xuống dưới indicator2 không      |
-//+------------------------------------------------------------------+
-bool CIndicatorUtils::IsCrossDown(int indicator1, int indicator2, int shift) 
-{
-    // Lấy giá trị cho shift hiện tại và trước đó
-    double ind1Current = GetMA(indicator1, shift);
-    double ind2Current = GetMA(indicator2, shift);
-    double ind1Previous = GetMA(indicator1, shift + 1);
-    double ind2Previous = GetMA(indicator2, shift + 1);
-    
-    // Kiểm tra giá trị hợp lệ
-    if (ind1Current == EMPTY_VALUE || ind2Current == EMPTY_VALUE || 
-        ind1Previous == EMPTY_VALUE || ind2Previous == EMPTY_VALUE) {
-        return false;
-    }
-    
-    // Kiểm tra cắt xuống
-    return (ind1Previous > ind2Previous) && (ind1Current <= ind2Current);
+    return (ma4 - ma1) / (period4 - period1);
 }
 
 //+------------------------------------------------------------------+
@@ -1010,7 +864,7 @@ bool CIndicatorUtils::IsPriceBelowMA(int period, int shift)
 //+------------------------------------------------------------------+
 bool CIndicatorUtils::IsVolatilityHigh(double threshold) 
 {
-    double atrRatio = GetATRRatio();
+    double atrRatio = GetATRRatio(10); // Sử dụng lookback mặc định 10 chu kỳ
     if (atrRatio == EMPTY_VALUE) return false;
     
     return atrRatio > threshold;
@@ -1021,7 +875,7 @@ bool CIndicatorUtils::IsVolatilityHigh(double threshold)
 //+------------------------------------------------------------------+
 bool CIndicatorUtils::IsVolatilityLow(double threshold) 
 {
-    double atrRatio = GetATRRatio();
+    double atrRatio = GetATRRatio(10); // Sử dụng lookback mặc định 10 chu kỳ
     if (atrRatio == EMPTY_VALUE) return false;
     
     return atrRatio < threshold;
@@ -1034,7 +888,20 @@ bool CIndicatorUtils::IsMarketRangebound(int lookback)
 {
     // Kiểm tra bằng BB Width
     double bbWidth = GetBBWidth(0);
-    double avgBBWidth = GetAverageBBWidth(lookback);
+    
+    // Tính trung bình BB Width thay vì dùng GetAverageBBWidth
+    double sumBBWidth = 0.0;
+    int validCount = 0;
+    
+    for (int i = 1; i <= lookback; i++) {
+        double bbw = GetBBWidth(i);
+        if (bbw != EMPTY_VALUE) {
+            sumBBWidth += bbw;
+            validCount++;
+        }
+    }
+    
+    double avgBBWidth = (validCount > 0) ? sumBBWidth / validCount : EMPTY_VALUE;
     
     if (bbWidth == EMPTY_VALUE || avgBBWidth == EMPTY_VALUE) return false;
     
@@ -1244,6 +1111,129 @@ void CIndicatorUtils::LogMessage(string message)
     Print("[IndicatorUtils] " + message);
 }
 
-} // End namespace ApexPullback
+//+------------------------------------------------------------------+
+//| Lấy giá trị Volume                                              |
+//+------------------------------------------------------------------+
+double CIndicatorUtils::GetVolume(int shift=0) {
+    if (!m_IsInitialized) return EMPTY_VALUE;
+    
+    // Cố gắng lấy từ buffer internal trước
+    if (shift < ArraySize(m_VolumeBuffer)) {
+        return m_VolumeBuffer[shift];
+    }
+    
+    // Nếu không có trong buffer hoặc handle không hợp lệ, lấy trực tiếp
+    long volume = 0;
+    if (!HistorySelect(TimeCurrent() - shift * PeriodSeconds(m_Timeframe), TimeCurrent())) {
+        return EMPTY_VALUE;
+    }
+    
+    volume = HistoryDealsTotal();
+    return (double)volume;
+}
+
+//+------------------------------------------------------------------+
+//| Lấy Volume trung bình                                           |
+//+------------------------------------------------------------------+
+double CIndicatorUtils::GetAverageVolume(int periods) 
+{
+    if (!m_IsInitialized) return EMPTY_VALUE;
+    
+    double sum = 0;
+    int count = 0;
+    
+    for (int i = 0; i < periods; i++) {
+        double vol = GetVolume(i);
+        if (vol != EMPTY_VALUE && vol > 0) {
+            sum += vol;
+            count++;
+        }
+    }
+    
+    if (count == 0) return EMPTY_VALUE;
+    
+    return sum / count;
+}
+
+//+------------------------------------------------------------------+
+//| Lấy tỷ lệ Volume hiện tại so với trung bình                     |
+//+------------------------------------------------------------------+
+double CIndicatorUtils::GetVolumeRatio() 
+{
+    double currentVolume = GetVolume(0);
+    double avgVolume = GetAverageVolume(20);
+    
+    if (currentVolume == EMPTY_VALUE || avgVolume == EMPTY_VALUE || avgVolume == 0) {
+        return EMPTY_VALUE;
+    }
+    
+    return currentVolume / avgVolume;
+}
+
+//+------------------------------------------------------------------+
+//| Lấy Spread hiện tại                                             |
+//+------------------------------------------------------------------+
+double CIndicatorUtils::GetCurrentSpread() 
+{
+    return SymbolInfoInteger(m_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
+}
+
+//+------------------------------------------------------------------+
+//| Lấy Spread trung bình                                           |
+//+------------------------------------------------------------------+
+double CIndicatorUtils::GetAverageSpread(int periods) 
+{
+    // Không có handle riêng cho spread, phải tính theo cách khác
+    double sum = 0;
+    for (int i = 0; i < periods; i++) {
+        sum += (double)SymbolInfoInteger(m_Symbol, SYMBOL_SPREAD);
+    }
+    
+    return (sum / periods) * SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra xem indicator1 có cắt lên trên indicator2 không        |
+//+------------------------------------------------------------------+
+bool CIndicatorUtils::IsCrossUp(int indicator1, int indicator2, int shift) 
+{
+    // Lấy giá trị cho shift hiện tại và trước đó
+    double ind1Current = GetMA(indicator1, shift);
+    double ind2Current = GetMA(indicator2, shift);
+    double ind1Previous = GetMA(indicator1, shift + 1);
+    double ind2Previous = GetMA(indicator2, shift + 1);
+    
+    // Kiểm tra giá trị hợp lệ
+    if (ind1Current == EMPTY_VALUE || ind2Current == EMPTY_VALUE || 
+        ind1Previous == EMPTY_VALUE || ind2Previous == EMPTY_VALUE) {
+        return false;
+    }
+    
+    // Kiểm tra cắt lên
+    return (ind1Previous < ind2Previous) && (ind1Current >= ind2Current);
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra xem indicator1 có cắt xuống dưới indicator2 không      |
+//+------------------------------------------------------------------+
+bool CIndicatorUtils::IsCrossDown(int indicator1, int indicator2, int shift) 
+{
+    // Lấy giá trị cho shift hiện tại và trước đó
+    double ind1Current = GetMA(indicator1, shift);
+    double ind2Current = GetMA(indicator2, shift);
+    double ind1Previous = GetMA(indicator1, shift + 1);
+    double ind2Previous = GetMA(indicator2, shift + 1);
+    
+    // Kiểm tra giá trị hợp lệ
+    if (ind1Current == EMPTY_VALUE || ind2Current == EMPTY_VALUE || 
+        ind1Previous == EMPTY_VALUE || ind2Previous == EMPTY_VALUE) {
+        return false;
+    }
+    
+    // Kiểm tra cắt xuống
+    return (ind1Previous > ind2Previous) && (ind1Current <= ind2Current);
+}
+
+} // Kết thúc namespace
 
 #endif // INDICATOR_UTILS_MQH

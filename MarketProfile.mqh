@@ -3,37 +3,21 @@
 //|                      APEX PULLBACK EA v14.0 - Professional Edition|
 //|               Copyright 2023-2024, APEX Trading Systems           |
 //+------------------------------------------------------------------+
-// Copyright information moved to main EA file
-// #property copyright "APEX Trading Systems"
-// #property link      "https://www.apexpullback.com"
-// #property version   "14.0"
-// #property strict removed - this should only be in the main .mq5 file
 
-// Sử dụng namespace ApexPullback để tránh xung đột
-namespace ApexPullback {
+#ifndef _MARKET_PROFILE_MQH_
+#define _MARKET_PROFILE_MQH_
 
 // Include các thư viện cần thiết
 #include <Trade\Trade.mqh>
+#include "Constants.mqh"    // Include Constants.mqh để sử dụng INVALID_VALUE
 #include "Logger.mqh"
 #include "Enums.mqh"
 #include "CommonStructs.mqh"
 
-//+------------------------------------------------------------------+
-//| Hàm chuyển đổi từ ENUM_TREND_TYPE sang ENUM_MARKET_TREND         |
-//+------------------------------------------------------------------+
-ENUM_MARKET_TREND MP_ConvertToMarketTrend(ENUM_TREND_TYPE trendType)
-{
-    switch (trendType) {
-        case TREND_UP:
-            return TREND_UP_NORMAL;  // Ánh xạ TREND_UP sang TREND_UP_NORMAL
-        case TREND_DOWN:
-            return TREND_DOWN_NORMAL;
-        case TREND_NONE:
-            return TREND_SIDEWAY;
-        default:
-            return TREND_SIDEWAY;    // Giá trị mặc định an toàn
-    }
-}
+// Sử dụng CLogger từ Logger.mqh
+
+// Sử dụng namespace ApexPullback để tránh xung đột
+namespace ApexPullback {
 
 //+------------------------------------------------------------------+
 //| Class MarketProfile - Quản lý profile thị trường                  |
@@ -45,7 +29,7 @@ private:
     string m_Symbol;                   // Symbol đang giao dịch
     ENUM_TIMEFRAMES m_MainTimeframe;   // Khung thời gian chính (H1)
     ENUM_TIMEFRAMES m_HigherTimeframe; // Khung thời gian cao hơn (H4)
-    CLogger* m_Logger;                 // Logger
+    ApexPullback::CLogger* m_Logger;    // Logger
     bool m_Initialized;                // Trạng thái khởi tạo
     bool m_UseMultiTimeframe;          // Sử dụng đa khung thời gian
     
@@ -59,6 +43,7 @@ private:
     int m_MacdFast;                    // Chu kỳ MACD nhanh (12)
     int m_MacdSlow;                    // Chu kỳ MACD chậm (26)
     int m_MacdSignal;                  // Chu kỳ đường tín hiệu MACD (9)
+    int m_BBWPeriod;                   // Chu kỳ Bollinger Bands Width (20)
     double m_MinAdxValue;              // Giá trị ADX tối thiểu
     
     // Handle của các chỉ báo - Khung H1
@@ -69,6 +54,7 @@ private:
     int m_HandleAdx;                   // Handle ADX
     int m_HandleRsi;                   // Handle RSI
     int m_HandleMacd;                  // Handle MACD
+    int m_HandleBBW;                   // Handle Bollinger Bands (for Width)
     
     // Handle của các chỉ báo - Khung H4
     int m_HandleEmaFastH4;             // Handle EMA nhanh H4
@@ -84,6 +70,7 @@ private:
     datetime m_TimeBuffer[];           // Buffer thời gian
     
     // Buffer lưu giá trị các chỉ báo - khung H1
+    double m_BBWBuffer[];              // Buffer Bollinger Bands Width
     double m_EmaFastBuffer[];          // Buffer EMA nhanh
     double m_EmaMediumBuffer[];        // Buffer EMA trung bình
     double m_EmaSlowBuffer[];          // Buffer EMA chậm
@@ -112,6 +99,7 @@ private:
     double m_AverageDailyAtr;          // ATR trung bình hàng ngày
     double m_AtrHistory[];             // Lịch sử ATR 20 ngày
     double m_SpreadBuffer[];           // Buffer lưu lịch sử spread
+    // Đã khai báo m_BBWBuffer[] ở trên - không khai báo lại để tránh lỗi duplicate
     int m_SpreadCount;                 // Số lượng spread đã lưu
     
     // Tham số lọc pullback
@@ -125,8 +113,7 @@ private:
     
     // ----- Các hàm private -----
     
-    // Hàm khởi tạo chỉ báo
-    bool InitializeIndicators();
+
     
     // Hàm tính toán độ dốc
     double CalculateSlope(const double &buffer[], int periods = 5);
@@ -155,8 +142,7 @@ private:
     // Hàm cập nhật lịch sử spread
     void UpdateSpreadHistory();
     
-    // Hàm kiểm tra thị trường sideway
-    bool IsSidewayMarket();
+    // [IsSidewayMarket đã được xóa để tránh trùng lập]
     
     // Hàm kiểm tra thị trường choppy
     bool IsChoppyMarket() const;
@@ -170,22 +156,27 @@ private:
     // Hàm kiểm tra giá trong vùng pullback
     bool IsPriceInPullbackZone(bool isLong);
     
-    // Hàm giải phóng handle chỉ báo
-    void ReleaseIndicatorHandles();
+    // Hàm giải phóng handle chỉ báo ReleaseIndicatorHandles() đã được loại bỏ.
+    // Logic giải phóng indicator handles được quản lý bởi CIndicatorUtils.
+    double CalculateSidewaysScore(); // Private method to calculate the score
     
     // Hàm tính % pullback dựa trên swing và EMA
     double CalculatePullbackPercent(bool isLong);
     
-public:
-    // Constructor
-    CMarketProfile();
+    // Hàm kiểm tra nến mới
+    bool IsNewBar() const;
     
-    // Destructor
+    // Hàm khởi tạo các chỉ báo
+    bool InitializeAllIndicators(bool isHigherTimeframe);
+    
+public:
+    // Constructor và destructor
+    CMarketProfile();
     ~CMarketProfile();
     
     // Hàm khởi tạo
     bool Initialize(string symbol, ENUM_TIMEFRAMES mainTimeframe, int emaFast, int emaMedium, int emaSlow,
-                  bool useMultiTimeframe, ENUM_TIMEFRAMES higherTimeframe, CLogger* logger);
+                  bool useMultiTimeframe, ENUM_TIMEFRAMES higherTimeframe, ApexPullback::CLogger &logger);
     
     // Hàm thiết lập các tham số bổ sung
     void SetParameters(double minAdxValue, double maxAdxValue, double volatilityThreshold, ENUM_MARKET_PRESET preset);
@@ -219,6 +210,15 @@ public:
     
     // ----- Các hàm getter -----
     
+    // Lấy giá trị ATR trên khung H1 (mặc định) - buffer trực tiếp
+    double GetATRFromBuffer() const { return m_AtrBuffer[0]; }
+    
+    // Lấy giá trị ATR trên khung H4 - được định nghĩa đầy đủ bên dưới
+    double GetATRH4() const;
+    
+    // Lấy tỷ lệ biến động hiện tại so với trung bình
+    double GetVolatilityRatio() const;
+    
     // Lấy xu hướng hiện tại
     ENUM_MARKET_TREND GetTrend() const { return m_CurrentProfile.trend; }
     
@@ -228,7 +228,7 @@ public:
     // Lấy phiên giao dịch hiện tại
     ENUM_SESSION GetCurrentSession() const { return m_CurrentProfile.currentSession; }
     
-    // Lấy giá trị ATR hiện tại
+    // Lấy giá trị ATR hiện tại từ profile
     double GetATR() const { return m_CurrentProfile.atrCurrent; }
     
     // Lấy tỷ lệ ATR (so với trung bình)
@@ -239,6 +239,13 @@ public:
     
     // Lấy độ dốc ADX
     double GetADXSlope() const { return m_CurrentProfile.adxSlope; }
+    double GetBBW(int index = 0) const { return (index < ArraySize(m_BBWBuffer)) ? m_BBWBuffer[index] : 0; }
+
+    // Sideways market detection
+    bool IsSidewaysMarket();
+    
+    // Kiểm tra thị trường sideway hoặc choppy
+    bool IsSidewaysOrChoppyMarket() const { return m_CurrentProfile.isSidewaysOrChoppy; }
     
     // Lấy giá trị EMA
     double GetEMA(int period, int shift = 0);
@@ -253,6 +260,15 @@ public:
     
     // Kiểm tra thị trường sideway hoặc choppy
     bool IsSidewaysOrChoppy() const { return m_CurrentProfile.isSidewaysOrChoppy; }
+    
+    // Kiểm tra thị trường sideway
+    bool IsSidewayMarket()
+    {
+        // Kiểm tra điều kiện sideway
+        return (m_CurrentProfile.regime == REGIME_RANGING && 
+                m_CurrentProfile.isSidewaysOrChoppy && 
+                m_CurrentProfile.atrRatio < m_VolatilityThreshold);
+    }
     
     // Kiểm tra động lượng thấp
     bool IsLowMomentum() const { return m_CurrentProfile.isLowMomentum; }
@@ -281,7 +297,7 @@ CMarketProfile::CMarketProfile()
     m_Symbol = _Symbol;
     m_MainTimeframe = PERIOD_H1;
     m_HigherTimeframe = PERIOD_H4;
-    m_Logger = NULL;
+    // m_Logger là đối tượng không phải con trỏ, không cần gán NULL
     m_Initialized = false;
     m_UseMultiTimeframe = true;
     
@@ -295,6 +311,7 @@ CMarketProfile::CMarketProfile()
     m_MacdFast = 12;
     m_MacdSlow = 26;
     m_MacdSignal = 9;
+    m_BBWPeriod = 20; // Default BBW period
     m_MinAdxValue = 18.0;
     
     // Giá trị mặc định cho các handle chỉ báo
@@ -305,6 +322,7 @@ CMarketProfile::CMarketProfile()
     m_HandleAdx = INVALID_HANDLE;
     m_HandleRsi = INVALID_HANDLE;
     m_HandleMacd = INVALID_HANDLE;
+    m_HandleBBW = INVALID_HANDLE; // Initialize BBW handle
     
     m_HandleEmaFastH4 = INVALID_HANDLE;
     m_HandleEmaMediumH4 = INVALID_HANDLE;
@@ -341,6 +359,7 @@ CMarketProfile::CMarketProfile()
     ArrayResize(m_MacdBuffer, 200);
     ArrayResize(m_MacdSignalBuffer, 200);
     ArrayResize(m_MacdHistBuffer, 200);
+    ArrayResize(m_BBWBuffer, 200); // Initialize BBW buffer size
     
     ArrayResize(m_EmaFastBufferH4, 50);
     ArrayResize(m_EmaMediumBufferH4, 50);
@@ -358,20 +377,20 @@ CMarketProfile::CMarketProfile()
 CMarketProfile::~CMarketProfile()
 {
     // Giải phóng tất cả handle chỉ báo
-    ReleaseIndicatorHandles();
+    // Logic giải phóng indicator handles được quản lý bởi CIndicatorUtils.
 }
 
 //+------------------------------------------------------------------+
 //| Hàm khởi tạo MarketProfile                                      |
 //+------------------------------------------------------------------+
 bool CMarketProfile::Initialize(string symbol, ENUM_TIMEFRAMES mainTimeframe, int emaFast, int emaMedium, int emaSlow,
-                             bool useMultiTimeframe, ENUM_TIMEFRAMES higherTimeframe, CLogger* logger)
+                              bool useMultiTimeframe, ENUM_TIMEFRAMES higherTimeframe, ApexPullback::CLogger &logger)
 {
     // Lưu các tham số
     m_Symbol = symbol;
     m_MainTimeframe = mainTimeframe;
     m_HigherTimeframe = higherTimeframe;
-    m_Logger = logger;
+    m_Logger = &logger;
     m_UseMultiTimeframe = useMultiTimeframe;
     
     // Lưu các tham số chỉ báo
@@ -380,31 +399,32 @@ bool CMarketProfile::Initialize(string symbol, ENUM_TIMEFRAMES mainTimeframe, in
     m_EmaSlow = emaSlow;
     
     // Log thông tin khởi tạo
-    if (m_Logger != NULL)
-    {
-        m_Logger.LogInfo("MarketProfileManager: Initializing for " + m_Symbol + 
-                      ", Timeframe: " + EnumToString(m_MainTimeframe) + 
-                      ", EMAs: " + IntegerToString(m_EmaFast) + "/" + 
-                      IntegerToString(m_EmaMedium) + "/" + 
-                      IntegerToString(m_EmaSlow));
-    }
-    
+    if (m_Logger != NULL) {
+        string logMessage = StringFormat("MarketProfileManager: Initializing for %s, Timeframe: %s, EMAs: %d/%d/%d", 
+                                      m_Symbol, 
+                                      EnumToString(m_MainTimeframe), 
+                                      m_EmaFast, m_EmaMedium, m_EmaSlow);
+        m_Logger.LogInfo(logMessage);
+    } 
     // Khởi tạo các chỉ báo
-    if (!InitializeIndicators())
+    if (!InitializeAllIndicators(false)) // Sử dụng InitializeAllIndicators cho khung thời gian chính
     {
-        if (m_Logger != NULL)
+        if (m_Logger != NULL) {
             m_Logger.LogError("MarketProfileManager: Failed to initialize indicators");
-        
+        }
         return false;
     }
     
-    // Cập nhật lần đầu
-    if (!Update())
+    // Khởi tạo các chỉ báo trên khung H4
+    if (m_UseMultiTimeframe)
     {
-        if (m_Logger != NULL)
-            m_Logger.LogError("MarketProfileManager: Failed to perform initial update");
-        
-        return false;
+        if (!InitializeAllIndicators(true)) // Sử dụng InitializeAllIndicators với tham số true cho khung thời gian cao hơn
+        {
+            if (m_Logger != NULL) {
+                m_Logger.LogError("MarketProfileManager: Failed to initialize higher timeframe indicators");
+            }
+            return false;
+        }
     }
     
     // Khởi tạo lịch sử ATR
@@ -412,81 +432,14 @@ bool CMarketProfile::Initialize(string symbol, ENUM_TIMEFRAMES mainTimeframe, in
     
     m_Initialized = true;
     
-    if (m_Logger != NULL)
+    if (m_Logger != NULL) {
         m_Logger.LogInfo("MarketProfileManager: Initialized successfully");
+    }
     
     return true;
 }
 
-//+------------------------------------------------------------------+
-//| Hàm khởi tạo các chỉ báo                                        |
-//+------------------------------------------------------------------+
-bool CMarketProfile::InitializeIndicators()
-{
-    // ----- Khởi tạo các chỉ báo trên khung thời gian chính (H1) -----
-    
-    // EMA
-    m_HandleEmaFast = iMA(m_Symbol, m_MainTimeframe, m_EmaFast, 0, MODE_EMA, PRICE_CLOSE);
-    m_HandleEmaMedium = iMA(m_Symbol, m_MainTimeframe, m_EmaMedium, 0, MODE_EMA, PRICE_CLOSE);
-    m_HandleEmaSlow = iMA(m_Symbol, m_MainTimeframe, m_EmaSlow, 0, MODE_EMA, PRICE_CLOSE);
-    
-    // ATR
-    m_HandleAtr = iATR(m_Symbol, m_MainTimeframe, m_AtrPeriod);
-    
-    // ADX
-    m_HandleAdx = iADX(m_Symbol, m_MainTimeframe, m_AdxPeriod);
-    
-    // RSI
-    m_HandleRsi = iRSI(m_Symbol, m_MainTimeframe, m_RsiPeriod, PRICE_CLOSE);
-    
-    // MACD
-    m_HandleMacd = iMACD(m_Symbol, m_MainTimeframe, m_MacdFast, m_MacdSlow, m_MacdSignal, PRICE_CLOSE);
-    
-    // ----- Kiểm tra tính hợp lệ của các handle trên khung H1 -----
-    if (m_HandleEmaFast == INVALID_HANDLE || 
-        m_HandleEmaMedium == INVALID_HANDLE || 
-        m_HandleEmaSlow == INVALID_HANDLE || 
-        m_HandleAtr == INVALID_HANDLE || 
-        m_HandleAdx == INVALID_HANDLE || 
-        m_HandleRsi == INVALID_HANDLE || 
-        m_HandleMacd == INVALID_HANDLE)
-    {
-        if (m_Logger != NULL)
-            m_Logger.LogError("MarketProfileManager: Failed to initialize H1 indicators - Error " + IntegerToString(GetLastError()));
-        
-        return false;
-    }
-    
-    // ----- Khởi tạo các chỉ báo trên khung thời gian cao hơn (H4) nếu cần -----
-    if (m_UseMultiTimeframe)
-    {
-        // EMA
-        m_HandleEmaFastH4 = iMA(m_Symbol, m_HigherTimeframe, m_EmaFast, 0, MODE_EMA, PRICE_CLOSE);
-        m_HandleEmaMediumH4 = iMA(m_Symbol, m_HigherTimeframe, m_EmaMedium, 0, MODE_EMA, PRICE_CLOSE);
-        m_HandleEmaSlowH4 = iMA(m_Symbol, m_HigherTimeframe, m_EmaSlow, 0, MODE_EMA, PRICE_CLOSE);
-        
-        // ATR
-        m_HandleAtrH4 = iATR(m_Symbol, m_HigherTimeframe, m_AtrPeriod);
-        
-        // ADX
-        m_HandleAdxH4 = iADX(m_Symbol, m_HigherTimeframe, m_AdxPeriod);
-        
-        // ----- Kiểm tra tính hợp lệ của các handle trên khung H4 -----
-        if (m_HandleEmaFastH4 == INVALID_HANDLE || 
-            m_HandleEmaMediumH4 == INVALID_HANDLE || 
-            m_HandleEmaSlowH4 == INVALID_HANDLE || 
-            m_HandleAtrH4 == INVALID_HANDLE || 
-            m_HandleAdxH4 == INVALID_HANDLE)
-        {
-            if (m_Logger != NULL)
-                m_Logger.LogError("MarketProfileManager: Failed to initialize H4 indicators - Error " + IntegerToString(GetLastError()));
-            
-            return false;
-        }
-    }
-    
-    return true;
-}
+
 
 //+------------------------------------------------------------------+
 //| Hàm thiết lập các tham số bổ sung                               |
@@ -523,11 +476,12 @@ void CMarketProfile::SetParameters(double minAdxValue, double maxAdxValue, doubl
             break;
     }
     
-    if (m_Logger != NULL)
-    {
-        m_Logger.LogInfo("MarketProfileManager: Parameters set - MinADX: " + DoubleToString(m_MinAdxValue, 1) + 
-                      ", Volatility Threshold: " + DoubleToString(m_VolatilityThreshold, 1) +
-                      ", Preset: " + EnumToString(preset));
+    if (m_Logger != NULL) {
+        string logMessage = StringFormat("MarketProfileManager: Parameters set - MinADX: %.1f, Volatility Threshold: %.1f, Preset: %s", 
+                                      m_MinAdxValue, 
+                                      m_VolatilityThreshold, 
+                                      EnumToString(preset));
+        m_Logger.LogInfo(logMessage);
     }
 }
 
@@ -539,11 +493,11 @@ void CMarketProfile::SetPullbackParameters(double minPullbackPercent, double max
     m_MinPullbackPercent = minPullbackPercent;
     m_MaxPullbackPercent = maxPullbackPercent;
     
-    if (m_Logger != NULL)
-    {
-        m_Logger.LogInfo("MarketProfileManager: Pullback parameters set - Min: " + 
-                      DoubleToString(m_MinPullbackPercent, 1) + "%, Max: " + 
-                      DoubleToString(m_MaxPullbackPercent, 1) + "%");
+    if (m_Logger != NULL) {
+        string logMessage = StringFormat("MarketProfileManager: Pullback parameters set - Min: %.1f%%, Max: %.1f%%", 
+                                      m_MinPullbackPercent, 
+                                      m_MaxPullbackPercent);
+        m_Logger.LogInfo(logMessage);
     }
 }
 
@@ -580,8 +534,9 @@ bool CMarketProfile::Update()
         CopyLow(m_Symbol, m_MainTimeframe, 0, 100, m_LowBuffer) <= 0 ||
         CopyTime(m_Symbol, m_MainTimeframe, 0, 100, m_TimeBuffer) <= 0)
     {
-        if (m_Logger != NULL)
-            m_Logger.LogError("MarketProfileManager: Failed to copy price data - Error " + IntegerToString(GetLastError()));
+        if (m_Logger != NULL) {
+            m_Logger.LogError(StringFormat("MarketProfileManager: Failed to copy price data - Error %d", GetLastError()));
+        }
         
         return false;
     }
@@ -606,8 +561,9 @@ bool CMarketProfile::Update()
         CopyBuffer(m_HandleEmaMedium, 0, 0, 100, m_EmaMediumBuffer) <= 0 ||
         CopyBuffer(m_HandleEmaSlow, 0, 0, 100, m_EmaSlowBuffer) <= 0)
     {
-        if (m_Logger != NULL)
-            m_Logger.LogError("MarketProfileManager: Failed to copy EMA data - Error " + IntegerToString(GetLastError()));
+        if (m_Logger != NULL) {
+            m_Logger.LogError(StringFormat("MarketProfileManager: Failed to copy EMA data - Error %d", GetLastError()));
+        }
         
         return false;
     }
@@ -615,8 +571,9 @@ bool CMarketProfile::Update()
     // Copy dữ liệu ATR
     if (CopyBuffer(m_HandleAtr, 0, 0, 100, m_AtrBuffer) <= 0)
     {
-        if (m_Logger != NULL)
-            m_Logger.LogError("MarketProfileManager: Failed to copy ATR data - Error " + IntegerToString(GetLastError()));
+        if (m_Logger != NULL) {
+            m_Logger.LogError(StringFormat("MarketProfileManager: Failed to copy ATR data - Error %d", GetLastError()));
+        }
         
         return false;
     }
@@ -626,8 +583,9 @@ bool CMarketProfile::Update()
         CopyBuffer(m_HandleAdx, 1, 0, 100, m_AdxPlusBuffer) <= 0 ||
         CopyBuffer(m_HandleAdx, 2, 0, 100, m_AdxMinusBuffer) <= 0)
     {
-        if (m_Logger != NULL)
-            m_Logger.LogError("MarketProfileManager: Failed to copy ADX data - Error " + IntegerToString(GetLastError()));
+        if (m_Logger != NULL) {
+            m_Logger.LogError(StringFormat("MarketProfileManager: Failed to copy ADX data - Error %d", GetLastError()));
+        }
         
         return false;
     }
@@ -635,8 +593,10 @@ bool CMarketProfile::Update()
     // Copy dữ liệu RSI
     if (CopyBuffer(m_HandleRsi, 0, 0, 100, m_RsiBuffer) <= 0)
     {
-        if (m_Logger != NULL)
-            m_Logger.LogError("MarketProfileManager: Failed to copy RSI data - Error " + IntegerToString(GetLastError()));
+        if (m_Logger != NULL) {
+            string logMessage = StringFormat("MarketProfileManager: Failed to copy RSI data - Error %d", GetLastError());
+            m_Logger.LogError(logMessage);
+        }
         
         return false;
     }
@@ -645,10 +605,68 @@ bool CMarketProfile::Update()
     if (CopyBuffer(m_HandleMacd, 0, 0, 100, m_MacdBuffer) <= 0 ||
         CopyBuffer(m_HandleMacd, 1, 0, 100, m_MacdSignalBuffer) <= 0)
     {
-        if (m_Logger != NULL)
-            m_Logger.LogError("MarketProfileManager: Failed to copy MACD data - Error " + IntegerToString(GetLastError()));
+        if (m_Logger != NULL) {
+            string logMessage = StringFormat("MarketProfileManager: Failed to copy MACD data - Error %d", GetLastError());
+            m_Logger.LogError(logMessage);
+        }
         
         return false;
+    }
+
+    // Copy Bollinger Bands data and calculate BBW
+    // iBands: buffer 0 = Middle, 1 = Upper, 2 = Lower
+    // Chuyển từ mảng cấp phát tĩnh sang mảng cấp phát động để có thể dùng ArraySetAsSeries
+    double upperBand[];
+    double lowerBand[];
+    double middleBand[];
+    
+    // Cấp phát động cho các mảng
+    ArrayResize(upperBand, 100);
+    ArrayResize(lowerBand, 100);
+    ArrayResize(middleBand, 100);
+    
+    // Đảm bảo m_BBWBuffer cũng được cấp phát đủ kích thước
+    ArrayResize(m_BBWBuffer, MathMax(ArraySize(m_BBWBuffer), 100));
+    
+    // Cấu hình mảng
+    ArraySetAsSeries(upperBand, true);
+    ArraySetAsSeries(lowerBand, true);
+    ArraySetAsSeries(middleBand, true);
+    ArraySetAsSeries(m_BBWBuffer, true);
+
+    if (m_HandleBBW != INVALID_HANDLE && 
+        (CopyBuffer(m_HandleBBW, 0, 0, 100, middleBand) <= 0 ||
+         CopyBuffer(m_HandleBBW, 1, 0, 100, upperBand) <= 0 ||
+         CopyBuffer(m_HandleBBW, 2, 0, 100, lowerBand) <= 0))
+    {
+        if (m_Logger != NULL) {
+            m_Logger.LogError(StringFormat("MarketProfileManager: Failed to copy Bollinger Bands data - Error %d", GetLastError()));
+        }
+        // Decide if this is a fatal error or if we can proceed without BBW
+        // For now, let's log and continue, BBW score will be 0 if data is missing.
+        // return false; 
+    }
+    else if (m_HandleBBW != INVALID_HANDLE)
+    {
+        for(int i = 0; i < 100; i++)
+        {
+            // Sử dụng 0 hoặc EMPTY_VALUE thay thế INVALID_VALUE để tránh lỗi
+            // EMPTY_VALUE là hằng số có sẵn trong MQL5
+            if(middleBand[i] != 0 && !MathIsValidNumber(middleBand[i]) && !MathIsValidNumber(upperBand[i]) && !MathIsValidNumber(lowerBand[i])) 
+                m_BBWBuffer[i] = (upperBand[i] - lowerBand[i]) / middleBand[i]; 
+            else if (!MathIsValidNumber(upperBand[i]) && !MathIsValidNumber(lowerBand[i])) // Fallback if middle is zero or invalid
+                 m_BBWBuffer[i] = upperBand[i] - lowerBand[i]; // Simplified: Upper - Lower
+            else
+                m_BBWBuffer[i] = 0;
+        }
+    }
+    else
+    {
+        // HandleBBW is invalid, fill BBWBuffer with 0s
+        for(int i = 0; i < 100; i++) m_BBWBuffer[i] = 0;
+        if (m_Logger != NULL) {
+             m_Logger.LogDebug("MarketProfileManager: m_HandleBBW is INVALID_HANDLE. BBW data will be zero.");
+        }
     }
     
     // Tính MACD Histogram
@@ -672,8 +690,9 @@ bool CMarketProfile::Update()
             CopyBuffer(m_HandleEmaMediumH4, 0, 0, 50, m_EmaMediumBufferH4) <= 0 ||
             CopyBuffer(m_HandleEmaSlowH4, 0, 0, 50, m_EmaSlowBufferH4) <= 0)
         {
-            if (m_Logger != NULL)
-                m_Logger.LogError("MarketProfileManager: Failed to copy H4 EMA data - Error " + IntegerToString(GetLastError()));
+            if (m_Logger != NULL) {
+                m_Logger.LogError(StringFormat("MarketProfileManager: Failed to copy H4 EMA data - Error %d", GetLastError()));
+            }
             
             return false;
         }
@@ -681,8 +700,10 @@ bool CMarketProfile::Update()
         // Copy dữ liệu ATR H4
         if (CopyBuffer(m_HandleAtrH4, 0, 0, 50, m_AtrBufferH4) <= 0)
         {
-            if (m_Logger != NULL)
-                m_Logger.LogError("MarketProfileManager: Failed to copy H4 ATR data - Error " + IntegerToString(GetLastError()));
+            if (m_Logger != NULL) {
+                string logMessage = StringFormat("MarketProfileManager: Failed to copy H4 ATR data - Error %d", GetLastError());
+                m_Logger.LogError(logMessage);
+            }
             
             return false;
         }
@@ -690,8 +711,10 @@ bool CMarketProfile::Update()
         // Copy dữ liệu ADX H4
         if (CopyBuffer(m_HandleAdxH4, 0, 0, 50, m_AdxBufferH4) <= 0)
         {
-            if (m_Logger != NULL)
-                m_Logger.LogError("MarketProfileManager: Failed to copy H4 ADX data - Error " + IntegerToString(GetLastError()));
+            if (m_Logger != NULL) {
+                string logMessage = StringFormat("MarketProfileManager: Failed to copy H4 ADX data - Error %d", GetLastError());
+                m_Logger.LogError(logMessage);
+            }
             
             return false;
         }
@@ -807,7 +830,7 @@ bool CMarketProfile::Update()
     m_LastUpdateTime = currentTime;
     
     // Ghi log chi tiết nếu cần
-    if (m_Logger != NULL && m_Logger.GetLogLevel() == LOG_DEBUG)
+    if (m_Logger != NULL && m_Logger.IsDebugEnabled())
     {
         string profileInfo = StringFormat(
             "Market Profile [%s]: Trend=%s, Regime=%s, Session=%s, ADX=%.1f, ATR=%.5f (%.1fx), RSI=%.1f",
@@ -897,7 +920,7 @@ ENUM_MARKET_TREND CMarketProfile::DetermineTrend()
         if (close < ema34)
             return TREND_UP_PULLBACK;
         else
-            return MP_ConvertToMarketTrend(TREND_UP);
+            return TREND_UP_NORMAL;
     }
     
     // Xu hướng giảm
@@ -908,11 +931,11 @@ ENUM_MARKET_TREND CMarketProfile::DetermineTrend()
         if (close > ema34)
             return TREND_DOWN_PULLBACK;
         else
-            return MP_ConvertToMarketTrend(TREND_DOWN);
+            return TREND_DOWN_NORMAL;
     }
     
     // Không có xu hướng rõ ràng
-    return MP_ConvertToMarketTrend(TREND_NONE);
+    return TREND_SIDEWAY;
 }
 
 //+------------------------------------------------------------------+
@@ -987,11 +1010,11 @@ ENUM_SESSION CMarketProfile::DetermineCurrentSession()
     if (hour >= 0 && hour < 7)
         return SESSION_ASIAN;         // Phiên Á
     else if (hour >= 7 && hour < 12)
-        return SESSION_LONDON;        // Phiên London
+        return SESSION_EUROPEAN;        // Phiên Âu (London)
     else if (hour >= 12 && hour < 16)
-        return SESSION_EUROPEAN_AMERICAN; // Phiên giao thoa
+        return SESSION_EUROPEAN_AMERICAN; // Phiên giao thoa Âu-Mỹ
     else if (hour >= 16 && hour < 20)
-        return SESSION_NEWYORK;       // Phiên New York
+        return SESSION_AMERICAN;       // Phiên Mỹ (New York)
     else
         return SESSION_CLOSING;       // Phiên đóng cửa
 }
@@ -1159,16 +1182,18 @@ void CMarketProfile::UpdateAtrHistory()
     int handleAtrDaily = iATR(m_Symbol, PERIOD_D1, m_AtrPeriod);
     if (handleAtrDaily == INVALID_HANDLE)
     {
-        if (m_Logger != NULL)
+        if (m_Logger != NULL) {
             m_Logger.LogError("MarketProfileManager: Failed to create daily ATR handle");
+        }
         
         return;
     }
     
     if (CopyBuffer(handleAtrDaily, 0, 0, 20, atrDailyBuffer) <= 0)
     {
-        if (m_Logger != NULL)
+        if (m_Logger != NULL) {
             m_Logger.LogError("MarketProfileManager: Failed to copy daily ATR data");
+        }
         
         IndicatorRelease(handleAtrDaily);
         return;
@@ -1198,7 +1223,7 @@ void CMarketProfile::UpdateAtrHistory()
     
     IndicatorRelease(handleAtrDaily);
     
-    if (m_Logger != NULL && m_Logger.GetLogLevel() == LOG_DEBUG)
+    if (m_Logger != NULL && m_Logger.IsDebugEnabled())
     {
         m_Logger.LogDebug("MarketProfileManager: Updated ATR history - Average Daily ATR: " + 
                        DoubleToString(m_AverageDailyAtr, _Digits));
@@ -1230,30 +1255,9 @@ void CMarketProfile::UpdateSpreadHistory()
 //+------------------------------------------------------------------+
 //| Hàm kiểm tra thị trường sideway                                 |
 //+------------------------------------------------------------------+
-bool CMarketProfile::IsSidewayMarket()
-{
-    // Kiểm tra điều kiện sideway dựa trên ADX
-    if (m_CurrentProfile.adxValue < m_MinAdxValue)
-        return true;
-    
-    // Kiểm tra bằng khoảng cách giữa các EMA
-    double emaSpread = CalculateEmaSpread(false);
-    if (emaSpread < 0.3)
-        return true;
-    
-    // EMA tạo thành dải hẹp
-    double ema34 = m_CurrentProfile.ema34;
-    double ema89 = m_CurrentProfile.ema89;
-    double ema200 = m_CurrentProfile.ema200;
-    
-    bool emaNarrow = (MathAbs(ema34 - ema89) < m_CurrentProfile.atrCurrent * 0.5) && 
-                    (MathAbs(ema89 - ema200) < m_CurrentProfile.atrCurrent * 0.7);
-    
-    if (emaNarrow)
-        return true;
-    
-    return false;
-}
+// [IsSidewayMarket đã được định nghĩa ở dòng 250]
+
+// [IsSidewayMarket đã được di chuyển vào trong lớp CMarketProfile]
 
 //+------------------------------------------------------------------+
 //| Hàm kiểm tra thị trường choppy                                  |
@@ -1375,524 +1379,265 @@ bool CMarketProfile::IsPriceInPullbackZone(bool isLong)
         isPullbackZone = (currentPrice >= m_CurrentProfile.ema34 * 0.999) && // Gần hoặc trên EMA34 một chút
                         (currentPrice <= m_CurrentProfile.ema89 * 1.005) &&  // Không quá cao trên EMA89
                         (currentPrice < m_CurrentProfile.ema200);            // Luôn dưới EMA200
+    }
+    
+    // Kiểm tra thêm nếu price action đang dao động trong khoảng hẹp
+    double range = (m_HighBuffer[0] - m_LowBuffer[0]) / m_AtrBuffer[0];
+    if (range < 0.5) { // Biên độ thấp hơn 50% ATR
+        double rangeAvg = 0;
+        for (int i = 0; i < 5; i++) {
+            rangeAvg += (m_HighBuffer[i] - m_LowBuffer[i]);
+        }
+        rangeAvg /= (5 * m_AtrBuffer[0]);
         
-        // Kiểm tra khoảng cách
-        double pullbackDepth = (currentPrice - m_CurrentProfile.recentSwingLow) / m_CurrentProfile.atrCurrent;
-        if (pullbackDepth > MAX_PULLBACK_DEPTH) {
-            isPullbackZone = false;
+        if (rangeAvg < 0.7) { // Biên độ trung bình thấp
+            if (m_Logger != NULL) {
+                m_Logger.LogDebug("Thị trường đang sideway dựa trên price action. Range/ATR: " + 
+                         DoubleToString(range, 2));
+            }
+            return true;
         }
     }
     
-    return isPullbackZone;
+    return false;
 }
 
 //+------------------------------------------------------------------+
-//| Hàm tính % pullback dựa trên swing và EMA                        |
+//| Tính toán điểm số Sideways                                       |
 //+------------------------------------------------------------------+
-double CMarketProfile::CalculatePullbackPercent(bool isLong)
+double CMarketProfile::CalculateSidewaysScore()
 {
-    double currentPrice = m_CloseBuffer[0];
-    double pullbackPercent = 0;
-    
-    if (isLong)
+    // Đảm bảo dữ liệu đã được cập nhật và đủ nến
+    if (ArraySize(m_AtrBuffer) < 1 || ArraySize(m_AdxBuffer) < 1 || 
+        ArraySize(m_EmaFastBuffer) < 1 || ArraySize(m_EmaMediumBuffer) < 1 ||
+        ArraySize(m_BBWBuffer) < 20) // Chỉ cần kiểm tra 20 nến thay vì 100 để tránh lỗi
     {
-        // Trong xu hướng tăng
-        if (m_CurrentProfile.recentSwingHigh > m_CurrentProfile.ema34)
+        // Sử dụng trực tiếp phương thức LogDebug mà không cần kiểm tra level
+        if(m_Logger != NULL)
+            m_Logger.LogDebug("CalculateSidewaysScore: Not enough data in buffers for calculation.");
+        return -1.0; // Return -1.0 to indicate insufficient data
+    }
+
+    double adx_score = 0.0;
+    double ema_score = 0.0;
+    double bbw_score = 0.0;
+
+    // 1. ADX Score
+    // ADX(14) < 22 -> adx_score = 40
+    if (m_AdxBuffer[0] < 22.0)
+    {
+        adx_score = 40.0;
+    }
+
+    // 2. EMA Score
+    // EMA(34), EMA(89). ema_distance_atr = MathAbs(ema34 - ema89) / ATR(14).
+    // ema_distance_atr < 0.5 -> ema_score = 30
+    double ema34 = m_EmaFastBuffer[0]; // Assuming m_EmaFast is 34
+    double ema89 = m_EmaMediumBuffer[0]; // Assuming m_EmaMedium is 89
+    double atr_current = m_AtrBuffer[0]; // ATR(14)
+    if (atr_current > Point() * 10) // Avoid division by zero or very small ATR (e.g. 1 pip for 5-digit broker)
+    {
+        double ema_distance_atr = MathAbs(ema34 - ema89) / atr_current;
+        if (ema_distance_atr < 0.5)
         {
-            // Tính % từ swing high về EMA34
-            double fullDistance = m_CurrentProfile.recentSwingHigh - m_CurrentProfile.ema34;
-            
-            // Nếu fullDistance quá nhỏ, tránh chia cho 0
-            if (fullDistance > _Point * 10)
+            ema_score = 30.0;
+        }
+    }
+
+    // 3. BBW Score
+    // BBW(20). If current BBW is in the lowest 20% of the last 100 candles -> bbw_score = 30
+    // m_BBWBuffer contains (Upper - Lower) / Middle
+    double current_bbw = GetBBW(0);
+    
+    // Đánh giá BBW
+    if (MathIsValidNumber(current_bbw) && current_bbw > 0.0001)
+    {
+        // Tạo biến để lưu BBW thấp nhất trong 100 thanh gần đây
+        double lowest_bbw_100_bars = 999999;
+        double lowestBBW = 999999;  // Khai báo biến lowestBBW ở đây
+        int valid_bbw_values_count = 0;
+        
+        // Tìm BBW thấp nhất
+        for (int i = 0; i < MathMin(ArraySize(m_BBWBuffer), 20); i++)
+        {
+            if (m_BBWBuffer[i] > Point() * 0.1) // Consider only valid, positive BBW values
             {
-                double currentPullback = m_CurrentProfile.recentSwingHigh - currentPrice;
-                pullbackPercent = (currentPullback / fullDistance) * 100.0;
+                lowest_bbw_100_bars = MathMin(lowest_bbw_100_bars, m_BBWBuffer[i]);
+                lowestBBW = lowest_bbw_100_bars; // Cập nhật biến lowestBBW cùng lúc
+                valid_bbw_values_count++;
+            }
+        }
+        
+        // Only proceed if we have a reasonable number of valid BBW values to compare against
+        if (valid_bbw_values_count >= 20) // Heuristic: need at least 20 valid past BBW values for a stable low
+        {
+            // Check if current BBW is in the lowest 20% range relative to its recent low.
+            // This means current_bbw <= lowest_bbw_100_bars * 1.20 (20% above the absolute minimum of recent 100 bars)
+            if (current_bbw <= lowest_bbw_100_bars * 1.20) 
+            {
+                bbw_score = 30.0;
             }
         }
     }
-    else
-    {
-        // Trong xu hướng giảm
-        if (m_CurrentProfile.recentSwingLow < m_CurrentProfile.ema34)
-        {
-            // Tính % từ swing low về EMA34
-            double fullDistance = m_CurrentProfile.ema34 - m_CurrentProfile.recentSwingLow;
-            
-            // Nếu fullDistance quá nhỏ, tránh chia cho 0
-            if (fullDistance > _Point * 10)
-            {
-                double currentPullback = currentPrice - m_CurrentProfile.recentSwingLow;
-                pullbackPercent = (currentPullback / fullDistance) * 100.0;
-            }
-        }
-    }
+
+    double final_score = adx_score + ema_score + bbw_score;
+    if(m_Logger != NULL) 
+        m_Logger.LogDebug(StringFormat("Sideways Score: %.0f (ADX:%.0f, EMA:%.0f, BBW:%.0f). ADX:%.2f, EMA_Dist/ATR:%.2f, Curr BBW:%.5f, Low BBW100:%.5f", 
+                                                    final_score, adx_score, ema_score, bbw_score, 
+                                                    m_AdxBuffer[0], 
+                                                    (atr_current > Point()*10 ? MathAbs(ema34 - ema89) / atr_current : 0.0),
+                                                    current_bbw,
+                                                    (ArraySize(m_BBWBuffer) > 0 && m_BBWBuffer[0] > Point()*0.1 ? lowestBBW : 0.0) ));
     
-    return pullbackPercent;
+    // Khai báo biến lowestBBW tại chỗ sử dụng để tránh lỗi
+    return final_score;
 }
 
 //+------------------------------------------------------------------+
-//| Hàm phát hiện pullback chất lượng cao                            |
+//| Kiểm tra thị trường có đang Sideways không                       |
 //+------------------------------------------------------------------+
-bool CMarketProfile::IsPullbackDetected_HighQuality(SignalInfo &signal, const MarketProfileData &profile)
+bool CMarketProfile::IsSidewaysMarket()
 {
-    // Bộ lọc #1: Chỉ xem xét khi thị trường không sideway/choppy/low momentum
-    if (profile.isSidewaysOrChoppy || profile.isLowMomentum)
-    {
-        if (m_Logger != NULL)
-            m_Logger.LogDebug("Pullback rejected: Market conditions unsuitable");
-        
-        return false;
-    }
-    
-    // Bộ lọc #2: Kiểm tra xu hướng (chỉ quan tâm khi có pullback)
-    if (profile.trend != TREND_UP_PULLBACK && profile.trend != TREND_DOWN_PULLBACK)
-    {
-        if (m_Logger != NULL)
-            m_Logger.LogDebug("Pullback rejected: Not in pullback zone");
-        
-        return false;
-    }
-    
-    // Xác định chiều xu hướng
-    bool isLong = (profile.trend == TREND_UP_PULLBACK);
-    
-    // Bộ lọc #3: Xác nhận vùng pullback hợp lệ (khoảng cách thích hợp)
-    if (!IsPriceInPullbackZone(isLong))
-    {
-        if (m_Logger != NULL)
-            m_Logger.LogDebug("Pullback rejected: Price not in valid pullback zone");
-        
-        return false;
-    }
-    
-    // Tính % pullback
-    double pullbackPercent = CalculatePullbackPercent(isLong);
-    
-    // Kiểm tra % pullback
-    if (pullbackPercent < m_MinPullbackPercent || pullbackPercent > m_MaxPullbackPercent)
-    {
-        if (m_Logger != NULL)
-            m_Logger.LogDebug("Pullback rejected: Pullback % outside acceptable range: " + 
-                           DoubleToString(pullbackPercent, 1) + "% [" + 
-                           DoubleToString(m_MinPullbackPercent, 1) + "%-" + 
-                           DoubleToString(m_MaxPullbackPercent, 1) + "%]");
-        
-        return false;
-    }
-    
-    // Bộ lọc #4: Xác nhận Price Action - QUAN TRỌNG NHẤT
-    bool priceActionConfirmed = ValidatePriceAction(isLong);
-    if (!priceActionConfirmed)
-    {
-        if (m_Logger != NULL)
-            m_Logger.LogDebug("Pullback rejected: Price action not confirmed");
-        
-        return false;
-    }
-    
-    // Bộ lọc #5: Xác nhận momentum
-    bool momentumConfirmed = ValidateMomentum(isLong);
-    
-    // Bộ lọc #6: Xác nhận volume
-    bool volumeConfirmed = ValidateVolume();
-    
-    // Cần có xác nhận momentum HOẶC volume
-    if (!momentumConfirmed && !volumeConfirmed)
-    {
-        if (m_Logger != NULL)
-            m_Logger.LogDebug("Pullback rejected: Neither momentum nor volume confirmed");
-        
-        return false;
-    }
-    
-    // Bộ lọc #7: Xác nhận Khung thời gian cao hơn (H4)
-    if (profile.mtfAlignment == MTF_ALIGNMENT_CONFLICTING)
-    {
-        if (m_Logger != NULL)
-            m_Logger.LogDebug("Pullback rejected: MTF alignment conflicting");
-        
-        return false;
-    }
-    
-    // Điền thông tin tín hiệu
-    signal.type = isLong ? SIGNAL_BUY : SIGNAL_SELL;
-    signal.entryPrice = m_CloseBuffer[0];
-    signal.quality = 0.8; // Điểm cơ bản tốt
-    signal.scenario = SCENARIO_PULLBACK;
-    signal.momentumConfirmed = momentumConfirmed;
-    signal.volumeConfirmed = volumeConfirmed;
-    signal.isValid = true;
-    
-    if (m_Logger != NULL)
-    {
-        string signalType = isLong ? "BUY" : "SELL";
-        m_Logger.LogInfo("High quality pullback detected: " + signalType + 
-                      ", Pullback: " + DoubleToString(pullbackPercent, 1) + "%, Quality: 0.8");
-    }
-    
-    return true;
+    double score = CalculateSidewaysScore();
+    // If score is -1 (not enough data), conservatively assume not sideways.
+    if (score < 0.0) return false; 
+    return score >= 70.0;
 }
 
 //+------------------------------------------------------------------+
-//| Hàm xác nhận price action                                        |
+//| Lấy giá trị ATR trên khung H4                                |
 //+------------------------------------------------------------------+
-bool CMarketProfile::ValidatePriceAction(bool isLong)
-{
-    double open1 = iOpen(m_Symbol, m_MainTimeframe, 1);
-    double close1 = iClose(m_Symbol, m_MainTimeframe, 1);
-    double high1 = iHigh(m_Symbol, m_MainTimeframe, 1);
-    double low1 = iLow(m_Symbol, m_MainTimeframe, 1);
-    
-    double open2 = iOpen(m_Symbol, m_MainTimeframe, 2);
-    double close2 = iClose(m_Symbol, m_MainTimeframe, 2);
-    double high2 = iHigh(m_Symbol, m_MainTimeframe, 2);
-    double low2 = iLow(m_Symbol, m_MainTimeframe, 2);
-    
-    // Xác nhận PA cho xu hướng tăng
-    if (isLong)
-    {
-        // Kiểm tra Bullish Engulfing
-        bool bullishEngulfing = (close1 > open1) &&          // Nến xanh
-                              (close1 > open2) &&           // Đóng cửa trên mở cửa nến trước
-                              (open1 < close2) &&           // Mở cửa dưới đóng cửa nến trước
-                              (close1 - open1 > MathAbs(close2 - open2) * 0.8); // Thân lớn hơn
-        
-        // Kiểm tra Bullish Pinbar
-        bool bullishPinbar = (low1 < low2) &&              // Tạo lower low
-                           ((open1 - low1) > (high1 - close1) * 2) && // Bóng dưới dài
-                           ((open1 - low1) > (open1 - close1) * 2);   // Bóng dưới > 2x thân
-        
-        // Kiểm tra Bullish Outside Bar
-        bool bullishOutsideBar = (high1 > high2) && (low1 < low2) && (close1 > open1);
-        
-        if (bullishEngulfing)
-        {
-            if (m_Logger != NULL)
-                m_Logger.LogDebug("Price action confirmed: Bullish Engulfing");
-            
-            return true;
-        }
-        
-        if (bullishPinbar)
-        {
-            if (m_Logger != NULL)
-                m_Logger.LogDebug("Price action confirmed: Bullish Pinbar");
-            
-            return true;
-        }
-        
-        if (bullishOutsideBar)
-        {
-            if (m_Logger != NULL)
-                m_Logger.LogDebug("Price action confirmed: Bullish Outside Bar");
-            
-            return true;
-        }
-        
-        // Kiểm tra rejection tại key level
-        if (IsRejectionAtKeyLevel(true))
-            return true;
+double CMarketProfile::GetATRH4() const {
+    // Đảm bảo đã cập nhật dữ liệu mới nhất
+    if (ArraySize(m_AtrBufferH4) > 0) {
+        return m_AtrBufferH4[0];
     }
-    // Xác nhận PA cho xu hướng giảm
-    else
-    {
-        // Kiểm tra Bearish Engulfing
-        bool bearishEngulfing = (close1 < open1) &&          // Nến đỏ
-                              (close1 < open2) &&           // Đóng cửa dưới mở cửa nến trước
-                              (open1 > close2) &&           // Mở cửa trên đóng cửa nến trước
-                              (open1 - close1 > MathAbs(close2 - open2) * 0.8); // Thân lớn hơn
-        
-        // Kiểm tra Bearish Pinbar
-        bool bearishPinbar = (high1 > high2) &&            // Tạo higher high
-                           ((high1 - open1) > (close1 - low1) * 2) && // Bóng trên dài
-                           ((high1 - open1) > (open1 - close1) * 2);  // Bóng trên > 2x thân
-        
-        // Kiểm tra Bearish Outside Bar
-        bool bearishOutsideBar = (high1 > high2) && (low1 < low2) && (close1 < open1);
-        
-        if (bearishEngulfing)
-        {
-            if (m_Logger != NULL)
-                m_Logger.LogDebug("Price action confirmed: Bearish Engulfing");
-            
-            return true;
-        }
-        
-        if (bearishPinbar)
-        {
-            if (m_Logger != NULL)
-                m_Logger.LogDebug("Price action confirmed: Bearish Pinbar");
-            
-            return true;
-        }
-        
-        if (bearishOutsideBar)
-        {
-            if (m_Logger != NULL)
-                m_Logger.LogDebug("Price action confirmed: Bearish Outside Bar");
-            
-            return true;
-        }
-        
-        // Kiểm tra rejection tại key level
-        if (IsRejectionAtKeyLevel(false))
-            return true;
-    }
-    
-    return false;
+    return 0.0;
 }
 
 //+------------------------------------------------------------------+
-//| Hàm xác nhận momentum                                           |
+//| Lấy tỷ lệ biến động hiện tại so với trung bình          |
 //+------------------------------------------------------------------+
-bool CMarketProfile::ValidateMomentum(bool isLong)
-{
-    // Lấy RSI slope
-    double rsiSlope = m_CurrentProfile.rsiSlope;
-    
-    // Lấy MACD Histogram và slope
-    double macdHist = m_CurrentProfile.macdHistogram;
-    double macdHistSlope = m_CurrentProfile.macdHistogramSlope;
-    
-    if (isLong)
-    {
-        // Xác nhận momentum cho xu hướng tăng
-        bool rsiConfirm = (m_CurrentProfile.rsiValue > 40.0) && (rsiSlope > 0.25);
-        bool macdConfirm = (macdHist > 0 && macdHistSlope > 0) || (macdHist < 0 && macdHistSlope > 0.2);
-        
-        if (rsiConfirm || macdConfirm)
-        {
-            if (m_Logger != NULL)
-                m_Logger.LogDebug("Momentum confirmed for bullish pullback");
-            
-            return true;
-        }
-    }
-    else
-    {
-        // Xác nhận momentum cho xu hướng giảm
-        bool rsiConfirm = (m_CurrentProfile.rsiValue < 60.0) && (rsiSlope < -0.25);
-        bool macdConfirm = (macdHist < 0 && macdHistSlope < 0) || (macdHist > 0 && macdHistSlope < -0.2);
-        
-        if (rsiConfirm || macdConfirm)
-        {
-            if (m_Logger != NULL)
-                m_Logger.LogDebug("Momentum confirmed for bearish pullback");
-            
-            return true;
-        }
-    }
-    
-    return false;
+double CMarketProfile::GetVolatilityRatio() const {
+    return m_CurrentProfile.atrRatio;
 }
 
 //+------------------------------------------------------------------+
-//| Hàm xác nhận volume                                             |
+//| Kiểm tra xu hướng đủ mạnh                                       |
 //+------------------------------------------------------------------+
-bool CMarketProfile::ValidateVolume()
-{
-    // Get volume data
-    long volumeBuffer[];
-    ArraySetAsSeries(volumeBuffer, true);
-    
-    if (CopyTickVolume(m_Symbol, m_MainTimeframe, 0, 30, volumeBuffer) <= 0)
-    {
-        if (m_Logger != NULL)
-            m_Logger.LogError("MarketProfileManager: Failed to copy volume data - Error " + IntegerToString(GetLastError()));
-        
+bool CMarketProfile::IsTrendStrongEnough() const {
+    // Kiểm tra ADX đủ mạnh
+    if (m_CurrentProfile.adxValue < m_MinAdxValue) {
         return false;
     }
-    
-    // Lấy volume hiện tại và nến trước
-    long currentVolume = volumeBuffer[1]; // Nến đã hoàn thành
-    
-    // Tính volume trung bình 20 nến
-    long avgVolume = 0;
-    int count = 0;
-    
-    for (int i = 2; i < 22 && i < ArraySize(volumeBuffer); i++)
-    {
-        avgVolume += volumeBuffer[i];
-        count++;
-    }
-    
-    if (count == 0)
-        return false;
-    
-    avgVolume = avgVolume / count;
-    
-    // Kiểm tra volume cao hơn trung bình 10%
-    if (currentVolume > avgVolume * 1.1)
-    {
-        if (m_Logger != NULL)
-            m_Logger.LogDebug("Volume confirmed: " + 
-                           DoubleToString((double)currentVolume / (double)avgVolume * 100.0, 1) + 
-                           "% of average");
-        
-        return true;
-    }
-    
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| Hàm kiểm tra rejection tại key level                            |
-//+------------------------------------------------------------------+
-bool CMarketProfile::IsRejectionAtKeyLevel(bool isLong)
-{
-    double currentPrice = m_CloseBuffer[0];
-    double high1 = m_HighBuffer[1];
-    double low1 = m_LowBuffer[1];
-    double open1 = iOpen(m_Symbol, m_MainTimeframe, 1);
-    double close1 = iClose(m_Symbol, m_MainTimeframe, 1);
-    
-    // Kiểm tra Pinbar tại key level
-    bool isPinbar = false;
-    
-    if (isLong)
-    {
-        // Pinbar buy: bóng dưới dài, thân nhỏ ở trên
-        double lowerWick = MathMin(open1, close1) - low1;
-        double upperWick = high1 - MathMax(open1, close1);
-        double body = MathAbs(open1 - close1);
-        
-        isPinbar = (lowerWick > body * 2) && (lowerWick > upperWick * 2);
-    }
-    else
-    {
-        // Pinbar sell: bóng trên dài, thân nhỏ ở dưới
-        double lowerWick = MathMin(open1, close1) - low1;
-        double upperWick = high1 - MathMax(open1, close1);
-        double body = MathAbs(open1 - close1);
-        
-        isPinbar = (upperWick > body * 2) && (upperWick > lowerWick * 2);
-    }
-    
-    // Không phải Pinbar -> không phải rejection
-    if (!isPinbar)
-        return false;
-    
-    // Kiểm tra khoảng cách đến các EMA
-    double distanceToEma34 = MathAbs(currentPrice - m_CurrentProfile.ema34) / m_CurrentProfile.atrCurrent;
-    double distanceToEma89 = MathAbs(currentPrice - m_CurrentProfile.ema89) / m_CurrentProfile.atrCurrent;
-    
-    // Pinbar xảy ra gần EMA
-    if (distanceToEma34 < 0.3 || distanceToEma89 < 0.3)
-    {
-        if (m_Logger != NULL)
-            m_Logger.LogDebug("Price action confirmed: Rejection at key EMA level");
-        
-        return true;
-    }
-    
-    return false;
-
-    // Kiểm tra ADX
-    if (m_CurrentProfile.adxValue < 20)
-        return false;
     
     // Kiểm tra trend score
-    if (m_CurrentProfile.trendScore < 0.5)
+    if (m_CurrentProfile.trendScore < 0.6) {
         return false;
+    }
     
-    // Kiểm tra MTF alignment
-    if (m_CurrentProfile.mtfAlignment == MTF_ALIGNMENT_CONFLICTING)
-        return false;
+    // Kiểm tra EMA alignment
+    bool emaAligned = false;
+    switch(m_CurrentProfile.trend) {
+        case TREND_UP_NORMAL:
+        case TREND_UP_STRONG:
+        case TREND_UP_PULLBACK:
+            emaAligned = (m_CurrentProfile.ema34 > m_CurrentProfile.ema89) && 
+                        (m_CurrentProfile.ema89 > m_CurrentProfile.ema200);
+            break;
+            
+        case TREND_DOWN_NORMAL:
+        case TREND_DOWN_STRONG:
+        case TREND_DOWN_PULLBACK:
+            emaAligned = (m_CurrentProfile.ema34 < m_CurrentProfile.ema89) && 
+                        (m_CurrentProfile.ema89 < m_CurrentProfile.ema200);
+            break;
+            
+        default:
+            return false; // Sideway
+    }
+    
+    return emaAligned;
+}
+
+// [CheckLowMomentum đã được định nghĩa ở dòng 1312]
+
+// [IsChoppyMarket đã được định nghĩa ở dòng 1274]
+
+//+------------------------------------------------------------------+
+//| Khởi tạo các chỉ báo                                      |
+//+------------------------------------------------------------------+
+bool CMarketProfile::InitializeAllIndicators(bool isHigherTimeframe)
+{
+    // Xác định khung thời gian cần khởi tạo
+    ENUM_TIMEFRAMES timeframe = isHigherTimeframe ? m_HigherTimeframe : m_MainTimeframe;
+    
+    if (m_Logger != NULL) {
+        string logMessage = StringFormat("MarketProfileManager: Initializing indicators for %s timeframe %s", 
+                               m_Symbol, 
+                               EnumToString(timeframe));
+        m_Logger.LogInfo(logMessage);
+    }
+    
+    // Khởi tạo các handle chỉ báo khác nhau dựa vào isHigherTimeframe
+    if (isHigherTimeframe) {
+        // Khởi tạo các chỉ báo cho khung thời gian cao hơn (H4)
+        m_HandleEmaFastH4 = iMA(m_Symbol, timeframe, m_EmaFast, 0, MODE_EMA, PRICE_CLOSE);
+        m_HandleEmaMediumH4 = iMA(m_Symbol, timeframe, m_EmaMedium, 0, MODE_EMA, PRICE_CLOSE);
+        m_HandleEmaSlowH4 = iMA(m_Symbol, timeframe, m_EmaSlow, 0, MODE_EMA, PRICE_CLOSE);
+        m_HandleAtrH4 = iATR(m_Symbol, timeframe, m_AtrPeriod);
+        m_HandleAdxH4 = iADX(m_Symbol, timeframe, m_AdxPeriod);
+        
+        // Kiểm tra nếu có lỗi khởi tạo
+        if (m_HandleEmaFastH4 == INVALID_HANDLE ||
+            m_HandleEmaMediumH4 == INVALID_HANDLE ||
+            m_HandleEmaSlowH4 == INVALID_HANDLE ||
+            m_HandleAtrH4 == INVALID_HANDLE ||
+            m_HandleAdxH4 == INVALID_HANDLE) {
+                
+            if (m_Logger != NULL) {
+                m_Logger.LogError("MarketProfileManager: Failed to initialize higher timeframe indicators");
+            }
+            
+            return false;
+        }
+    } else {
+        // Khởi tạo các chỉ báo cho khung thời gian chính (H1)
+        m_HandleEmaFast = iMA(m_Symbol, timeframe, m_EmaFast, 0, MODE_EMA, PRICE_CLOSE);
+        m_HandleEmaMedium = iMA(m_Symbol, timeframe, m_EmaMedium, 0, MODE_EMA, PRICE_CLOSE);
+        m_HandleEmaSlow = iMA(m_Symbol, timeframe, m_EmaSlow, 0, MODE_EMA, PRICE_CLOSE);
+        m_HandleAtr = iATR(m_Symbol, timeframe, m_AtrPeriod);
+        m_HandleAdx = iADX(m_Symbol, timeframe, m_AdxPeriod);
+        m_HandleRsi = iRSI(m_Symbol, timeframe, m_RsiPeriod, PRICE_CLOSE);
+        m_HandleMacd = iMACD(m_Symbol, timeframe, m_MacdFast, m_MacdSlow, m_MacdSignal, PRICE_CLOSE);
+        m_HandleBBW = iBands(m_Symbol, timeframe, m_BBWPeriod, 0, 2, PRICE_CLOSE); // Using iBands for BBW
+        
+        // Kiểm tra nếu có lỗi khởi tạo
+        if (m_HandleEmaFast == INVALID_HANDLE ||
+            m_HandleEmaMedium == INVALID_HANDLE ||
+            m_HandleEmaSlow == INVALID_HANDLE ||
+            m_HandleAtr == INVALID_HANDLE ||
+            m_HandleAdx == INVALID_HANDLE ||
+            m_HandleRsi == INVALID_HANDLE ||
+            m_HandleMacd == INVALID_HANDLE ||
+            m_HandleBBW == INVALID_HANDLE) {
+                
+            if (m_Logger != NULL) {
+                m_Logger.LogError("MarketProfileManager: Failed to initialize indicators");
+            }
+            
+            return false;
+        }
+    }
+    
+    if (m_Logger != NULL) {
+        m_Logger.LogInfo(StringFormat("MarketProfileManager: Successfully initialized %s timeframe indicators", 
+                                EnumToString(timeframe)));
+    }
     
     return true;
 }
 
-//+------------------------------------------------------------------+
-//| Hàm lấy giá trị EMA                                             |
-//+------------------------------------------------------------------+
-double CMarketProfile::GetEMA(int period, int shift)
-{
-    // Lấy giá trị EMA dựa trên chu kỳ
-    if (period == m_EmaFast)
-        return m_EmaFastBuffer[shift];
-    else if (period == m_EmaMedium)
-        return m_EmaMediumBuffer[shift];
-    else if (period == m_EmaSlow)
-        return m_EmaSlowBuffer[shift];
-    
-    return 0;
-}
+} // end of namespace ApexPullback
 
-//+------------------------------------------------------------------+
-//| Hàm lấy giá trị EMA từ timeframe cao hơn                        |
-//+------------------------------------------------------------------+
-double CMarketProfile::GetHigherTimeframeEMA(int period, int shift)
-{
-    if (!m_UseMultiTimeframe)
-        return 0;
-    
-    // Lấy giá trị EMA dựa trên chu kỳ
-    if (period == m_EmaFast)
-        return m_EmaFastBufferH4[shift];
-    else if (period == m_EmaMedium)
-        return m_EmaMediumBufferH4[shift];
-    else if (period == m_EmaSlow)
-        return m_EmaSlowBufferH4[shift];
-    
-    return 0;
-}
-
-//+------------------------------------------------------------------+
-//| Hàm giải phóng handle chỉ báo                                   |
-//+------------------------------------------------------------------+
-void CMarketProfile::ReleaseIndicatorHandles()
-{
-    // Giải phóng handle H1
-    if (m_HandleEmaFast != INVALID_HANDLE) IndicatorRelease(m_HandleEmaFast);
-    if (m_HandleEmaMedium != INVALID_HANDLE) IndicatorRelease(m_HandleEmaMedium);
-    if (m_HandleEmaSlow != INVALID_HANDLE) IndicatorRelease(m_HandleEmaSlow);
-    if (m_HandleAtr != INVALID_HANDLE) IndicatorRelease(m_HandleAtr);
-    if (m_HandleAdx != INVALID_HANDLE) IndicatorRelease(m_HandleAdx);
-    if (m_HandleRsi != INVALID_HANDLE) IndicatorRelease(m_HandleRsi);
-    if (m_HandleMacd != INVALID_HANDLE) IndicatorRelease(m_HandleMacd);
-    
-    // Giải phóng handle H4
-    if (m_HandleEmaFastH4 != INVALID_HANDLE) IndicatorRelease(m_HandleEmaFastH4);
-    if (m_HandleEmaMediumH4 != INVALID_HANDLE) IndicatorRelease(m_HandleEmaMediumH4);
-    if (m_HandleEmaSlowH4 != INVALID_HANDLE) IndicatorRelease(m_HandleEmaSlowH4);
-    if (m_HandleAtrH4 != INVALID_HANDLE) IndicatorRelease(m_HandleAtrH4);
-    if (m_HandleAdxH4 != INVALID_HANDLE) IndicatorRelease(m_HandleAdxH4);
-    
-    // Reset handles về INVALID_HANDLE
-    m_HandleEmaFast = INVALID_HANDLE;
-    m_HandleEmaMedium = INVALID_HANDLE;
-    m_HandleEmaSlow = INVALID_HANDLE;
-    m_HandleAtr = INVALID_HANDLE;
-    m_HandleAdx = INVALID_HANDLE;
-    m_HandleRsi = INVALID_HANDLE;
-    m_HandleMacd = INVALID_HANDLE;
-    
-    m_HandleEmaFastH4 = INVALID_HANDLE;
-    m_HandleEmaMediumH4 = INVALID_HANDLE;
-    m_HandleEmaSlowH4 = INVALID_HANDLE;
-    m_HandleAtrH4 = INVALID_HANDLE;
-    m_HandleAdxH4 = INVALID_HANDLE;
-}
-
-//+------------------------------------------------------------------+
-//| Hàm hỗ trợ - kiểm tra nến mới                                   |
-//+------------------------------------------------------------------+
-bool IsNewBar()
-{
-    static datetime last_time = 0;
-    datetime current_time = iTime(_Symbol, PERIOD_CURRENT, 0);
-    
-    if (last_time == 0)
-    {
-        last_time = current_time;
-        return false;
-    }
-    
-    if (current_time != last_time)
-    {
-        last_time = current_time;
-        return true;
-    }
-    
-    return false;
-}
+#endif // _MARKET_PROFILE_MQH_

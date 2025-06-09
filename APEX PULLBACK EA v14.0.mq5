@@ -1,1876 +1,1594 @@
 //+------------------------------------------------------------------+
-//|   APEX PULLBACK EA v14.1 - Professional Edition                  |
-//|   Chiến lược EMA Pullback được tối ưu hóa với Market Profile     |
-//|   Module hóa xuất sắc - Quản lý rủi ro đa tầng - EA chuẩn Prop   |
+//|   APEX PULLBACK EA v14.0 - Professional Edition                  |
+//|   Module hóa xuất sắc - Quản lý rủi ro - EA chuẩn Prop   |
 //|   Copyright 2025, APEX Forex - Mèo Cọc                           |
 //+------------------------------------------------------------------+
-//| APEX PULLBACK EA v14.0                                          |
-//| Copyright 2023, Forex Robot Easy Team                            |
-//| https://www.forexroboteasy.com                                  |
-//+------------------------------------------------------------------+
-#property copyright "Copyright 2023, Forex Robot Easy Team"
-#property link      "https://www.forexroboteasy.com"
-#property version   "14.0"
-#property strict
 
-// Khai báo các thư viện cơ bản MQL5
-#include <Trade/Trade.mqh>          // Thư viện giao dịch
-#include <Trade/PositionInfo.mqh>   // Thư viện quản lý vị thế
-#include <Trade/SymbolInfo.mqh>     // Thư viện thông tin symbol
-#include <Trade/AccountInfo.mqh>    // Thư viện thông tin tài khoản
-#include <Arrays/ArrayObj.mqh>      // Thư viện mảng đối tượng
-#include <Charts/Chart.mqh>         // Thư viện biểu đồ
+// =====================================================================================================================
+// Khai báo thư viện MQL
+// =====================================================================================================================
+// --- Standard MQL5 Libraries ---
+#include <Trade/Trade.mqh>                // CTrade class for trading operations
+#include <Trade/PositionInfo.mqh>         // CPositionInfo for position data
+#include <Trade/SymbolInfo.mqh>           // CSymbolInfo for symbol properties
+#include <Trade/AccountInfo.mqh>          // CAccountInfo for account details
+#include <Arrays/ArrayObj.mqh>            // CArrayObj for collections of objects
+#include <Arrays/ArrayDouble.mqh>         // For dynamic arrays of doubles
+#include <Arrays/ArrayString.mqh>         // For dynamic arrays of strings
+#include <Arrays/ArrayInt.mqh>            // For dynamic arrays of integers
+#include <Object.mqh>                     // Base class for chart objects
+#include <Charts/Chart.mqh>               // CChart class for chart operations
+#include <ChartObjects/ChartObject.mqh>   // CChartObject base class
+#include <ChartObjects/ChartObjectsLines.mqh> // Line objects
+#include <ChartObjects/ChartObjectsShapes.mqh>// Shape objects
+#include <Math/Stat/Math.mqh>             // Mathematical functions
+#include <Math/Stat/Stat.mqh>             // Statistical functions
+#include <Files/FileTxt.mqh>              // For text file operations (e.g., CSV logging)
 
-//+------------------------------------------------------------------+
-//| Includes & Modules                                               |
-//+------------------------------------------------------------------+
+// --- Custom EA Core Includes ---
+// QUAN TRỌNG: Các tệp này định nghĩa các thành phần cốt lõi và nên được include trước các module cụ thể.
+// Namespace.mqh nên được include trước khi khai báo namespace.
+#include "Namespace.mqh"                // Defines namespaces (e.g., ApexPullback) and related macros
+#include "CommonDefinitions.mqh"        // General definitions, possibly macros like TREND_NONE, SIGNAL_NONE
+#include "Constants.mqh"                // EA-specific constants
+#include "Enums.mqh"                    // Enumerations (e.g., ENUM_EA_STATE, ENUM_TRAILING_MODE)
+#include "CommonStructs.mqh"            // Common data structures (e.g., MarketProfileData, PositionMetadata)
+#include "FunctionDefinitions.mqh"      // Global utility functions (if any are used by this module)
+#include "MathHelper.mqh"               // Math utility functions (if any are used by this module)
 
-// 1. Các file định nghĩa cơ bản
-#include "Enums.mqh"                       // Các enum
-#include "CommonStructs.mqh"               // Các cấu trúc dữ liệu
-#include "Inputs.mqh"                      // Các tham số đầu vào
-
-// Forward declarations cho các class trong namespace ApexPullback
+// Forward declarations to resolve class dependencies
 namespace ApexPullback {
     class CLogger;
-    class CMarketProfile;
+    class CDashboard;
+    class CRiskManager;
+    class CSessionManager;
+    class CNewsFilter;
     class CAssetProfileManager;
-    class CAssetProfiler;
-    class CPatternDetector;
+    struct AssetProfile;
+    struct MarketProfileData;
+    class CMarketProfile;
     class CSwingPointDetector;
-    class CSwingDetector;
     class CPositionManager;
     class CTradeManager;
-    class CRiskManager;
+    class CPatternDetector;
     class CPerformanceTracker;
-    class CSessionManager;
-    class CDashboard;
-    class CNewsFilter;
-    class CRiskOptimizer;
-    class CIndicatorUtils;
+    class CPortfolioManager; // Forward declaration for PortfolioManager
+    struct IndicatorHandles;
 }
 
-// Bắt đầu implementation EA
+//+------------------------------------------------------------------+
+//| EA Context Structure                                             |
+//+------------------------------------------------------------------+
+namespace ApexPullback {
+struct EAContext {
+    CLogger*             Logger;
+    CTradeManager*       TradeManager;
+    CPositionManager*    PositionManager;
+    CRiskManager*        RiskManager;
+    CDashboard*          Dashboard;
+    CSwingPointDetector* SwingDetector;
+    CMarketProfile*      MarketProfile;
+    CPerformanceTracker* PerformanceTracker;
+    CAssetProfileManager* AssetProfileManager;
+    CNewsFilter*         NewsFilter;
+    CSessionManager*     SessionManager;
+    CPatternDetector*    PatternDetector;
+    CIndicatorUtils*     IndicatorUtils;
+    CAssetProfiler*      AssetProfiler; // Added AssetProfiler
+    CPortfolioManager*   PortfolioManager; // Added PortfolioManager
 
-// Sử dụng cách này thay vì using namespace để tránh xung đột
-// Định nghĩa các enum cần thiết cho EA
+    // Key state variables
+    MarketProfileData    CurrentProfileData;
+    datetime             LastMarketDataUpdate;
+    datetime             LastTickTime;
+    datetime             LastHeartbeatTime;
+    datetime             LastPerformanceUpdate;
+    datetime             SpreadCacheTime;
+    double               CachedSpread;
+    datetime             LastDashboardUpdateTime; // For UpdateDashboardIfNeeded
+    int                  DashboardErrorCount;   // For UpdateDashboardIfNeeded
+
+    bool                 IsInitialized;
+    bool                 IsShuttingDown;
+    bool                 EmergencyStop;
+    bool                 AllowNewTrades; // Renamed from g_AllowNewTrades
+    bool                 DisplayDashboard; // Moved from global g_DisplayDashboard
+
+    long                 TickCounter;
+    int                  ErrorCounter;
+    int                  SuccessfulTrades;
+    int                  FailedTrades;
+    int                  DayTrades;
+    double               CurrentDrawdownPct;
+    datetime             LastAdaptationTime;        // Thời gian thích ứng thị trường cuối cùng
+    datetime             LastAssetProfileUpdateTime;// Thời gian cập nhật hồ sơ tài sản cuối cùng
+
+    // Constructor to initialize pointers to NULL and default values
+    EAContext() : Logger(NULL), TradeManager(NULL), PositionManager(NULL), RiskManager(NULL),
+                  Dashboard(NULL), SwingDetector(NULL), MarketProfile(NULL), PerformanceTracker(NULL),
+                  AssetProfileManager(NULL), NewsFilter(NULL), SessionManager(NULL), PatternDetector(NULL),
+                  IndicatorUtils(NULL), AssetProfiler(NULL), PortfolioManager(NULL),
+                  LastMarketDataUpdate(0), LastTickTime(0), LastHeartbeatTime(0),
+                  LastPerformanceUpdate(0), SpreadCacheTime(0), CachedSpread(0.0),
+                  LastDashboardUpdateTime(0), DashboardErrorCount(0),
+                  IsInitialized(false), IsShuttingDown(false), EmergencyStop(false), AllowNewTrades(true),
+                  DisplayDashboard(true), // Initialize DisplayDashboard
+                  TickCounter(0), ErrorCounter(0), SuccessfulTrades(0), FailedTrades(0), DayTrades(0),
+                  CurrentDrawdownPct(0.0),
+                  LastAdaptationTime(0), LastAssetProfileUpdateTime(0) { // Initialize new members
+        // CurrentProfileData will be default initialized
+    }
+};
+
+EAContext* g_EAContext = NULL; // Global EA context pointer
+} // End namespace ApexPullback
+
+
+// Include các module chính theo thứ tự phụ thuộc
+#include "Logger.mqh"
+#include "Dashboard.mqh"
+#include "RiskManager.mqh"
+#include "SessionManager.mqh"
+#include "NewsFilter.mqh"
+#include "AssetProfileManager.mqh"
+#include "MarketProfile.mqh"
+#include "SwingPointDetector.mqh"
+#include "PositionManager.mqh"
+#include "TradeManager.mqh"
+#include "PatternDetector.mqh"
+#include "PerformanceTracker.mqh"
+#include "IndicatorUtils.mqh"       // Module quản lý và khởi tạo indicator
+#include "PortfolioManager.mqh"     // Module quản lý danh mục đầu tư
+
+// Khai báo các tham số đầu vào
+input string  EAName              = "APEX Pullback EA v14.0"; // Tên EA
+input string  EAVersion           = "14.0";                    // Phiên bản
+input int     MagicNumber         = 1234567;                  // Magic Number
+input string  OrderComment        = "APEX_v14";               // Ghi chú lệnh
+input bool    InpAllowNewTrades      = true;                     // Cho phép vào lệnh mới (sẽ được gán cho g_EAContext.AllowNewTrades)
+input bool    InpEnableDetailedLogs  = false;                    // Bật log chi tiết (sẽ được dùng để cấu hình Logger)
+input bool    EnableCsvLog        = false;                    // Ghi log vào file CSV
+input string  CsvLogFilename      = "ApexPullback_Log.csv";   // Tên file CSV log
+// input bool   InpDisplayDashboard = true;                // Hiển thị dashboard (Đã có trong EAContext, sẽ lấy từ input khác nếu cần)
+input int     DashboardTheme      = 0;                        // Chủ đề Dashboard
+input bool    AlertsEnabled       = true;                     // Bật cảnh báo
+input bool    SendNotifications   = false;                    // Gửi thông báo đẩy
+input bool    SendEmailAlerts     = false;                    // Gửi email
+input bool    EnableTelegramNotify = false;                   // Bật thông báo Telegram
+input string  TelegramBotToken    = "";                       // Token Bot Telegram
+input string  TelegramChatID      = "";                       // ID Chat Telegram
+input bool    TelegramImportantOnly = true;                   // Chỉ gửi thông báo quan trọng
+input bool    DisableDashboardInBacktest = false;             // Tắt dashboard trong backtest
+input int     MainTimeframe       = PERIOD_CURRENT;           // Khung thời gian chính
+input int     EMA_Fast            = 34;                       // EMA nhanh
+input int     EMA_Medium          = 89;                       // EMA trung bình
+input int     EMA_Slow            = 200;                      // EMA chậm
+input int     ATR_Period          = 14;                       // Giai đoạn ATR
+input bool    UseMultiTimeframe   = true;                     // Sử dụng đa khung thời gian
+input int     HigherTimeframe     = PERIOD_H4;                // Khung thời gian cao hơn
+input int     TrendDirection      = 0;                        // Hướng xu hướng giao dịch
+input bool    EnablePriceAction   = true;                     // Kích hoạt xác nhận Price Action
+input bool    EnableSwingLevels   = true;                     // Sử dụng Swing Levels
+
+//+------------------------------------------------------------------+
+//| Các hàm khởi tạo indicator và cache - nằm trong namespace        |
+//+------------------------------------------------------------------+
+namespace ApexPullback {
+
+// Session types - định nghĩa trong namespace
 enum ENUM_SESSION_TYPE {
-    SESSION_ASIAN,       // Phiên Á (Tokyo)
-    SESSION_EUROPEAN,    // Phiên Âu (London)
-    SESSION_AMERICAN     // Phiên Mỹ (New York)
+    SESSION_TYPE_NONE = 0,
+    SESSION_TYPE_ASIAN = 1,
+    SESSION_TYPE_LONDON = 2,
+    SESSION_TYPE_NEWYORK = 3,
+    SESSION_TYPE_OVERLAP = 4
 };
 
-// Helper functions for finding highest and lowest prices
-double FindHighest(int count) {
-    double highest = DBL_MIN;
-    for (int i = 0; i < count; i++) {
-        double high = iHigh(Symbol(), Period(), i);
-        if (high > highest) highest = high;
+//+------------------------------------------------------------------+
+//| Kiểm tra xem thời gian hiện tại có cho phép giao dịch                   |
+//+------------------------------------------------------------------+
+bool IsAllowedTradingSession() {
+    if (ApexPullback::g_EAContext == NULL || ApexPullback::g_EAContext.SessionManager == NULL) {
+        if (ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.Logger != NULL) {
+            ApexPullback::g_EAContext.Logger.LogWarning("SessionManager is not initialized in IsAllowedTradingSession. Defaulting to true.");
+        } else {
+            Print("Warning: SessionManager is not initialized in IsAllowedTradingSession. Defaulting to true.");
+        }
+        return true; // Default to true to avoid blocking trades if not properly set up
     }
-    return highest;
+    return ApexPullback::g_EAContext.SessionManager.IsSessionActive();
 }
 
-double FindLowest(int count) {
-    double lowest = DBL_MAX;
-    for (int i = 0; i < count; i++) {
-        double low = iLow(Symbol(), Period(), i);
-        if (low < lowest) lowest = low;
+//+------------------------------------------------------------------+
+//| Kiểm tra xem thời gian hiện tại có ảnh hưởng tin tức kinh tế       |
+//+------------------------------------------------------------------+
+bool IsNewsImpactPeriod() {
+    if (ApexPullback::g_EAContext == NULL || ApexPullback::g_EAContext.NewsFilter == NULL) {
+        if (ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.Logger != NULL) {
+            ApexPullback::g_EAContext.Logger.LogWarning("NewsFilter is not initialized in IsNewsImpactPeriod. Defaulting to false.");
+        } else {
+            Print("Warning: NewsFilter is not initialized in IsNewsImpactPeriod. Defaulting to false.");
+        }
+        return false; // Default to false if not properly set up
     }
-    return lowest;
+    return ApexPullback::g_EAContext.NewsFilter.IsInNewsWindow();
 }
 
-ENUM_SESSION_TYPE DetermineSession(datetime time) {
-    // Xác định phiên giao dịch dựa vào thời gian
-    MqlDateTime dt;
-    TimeToStruct(time, dt);
-    int hour = dt.hour;
-    
-    if (hour >= 0 && hour < 8) {
-        return SESSION_ASIAN;
-    } else if (hour >= 8 && hour < 16) {
-        return SESSION_EUROPEAN;
-    } else {
-        return SESSION_AMERICAN;
-    }
-}
+// GlobalInitializeIndicatorCache đã được định nghĩa trong IndicatorUtils.mqh
 
-// 2. Các module cơ bản
-#include "Logger.mqh"                      // Bộ ghi log
-#include "IndicatorUtils.mqh"              // Tiện ích indicator
-#include "NewsFilter.mqh"                  // Bộ lọc tin tức
+// InitializeIndicators đã được định nghĩa trong IndicatorUtils.mqh
 
-// 3. Các module phân tích thị trường
-#include "MarketProfile.mqh"               // Phân tích Market Profile
-#include "SwingPointDetector.mqh"          // Phát hiện Swing
-#include "PatternDetector.mqh"             // Phát hiện mẫu hình
 
-// 4. Các module quản lý giao dịch
-#include "RiskManager.mqh"                 // Quản lý rủi ro
-#include "PositionManager.mqh"             // Quản lý vị thế
-#include "TradeManager.mqh"                // Quản lý giao dịch
-#include "RiskOptimizer.mqh"               // Tối ưu hóa rủi ro
+} // Kết thúc namespace ApexPullback
+input double  MinPullbackPercent  = 30.0;                     // % Pullback tối thiểu
+input double  MaxPullbackPercent  = 70.0;                     // % Pullback tối đa
+input bool    RequirePriceActionConfirmation = true;          // Yêu cầu xác nhận Price Action
+input bool    RequireMomentumConfirmation = true;             // Yêu cầu xác nhận Momentum
+input bool    RequireVolumeConfirmation = false;              // Yêu cầu xác nhận Volume
+input bool    EnableMarketRegimeFilter = true;                // Bật lọc Market Regime
+input bool    EnableVolatilityFilter = true;                  // Lọc biến động bất thường
+input bool    EnableAdxFilter = false;                        // Lọc ADX
+input int     MarketPreset = 0;                               // Preset cấu hình thị trường
+input double  MinAdxValue = 20.0;                             // Giá trị ADX tối thiểu
+input double  MaxAdxValue = 50.0;                             // Giá trị ADX tối đa
+input double  VolatilityThreshold = 2.0;                      // Ngưỡng biến động (xATR)
+input double  MaxSpreadPoints = 50.0;                         // Spread tối đa (points)
+input double  RiskPercent = 1.0;                              // Risk % mỗi lệnh
+input double  StopLoss_ATR = 1.5;                             // Hệ số ATR cho Stop Loss
+input double  TakeProfit_RR = 2.0;                            // Tỷ lệ R:R cho Take Profit
+input bool    PropFirmMode = false;                          // Chế độ Prop Firm
+input double  DailyLossLimit = 5.0;                          // Giới hạn lỗ ngày (%)
+input double  MaxDrawdown = 10.0;                             // Drawdown tối đa (%)
+input int     MaxTradesPerDay = 5;                           // Số lệnh tối đa/ngày
+input int     MaxConsecutiveLosses = 3;                      // Số lần thua liên tiếp tối đa
+input int     MaxPositions = 1;                              // Số vị thế tối đa
+input double  DrawdownReduceThreshold = 5.0;                 // Ngưỡng DD để giảm risk (%)
+input bool    EnableTaperedRisk = true;                      // Giảm risk từ từ (không đột ngột)
+input double  MinRiskMultiplier = 0.3;                       // Hệ số risk tối thiểu khi DD cao
+input int     EntryMode = 0;                                 // Chế độ vào lệnh
+input bool    UsePartialClose = false;                       // Sử dụng đóng từng phần
+input double  PartialCloseR1 = 1.0;                          // R-multiple cho đóng phần 1
+input double  PartialCloseR2 = 2.0;                          // R-multiple cho đóng phần 2
+input double  PartialClosePercent1 = 50.0;                   // % đóng ở mức R1
+input double  PartialClosePercent2 = 50.0;                   // % đóng ở mức R2
+input bool    UseAdaptiveTrailing = true;                    // Trailing thích ứng theo regime
+input int     TrailingMode = 0;                              // Chế độ trailing mặc định
+input double  TrailingAtrMultiplier = 2.0;                   // Hệ số ATR cho trailing
+input double  BreakEvenAfterR = 0.5;                         // Chuyển BE sau (R-multiple)
+input double  BreakEvenBuffer = 5.0;                         // Buffer cho breakeven (points)
+input bool    UseAssetProfiler = true;                       // Sử dụng Asset Profiler
+input int     UpdateFrequencySeconds = 5;                    // Tần suất cập nhật Dashboard (giây)
+input bool    SaveStatistics = true;                         // Lưu thống kê khi kết thúc
+input bool    EnableIndicatorCache = true;                   // Bật cache indicator
 
-// 5. Các module bổ sung
-#include "Dashboard.mqh"                   // Bảng thông tin
-#include "PerformanceTracker.mqh"          // Theo dõi hiệu suất
-#include "SessionManager.mqh"              // Quản lý phiên giao dịch
-#include "AssetProfileManager.mqh"         // Quản lý hồ sơ tài sản
-#include "AssetProfiler.mqh"               // Hồ sơ tài sản
-
-// 5. Include file inputs ở đây để các biến input được khai báo sau các module
-#include "Inputs.mqh"                      // Các tham số đầu vào
-
-// Forward declarations for classes to fix "expected a type specifier" errors
+// Định nghĩa namespace variables trong namespace ApexPullback
 namespace ApexPullback {
-    class CLogger;
-    class CMarketProfile;
-    class CAssetProfileManager;
-    class CPatternDetector;
-    class CSwingPointDetector;
-    class CPositionManager;
-    class CTradeManager;
-    class CRiskManager;
-    class CPerformanceTracker;
-    class CSessionManager;
-    class CDashboard;
-    class CNewsFilter;
+    // Global variables have been moved to EAContext.
+    // Access them via g_EAContext.variableName (since g_EAContext is a pointer, it would be g_EAContext->variableName, but the struct itself is often passed by value or reference in functions)
+    // Indicator handles are now managed by CIndicatorUtils within g_EAContext
+
+    // Các hàm inline hỗ trợ đã được chuyển sang sử dụng g_EAContext hoặc loại bỏ nếu không cần thiết
+    // Example: inline bool IsAlertsEnabled() { return g_EAContext != NULL && g_EAContext.AlertsEnabled; }
+    // Direct access like ApexPullback::g_EAContext.AlertsEnabled is preferred.
+
+    // Placeholder for any remaining essential global-like accessors or definitions within this namespace
+    // that are not directly tied to the removed EA state variables.
 }
 
-// Khai báo các biến toàn cục cho các đối tượng
 
-// --- Khai báo biến toàn cục tham chiếu đến các input ---
-// Các biến từ "THÔNG TIN CHUNG"
-extern string EAName;             // Tên EA
-extern string EAVersion;          // Phiên bản
-extern int MagicNumber;           // Magic Number
-extern string OrderComment;       // Ghi chú lệnh
-extern bool AllowNewTrades;       // Cho phép vào lệnh mới
 
-// Các biến từ "HIỂN THỊ & THÔNG BÁO"
-extern bool EnableDetailedLogs;   // Bật log chi tiết
-extern bool EnableCsvLog;         // Ghi log vào file CSV
-extern string CsvLogFilename;     // Tên file CSV log
-extern bool DisplayDashboard;     // Hiển thị dashboard
-extern ENUM_DASHBOARD_THEME DashboardTheme; // Chủ đề Dashboard
-extern bool AlertsEnabled;        // Bật cảnh báo
-extern bool SendNotifications;    // Gửi thông báo đẩy
-extern bool SendEmailAlerts;      // Gửi email
-extern bool EnableTelegramNotify; // Bật thông báo Telegram
-extern string TelegramBotToken;   // Token Bot Telegram
-extern string TelegramChatID;     // ID Chat Telegram
-extern bool TelegramImportantOnly; // Chỉ gửi thông báo quan trọng
-extern bool DisableDashboardInBacktest; // Tắt dashboard trong backtest
 
-// Các biến từ "CHIẾN LƯỢC CỐT LÕI"
-extern ENUM_TIMEFRAMES MainTimeframe; // Khung thời gian chính
-extern int EMA_Fast;              // EMA nhanh
-extern int EMA_Medium;            // EMA trung bình
-extern int EMA_Slow;              // EMA chậm
-extern bool UseMultiTimeframe;    // Sử dụng đa khung thời gian
-extern ENUM_TIMEFRAMES HigherTimeframe; // Khung thời gian cao hơn
-extern ENUM_TREND_TYPE TrendDirection; // Hướng xu hướng giao dịch
 
-// Các biến từ "ĐỊNH NGHĨA PULLBACK CHẤT LƯỢNG CAO"
-extern bool EnablePriceAction;    // Kích hoạt xác nhận Price Action
-extern bool EnableSwingLevels;    // Sử dụng Swing Levels
-extern double MinPullbackPercent; // % Pullback tối thiểu
-extern double MaxPullbackPercent; // % Pullback tối đa
-extern bool RequirePriceActionConfirmation; // Yêu cầu xác nhận Price Action
-extern bool RequireMomentumConfirmation; // Yêu cầu xác nhận Momentum
-extern bool RequireVolumeConfirmation; // Yêu cầu xác nhận Volume
 
-// Các biến từ "BỘ LỌC THỊ TRƯỜNG"
-extern bool EnableMarketRegimeFilter; // Bật lọc Market Regime
-extern bool EnableVolatilityFilter; // Lọc biến động bất thường
-extern bool EnableAdxFilter;      // Lọc ADX
-extern double MinAdxValue;        // Giá trị ADX tối thiểu
-extern double MaxAdxValue;        // Giá trị ADX tối đa
-extern double VolatilityThreshold; // Ngưỡng biến động (xATR)
-extern ENUM_MARKET_PRESET MarketPreset; // Preset thị trường
-extern double MaxSpreadPoints;    // Spread tối đa (points)
 
-// Các biến từ "QUẢN LÝ RỦI RO"
-extern double RiskPercent;        // Risk % mỗi lệnh
-extern double SL_ATR;             // Hệ số ATR cho Stop Loss
-extern double TP_RR;              // Tỷ lệ R:R cho Take Profit
-extern bool PropFirmMode;         // Chế độ Prop Firm
-extern double DailyLossLimit;     // Giới hạn lỗ ngày (%)
-extern double MaxDrawdown;        // Drawdown tối đa (%)
-extern int MaxTradesPerDay;       // Số lệnh tối đa/ngày
-extern int MaxConsecutiveLosses;  // Số lần thua liên tiếp tối đa
-extern int MaxPositions;          // Số vị thế tối đa
+// =====================================================================================================================
+// Định nghĩa các enum cần thiết và hằng số
+// =====================================================================================================================
 
-// Các biến từ "ĐIỀU CHỈNH RISK THEO DRAWDOWN"
-extern double DrawdownReduceThreshold; // Ngưỡng DD để giảm risk (%)
-extern bool EnableTaperedRisk;    // Giảm risk từ từ (không đột ngột)
-extern double MinRiskMultiplier;  // Hệ số risk tối thiểu khi DD cao
+// Sử dụng các hằng số cho Log Level và Alert
+#ifndef ALERT_LEVEL_CRITICAL
+#define ALERT_LEVEL_CRITICAL 3
+#endif
 
-// Các biến từ "QUẢN LÝ VỊ THẾ"
-extern ENUM_ENTRY_MODE EntryMode; // Chế độ vào lệnh
-extern bool UsePartialClose;      // Sử dụng đóng từng phần
-extern double PartialCloseR1;     // R-multiple cho đóng phần 1
-extern double PartialCloseR2;     // R-multiple cho đóng phần 2
-extern double PartialClosePercent1; // % đóng ở mức R1
-extern double PartialClosePercent2; // % đóng ở mức R2
+// Định nghĩa các hằng số đơn giản hóa cho TREND và REGIME để tránh lỗi biên dịch
+#define TREND_BULLISH      ENUM_MARKET_TREND::TREND_UP_STRONG
+#define TREND_BEARISH      ENUM_MARKET_TREND::TREND_DOWN_STRONG
+#define TREND_NEUTRAL      ENUM_MARKET_TREND::TREND_SIDEWAY
+#define REGIME_TRENDING    ENUM_MARKET_REGIME::REGIME_TRENDING
+#define REGIME_RANGING     ENUM_MARKET_REGIME::REGIME_RANGING
+#define REGIME_TRANSITIONING ENUM_MARKET_REGIME::REGIME_VOLATILE_EXPANSION
 
-// Các biến từ "TRAILING STOP"
-extern bool UseAdaptiveTrailing;  // Trailing thích ứng theo regime
-extern ENUM_TRAILING_MODE TrailingMode; // Chế độ trailing mặc định
-extern double TrailingAtrMultiplier; // Hệ số ATR cho trailing
-extern double BreakEvenAfterR;   // Chuyển BE sau (R-multiple)
-extern double BreakEvenBuffer;    // Buffer cho breakeven (points)
+// Log level constants are now defined as enums in Logger.mqh
+// Removed conflicting #define statements
 
-// Các biến từ "CHANDELIER EXIT"
-extern bool UseChandelierExit;    // Kích hoạt Chandelier Exit
-extern int ChandelierPeriod;      // Số nến lookback Chandelier
-extern double ChandelierMultiplier; // Hệ số ATR Chandelier
+// ENUM_MARKET_PRESET đã được định nghĩa trong Enums.mqh
 
-// Các biến từ "SCALING (NHỒI LỆNH)"
-extern bool EnableScaling;        // Cho phép nhồi lệnh
-extern int MaxScalingCount;       // Số lần nhồi tối đa
-extern double ScalingRiskPercent; // % risk cho lệnh nhồi (so với ban đầu)
-extern bool RequireBreakEvenForScaling; // Yêu cầu BE trước khi nhồi
+// Định nghĩa enum ENUM_ALERT_LEVEL đã được thay thế bằng các hằng số để tránh xung đột
 
-// Các biến từ "LỌC PHIÊN"
-extern bool FilterBySession;      // Kích hoạt lọc theo phiên
-extern ENUM_SESSION_FILTER SessionFilter; // Phiên giao dịch
-extern bool UseGmtOffset;         // Sử dụng điều chỉnh GMT
-extern int GmtOffset;             // Điều chỉnh GMT (giờ)
-extern bool TradeLondonOpen;      // Giao dịch mở cửa London
-extern bool TradeNewYorkOpen;     // Giao dịch mở cửa New York
+// Forward declarations cho các lớp và structs từ namespace ApexPullback
 
-// Các biến từ "LỌC TIN TỨC"
-extern ENUM_NEWS_FILTER NewsFilter; // Mức lọc tin tức
-extern string NewsDataFile;       // File dữ liệu tin tức
-extern int NewsImportance;        // Độ quan trọng tin (1-3)
-extern int MinutesBeforeNews;    // Phút trước tin tức
-extern int MinutesAfterNews;     // Phút sau tin tức
+// Không khai báo lại các biến đã có trong namespace ApexPullback cho các module và đối tượng
+// Khai báo các biến global từ namespace ApexPullback
 
-// Các biến từ "TỰ ĐỘNG TẠM DỪNG & KHÔI PHỤC"
-extern bool EnableAutoPause;      // Bật tự động tạm dừng
-extern double VolatilityPauseThreshold; // Ngưỡng biến động để tạm dừng (xATR)
-extern double DrawdownPauseThreshold; // Ngưỡng DD để tạm dừng (%)
-extern bool EnableAutoResume;     // Bật tự động khôi phục
-extern int PauseDurationMinutes;  // Thời gian tạm dừng (phút)
-extern bool ResumeOnLondonOpen;   // Tự động khôi phục vào London Open
+namespace ApexPullback {
+    
 
-// Các biến từ "ASSETPROFILER - MODULE MỚI"
-extern bool UseAssetProfiler;     // Kích hoạt AssetProfiler
-extern int AssetProfileDays;      // Số ngày phân tích tài sản
-extern bool AdaptRiskByAsset;     // Tự động điều chỉnh risk theo tài sản
-extern bool AdaptSLByAsset;       // Tự động điều chỉnh SL theo tài sản
-extern bool AdaptSpreadFilterByAsset; // Tự động lọc spread theo tài sản
+    
+} // End namespace ApexPullback
 
-// Thêm các biến thiếu và cần dùng trong code
-int UpdateFrequencySeconds = 5;   // Tần suất cập nhật trong giây
-bool SaveStatistics = true;       // Lưu số liệu thống kê
-bool IsNewBar = false;            // Kiểm tra nến mới
-bool StrictPriceAction = true;    // Yêu cầu PA nghiêm ngặt
-bool RequireSwingStructure = true; // Yêu cầu cấu trúc swing
-bool SkipVolatilityCheck = false; // Bỏ qua kiểm tra biến động
-bool EnableAssetProfile = true;   // Kích hoạt hồ sơ tài sản
-bool EnableRiskEventNotify = true; // Thông báo sự kiện rủi ro
-bool EnableIndicatorCache = true;  // Bật cache chỉ báo
+// GlobalSendAlert đã được định nghĩa ở phần sau
 
-// Thêm các biến toàn cục quan trọng
-double g_MinPullbackPct = 0.3;     // % tối thiểu cho pullback
-double g_MaxPullbackPct = 0.7;     // % tối đa cho pullback
-int LookbackBars = 100;           // Số nền nhìn lại
 
-// Định nghĩa các enum cần thiết
-// Sử dụng ENUM_SESSION đã có trong SessionManager.mqh nhưng thêm alias ENUM_SESSION_TYPE để tương thích
-typedef ENUM_SESSION ENUM_SESSION_TYPE;
 
-// Tương thích giữa các enum
-#define MARKET_TREND_UNKNOWN TREND_NONE
-#define MARKET_TREND_UP TREND_UP
-#define MARKET_TREND_DOWN TREND_DOWN
-#define MARKET_TREND_RANGING TREND_SIDEWAY
-#define MARKET_TREND_SIDEWAYS TREND_SIDEWAY
 
-// Các module chính của EA - Chỉ khai báo một lần ở phần sau
 
-// Các tham số cho EA
-bool UseMarketProfile = true;                      // Sử dụng Market Profile
-bool EnableDetailedLogs = false;                   // Bật log chi tiết
-double EnvF = 2.0;                                 // Hệ số môi trường
-double SL_ATR = 1.5;                               // Hệ số ATR cho SL
-double TP_RR = 1.5;                                // Tỷ lệ R:R cho TP
-double MaxSpreadPoints = 5.0;     // Spread tối đa cho phép
+// Khai báo biến toàn cục cho EA
+// bool g_EnableDetailedLogs = false;             // Bật logs chi tiết
 
-// Các đối tượng toàn cục
-bool g_Initialized = false;       // Đánh dấu đã khởi tạo EA
-bool g_IsBacktestMode = false;    // Đánh dấu đang backtest
-int g_ConsecutiveLosses = 0;      // Số lần thua liên tiếp
-datetime g_PauseEndTime = 0;      // Thời gian kết thúc tạm dừng
-double g_RegimeTransitionScore = 0.0; // Điểm chuyển đổi chế độ
-int g_ConsecutiveRegimeConfirm = 0;  // Số lần xác nhận chế độ liên tiếp
-ENUM_EA_STATE g_CurrentState = STATE_INIT; // Trạng thái hiện tại của EA
+// Các hàm inline trong namespace ApexPullback
+namespace ApexPullback {
+    // Indicator handles have been removed and are managed by CIndicatorUtils in EAContext.
 
-// Modules và thành phần - sử dụng namespace để tham chiếu các lớp
-// Chỉ sử dụng các biến g_* với namespace ApexPullback
-// Tất cả các global class pointers đều sử dụng namespace ApexPullback để tránh xung đột
-ApexPullback::CLogger* g_Logger = NULL;                         // Logger để ghi log
-ApexPullback::CAssetProfileManager* g_AssetProfileManager = NULL; // Quản lý hồ sơ tài sản
-MarketProfileData g_CurrentProfile;     // Profile hiện tại
-double g_VolatilityThreshold = 2.0;    // Ngưỡng biến động
+    // Loại bỏ các khai báo trùng lặp
+    // bool   g_AlertsEnabled = true;                   // Bật cảnh báo
+    // bool   g_SendNotifications = true;               // Gửi thông báo
+    // bool   g_SendEmailAlerts = false;                // Gửi email
+    // bool   g_EnableTelegramNotify = false;           // Gửi Telegram
+    // bool   g_TelegramImportantOnly = true;           // Chỉ gửi Telegram quan trọng
+    // bool   g_DisplayDashboard = true;                // Hiển thị dashboard
+    // bool   g_EnableIndicatorCache = true;            // Bật cache indicator
+
+    // Các hàm inline hỗ trợ đã được định nghĩa ở phần trước
+    // Không định nghĩa lại
+    // inline bool IsAlertsEnabled() { return g_AlertsEnabled; }
+    // inline bool IsSendNotificationsEnabled() { return g_SendNotifications; }
+    // inline bool IsSendEmailAlertsEnabled() { return g_SendEmailAlerts; }
+    // inline bool IsTelegramNotifyEnabled() { return g_EnableTelegramNotify; }
+    // inline bool IsTelegramImportantOnly() { return g_TelegramImportantOnly; }
+    // inline bool IsDashboardEnabled() { return g_DisplayDashboard; }
+} // Đóng namespace ApexPullback
 
 //+------------------------------------------------------------------+
-//| Sử dụng các enum từ Enums.mqh                                  |
+//| Hàm kiểm tra tính hợp lệ của các tham số đầu vào (Cải tiến)    |
 //+------------------------------------------------------------------+
-
-// Các enum đã được định nghĩa trong Enums.mqh, không cần định nghĩa lại ở đây
-// Sử dụng MarketProfileData từ CommonStructs.mqh
-
-// Enum trạng thái EA được định nghĩa đầy đủ trong Enums.mqh
-// Đây là tham chiếu:
-// enum ENUM_EA_STATE {
-//     STATE_INIT,       // Khởi tạo
-//     STATE_TRADING,    // Đang giao dịch
-//     STATE_MONITORING, // Đang giám sát
-//     STATE_PAUSED,     // Tạm dừng
-//     STATE_STOPPED     // Đã dừng
-// };
-
-// Sử dụng enum ENUM_TREND_TYPE từ file Enums.mqh, không định nghĩa lại ở đây
-
-//+------------------------------------------------------------------+
-//| Sử dụng cấu trúc dữ liệu từ CommonStructs.mqh                  |
-//+------------------------------------------------------------------+
-// Các enum và struct đã được định nghĩa trong các file include
-// ENUM_SESSION_TYPE, MarketProfileData...
-
-// Enum cho hướng tín hiệu
-enum ENUM_SIGNAL_DIRECTION {
-    SIGNAL_NONE = 0,        // Không có tín hiệu
-    SIGNAL_BUY = 1,          // Tín hiệu mua
-    SIGNAL_SELL = -1,        // Tín hiệu bán
-    SIGNAL_EXIT              // Tín hiệu thoát
-};
-
-// Cấu trúc kết quả phân tích mẫu hình
-struct PatternAnalysisResult {
-    bool patternDetected;    // Phát hiện mẫu hình
-    string patternName;      // Tên mẫu hình
-    double patternStrength;   // Độ mạnh của mẫu hình
-    double expectedMove;      // Dự đoán biên độ di chuyển
-    ENUM_SIGNAL_DIRECTION direction; // Hướng của mẫu hình
-};
-
-// Enum cho các loại môi trường thị trường
-enum ENUM_MARKET_PRESET {
-    PRESET_UNKNOWN,         // Unknown market condition
-    PRESET_TRENDING,        // Trending market
-    PRESET_RANGING,         // Ranging/Sideways market
-    PRESET_VOLATILE,        // Volatile market
-    PRESET_BREAKOUT,        // Breakout market
-    PRESET_REVERSAL,        // Reversal market
-    PRESET_MOMENTUM,        // Momentum-driven market
-    PRESET_COUNTER_TREND    // Counter-trend market
-};
-
-//+------------------------------------------------------------------+
-//| Khai báo biến và đối tượng toàn cục                              |
-//+------------------------------------------------------------------+
-// Modules và thành phần
-ApexPullback::CLogger *g_Logger = NULL;               // Module ghi log
-ApexPullback::CMarketProfile *g_MarketProfile = NULL; // Phân tích thị trường
-ApexPullback::CSwingPointDetector *g_SwingDetector = NULL; // Phát hiện swing
-ApexPullback::CSessionManager *g_SessionManager = NULL; // Quản lý phiên
-ApexPullback::CPatternDetector *g_PatternDetector = NULL; // Phát hiện mẫu hình
-ApexPullback::CRiskManager *g_RiskManager = NULL;     // Quản lý rủi ro
-ApexPullback::CTradeManager *g_TradeManager = NULL;   // Quản lý giao dịch
-ApexPullback::CPositionManager *g_PositionManager = NULL; // Quản lý vị thế
-ApexPullback::CRiskOptimizer *g_RiskOptimizer = NULL; // Tối ưu hóa rủi ro
-ApexPullback::CDashboard *g_Dashboard = NULL;        // Dashboard hiển thị
-ApexPullback::CPerformanceTracker *g_PerformanceTracker = NULL; // Theo dõi hiệu suất
-ApexPullback::CAssetProfiler *g_AssetProfiler = NULL; // Quản lý hồ sơ tài sản
-ApexPullback::CNewsFilter *g_NewsFilter = NULL;       // Bộ lọc tin tức
-ApexPullback::CSessionManager *g_SessionManager = NULL; // Quản lý phiên giao dịch
-// Already declared above // Quản lý hồ sơ tài sản
-// Biến trạng thái EA
-bool                 g_Initialized = false;            // Đã khởi tạo xong chưa
-bool                 g_IsTradeAllowed = false;        // Có được phép giao dịch không
-datetime             g_lastProfileTime = 0;           // Thời gian cập nhật Market Profile gần nhất
-bool                 g_NewBar = false;                // Có nến mới không
-ENUM_EA_STATE        g_CurrentState = STATE_INIT;      // Trạng thái hiện tại của EA
-bool                 EnableAdaptiveThresholds = true;  // Bật tính năng tự động điều chỉnh ngưỡng
-bool                 EnableMomentumConfirmation = true; // Bật xác nhận theo momentum
-int                  MinimumTradesForProfile = 100;   // Số giao dịch tối thiểu để xây dựng profile
-double               ProfileAdaptPercent = 30.0;      // Phần trăm điều chỉnh profile
-
-// Biến cho RSI và các chỉ báo
-double               rsiBuffer[];                     // Mảng lưu trữ giá trị RSI
-int                  rsiHandle = INVALID_HANDLE;       // Handle cho chỉ báo RSI
-bool                 hasHigherHighs = false;          // Có đỉnh cao hơn không
-bool                 hasHigherLows = false;           // Có đáy cao hơn không
-
-// Dữ liệu và cấu trúc
-MarketProfileData    g_CurrentProfile;                // Profile hiện tạiị trường hiện tại
-datetime             g_LastUpdateTime = 0;             // Thời gian cập nhật cuối
-datetime             g_LastTradeTime = 0;              // Thời gian giao dịch cuối
-datetime             g_PauseEndTime = 0;               // Thời gian kết thúc tạm dừng
-int                  g_CurrentDay = 0;                 // Ngày hiện tại
-int                  g_DayTrades = 0;                  // Số lệnh trong ngày
-double               g_DayStartEquity = 0.0;           // Equity đầu ngày
-double               g_AverageATR = 0.0;               // ATR trung bình theo ngày
-double               g_CurrentRisk = 0.0;              // Risk % hiện tại
-int                  g_ConsecutiveLosses = 0;          // Số lần thua liên tiếp
-bool                 g_IsBacktestMode = false;         // Đang chạy backtest?
-double               g_RegimeTransitionScore = 0.0;    // Điểm chuyển tiếp chế độ
-int                  g_ConsecutiveRegimeConfirm = 0;   // Số lần xác nhận chế độ liên tiếp
-double               g_SpreadHistory[10];              // Lịch sử spread gần đây
-double               g_AverageSpread = 0.0;            // [NEW] Spread trung bình
-int                  g_IndicatorCache[10];             // [NEW] Cache cho handles chỉ báo
-bool                 g_RequirePriceActionConfirm = true; // [NEW] Yêu cầu PA xác nhận
-
-//+------------------------------------------------------------------+
-//| Khai báo thêm các biến toàn cục                                 |
-//+------------------------------------------------------------------+
-// Các biến bổ sung có thể được thêm vào đây nếu cần
-// Các biến input đã được khai báo trong file Inputs.mqh
-
-// Lưu ý: Không khai báo lại các tham số input ở đây 
-// Tất cả tham số đã được khai báo trong file Inputs.mqh
-
-// Các biến toàn cục bổ sung
-double g_MinPullbackPct = 0.3;     // Tỷ lệ pullback tối thiểu (phần trăm)
-double g_MaxPullbackPct = 0.7;     // Tỷ lệ pullback tối đa (phần trăm)
-int LookbackBars = 50;            // Số nến nhìn lại
-int MaxSpreadPoints = 50;         // Spread tối đa cho phép (theo điểm)
-double EnvF = 0.05;               // Hệ số mở rộng mội trường
-double SL_ATR = 1.5;              // Hệ số ATR cho StopLoss
-double TP_RR = 2.0;               // Risk Reward cho TakeProfit
-double g_VolatilityThreshold = 1.5; // Ngưỡng biến động cao
-bool EnableDetailedLogs = false;   // Bật ghi log chi tiết
-
-// Ghi chú: các biến trạng thái đã được khai báo ở phần trên
-input double   PartialClosePercent1 = 35.0;           // % đóng ở mức R1
-input double   PartialClosePercent2 = 35.0;           // % đóng ở mức R2
-
-// Tham số trailing stop
-input string g_TrailingStopGroup = "=== TRAILING STOP ==="; // Nhóm Trailing Stop
-input bool     UseAdaptiveTrailing = true;            // Trailing thích ứng theo regime
-input ENUM_TRAILING_MODE TrailingMode = TRAILING_ATR; // Chế độ trailing mặc định
-input double   TrailingAtrMultiplier = 2.0;           // Hệ số ATR cho trailing
-input double   BreakEvenAfterR = 1.0;                 // Chuyển BE sau (R-multiple)
-input double   BreakEvenBuffer = 5.0;                 // Buffer cho breakeven (points)
-
-// Tham số cho Chandelier Exit
-input string g_ChandelierExitGroup = "=== CHANDELIER EXIT ==="; // Nhóm Chandelier Exit
-input bool     UseChandelierExit = true;              // Kích hoạt Chandelier Exit
-input int      ChandelierPeriod = 20;                 // Số nến lookback Chandelier
-input double   ChandelierMultiplier = 3.0;            // Hệ số ATR Chandelier
-
-// Tham số scaling (nhồi lệnh)
-input string g_ScalingGroup = "=== SCALING (NHỒI LỆNH) ==="; // Nhóm Scaling
-input bool     EnableScaling = false;                 // [UPDATED] Cho phép nhồi lệnh (tắt mặc định)
-input int      MaxScalingCount = 1;                   // Số lần nhồi tối đa
-input double   ScalingRiskPercent = 0.3;              // % risk cho lệnh nhồi (so với ban đầu)
-input bool     RequireBreakEvenForScaling = true;     // Yêu cầu BE trước khi nhồi
-input double   MinAdxForScaling = 25.0;               // [NEW] ADX tối thiểu cho scaling
-input bool     RequireConfirmedTrend = true;          // [NEW] Yêu cầu xu hướng xác nhận để scaling
-
-// Tham số lọc theo phiên
-input string g_SessionFilterGroup = "=== LỌC PHIÊN ==="; // Nhóm Lọc Phiên
-input bool     FilterBySession = false;               // Kích hoạt lọc theo phiên
-//| Khai báo các hàm chính                                           |
-//+------------------------------------------------------------------+
-// Khởi tạo và dọn dẹp
-bool        InitializeModules();
-void        CleanupModules();
-bool        LoadConfiguration();
-void        SaveConfiguration();
-
-// Quản lý EA và thông báo
-void        UpdateEAState();
-void        ManageEAState();
-void        LogMessage(string message, bool important = false);
-void        SendAlert(string message, bool isImportant = false);
-string      GetStateDescription(ENUM_EA_STATE state);
-
-// Phân tích thị trường
-bool        UpdateMarketData();
-MarketProfileData AnalyzeMarketProfile();
-bool        IsMarketConditionSuitable();
-bool        IsPullbackValid(bool isLong);
-bool        IsPriceActionConfirmed(bool isLong);
-double      CalculateSignalQuality(SignalInfo &signal);
-
-// [NEW] Thêm kiểm tra momentum và cấu trúc swing
-bool        IsMomentumConfirmed(bool isLong);
-double      GetRSISlope(int period = 14);
-double      GetMACDHistogramSlope();
-bool        HasValidSwingStructure(bool isLong);
-
-// Xử lý vào lệnh
-void        CheckNewTradeOpportunities();
-SignalInfo  DetectPullbackSignal();
-bool        ValidateTradeConditions(SignalInfo &signal);
-double      CalculateAdaptiveRiskPercent();
-double      CalculateLotSize(double riskPercent, double slPoints);
-
-// Quản lý vị thế
-void        ManageOpenPositions();
-double      CalculateDynamicTrailingStop(ulong ticket, double entryPrice, double currentPrice, bool isLong);
-double      CalculateChandelierExit(bool isLong, int period, double multiplier);
-double      CalculateSwingBasedTrailingStop(bool isLong);
-bool        CheckPartialCloseConditions(ulong ticket, double entryPrice, double currentPrice, bool isLong);
-bool        ShouldScaleInPosition(ulong ticket);
-
-// Quản lý rủi ro và bảo vệ
-bool        IsSpreadAcceptable();
-bool        IsVolatilityAcceptable();
-bool        IsNewsTimeFilter();
-bool        IsSessionActive();
-void        UpdateDailyStats();
-void        CheckDrawdownProtection();
-double      GetAverageATR();
-void        UpdateAtrHistory();
-double      GetAdaptiveMaxSpread();
-void        UpdateSpreadHistory();
-double      GetAdaptiveVolatilityThreshold();   // [NEW] Thích ứng ngưỡng biến động
-
-// Hiển thị và tiện ích
-void        UpdateDashboard();
-void        DrawValueZones();
-string      TimeframeToString(ENUM_TIMEFRAMES tf);
-string      GetDeinitReasonText(const int reason);
-
-// Asset Profile (tự học)
-void        UpdateAssetProfile(bool win, double profit, string scenario);
-bool        AdjustSignalByAssetProfile(SignalInfo &signal);
-
-// [NEW] Tối ưu hóa hiệu suất
-void        InitializeIndicatorCache();
-void        ClearIndicatorCache();
-int         GetIndicatorHandle(int indicatorType, string symbol, ENUM_TIMEFRAMES timeframe);
-bool        ShouldUpdateCalculations(datetime currentTime);
+bool ValidateInputParameters() {
+    bool isValid = true;
+    string errorMsg = "";
+    
+    // Kiểm tra Magic Number với phạm vi hợp lý
+    if (MagicNumber <= 0 || MagicNumber > 2147483647) {
+        errorMsg += "Magic Number phải trong khoảng 1-2147483647. ";
+        isValid = false;
+    }
+    
+    // Kiểm tra các tham số EMA với giới hạn thực tế
+    if (EMA_Fast <= 0 || EMA_Fast > 1000) {
+        errorMsg += "EMA_Fast phải trong khoảng 1-1000. ";
+        isValid = false;
+    }
+    if (EMA_Medium <= 0 || EMA_Medium > 1000) {
+        errorMsg += "EMA_Medium phải trong khoảng 1-1000. ";
+        isValid = false;
+    }
+    if (EMA_Slow <= 0 || EMA_Slow > 1000) {
+        errorMsg += "EMA_Slow phải trong khoảng 1-1000. ";
+        isValid = false;
+    }
+    
+    if (EMA_Fast >= EMA_Medium || EMA_Medium >= EMA_Slow) {
+        errorMsg += "Thứ tự EMA phải: EMA_Fast < EMA_Medium < EMA_Slow. ";
+        isValid = false;
+    }
+    
+    // Kiểm tra ATR Period với phạm vi hợp lý
+    if (ATR_Period <= 0 || ATR_Period > 200) {
+        errorMsg += "ATR Period phải trong khoảng 1-200. ";
+        isValid = false;
+    }
+    
+    // Kiểm tra các tham số Risk Management
+    if (RiskPercent <= 0 || RiskPercent > 10) {
+        errorMsg += "Risk Percent phải trong khoảng 0.1-10%. ";
+        isValid = false;
+    }
+    
+    if (StopLoss_ATR <= 0 || StopLoss_ATR > 10) {
+        errorMsg += "StopLoss ATR multiplier phải trong khoảng 0.1-10. ";
+        isValid = false;
+    }
+    
+    if (TakeProfit_RR <= 0 || TakeProfit_RR > 20) {
+        errorMsg += "TakeProfit R:R phải trong khoảng 0.1-20. ";
+        isValid = false;
+    }
+    
+    // Kiểm tra các giới hạn giao dịch
+    if (MaxTradesPerDay <= 0 || MaxTradesPerDay > 100) {
+        errorMsg += "Max Trades Per Day phải trong khoảng 1-100. ";
+        isValid = false;
+    }
+    
+    if (MaxPositions <= 0 || MaxPositions > 10) {
+        errorMsg += "Max Positions phải trong khoảng 1-10. ";
+        isValid = false;
+    }
+    
+    // Kiểm tra Telegram settings nếu được bật
+    if (EnableTelegramNotify) {
+        if (StringLen(TelegramBotToken) < 10) {
+            errorMsg += "Telegram Bot Token quá ngắn (tối thiểu 10 ký tự). ";
+            isValid = false;
+        }
+        if (StringLen(TelegramChatID) == 0) {
+            errorMsg += "Telegram Chat ID không được để trống. ";
+            isValid = false;
+        }
+    }
+    
+    // Kiểm tra CSV log filename nếu được bật
+    if (EnableCsvLog) {
+        if (StringLen(CsvLogFilename) == 0) {
+            errorMsg += "Tên file CSV log không được để trống. ";
+            isValid = false;
+        }
+        if (StringFind(CsvLogFilename, ".csv") == -1) {
+            errorMsg += "File CSV log phải có đuôi .csv. ";
+            isValid = false;
+        }
+    }
+    
+    // Kiểm tra tính hợp lý của Pullback parameters
+    if (MinPullbackPercent <= 0 || MinPullbackPercent >= 100) {
+        errorMsg += "Min Pullback Percent phải trong khoảng 1-99%. ";
+        isValid = false;
+    }
+    
+    if (MaxPullbackPercent <= MinPullbackPercent || MaxPullbackPercent >= 100) {
+        errorMsg += "Max Pullback Percent phải lớn hơn Min và nhỏ hơn 100%. ";
+        isValid = false;
+    }
+    
+    // Log lỗi nếu có
+    if (!isValid) {
+        if (ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.Logger != NULL) {
+            ApexPullback::g_EAContext.Logger.LogError("Lỗi tham số đầu vào: " + errorMsg);
+        } else {
+            Print("[LỖI NGHIÊM TRỌNG] Tham số đầu vào không hợp lệ: " + errorMsg);
+        }
+    } else {
+        if (ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.Logger != NULL) {
+            ApexPullback::g_EAContext.Logger.LogInfo("Tất cả tham số đầu vào đã được xác thực thành công.");
+        } else {
+             Print("Tất cả tham số đầu vào đã được xác thực thành công (Logger không khả dụng).");
+        }
+    }
+    
+    return isValid;
+}
 
 //+------------------------------------------------------------------+
-//| Expert initialization function                                   |
+//| Hàm dọn dẹp khi khởi tạo thất bại                              |
+//+------------------------------------------------------------------+
+void CleanupPartialInit() {
+    CLogger* loggerToUse = NULL;
+    if (ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.Logger != NULL) {
+        loggerToUse = ApexPullback::g_EAContext.Logger;
+    } else {
+        // loggerToUse remains NULL, subsequent checks will handle Print
+    }
+
+    if (loggerToUse != NULL) {
+        loggerToUse.LogInfo("Bắt đầu dọn dẹp do khởi tạo thất bại...");
+    } else {
+        Print("Bắt đầu dọn dẹp do khởi tạo thất bại (Logger không khả dụng)...");
+    }
+    
+    if (ApexPullback::g_EAContext != NULL) {
+        // Dọn dẹp theo thứ tự ngược lại với khởi tạo, using context members
+        if (ApexPullback::g_EAContext.Dashboard != NULL) { delete ApexPullback::g_EAContext.Dashboard; ApexPullback::g_EAContext.Dashboard = NULL; }
+        if (ApexPullback::g_EAContext.AssetProfileManager != NULL) { delete ApexPullback::g_EAContext.AssetProfileManager; ApexPullback::g_EAContext.AssetProfileManager = NULL; }
+        if (ApexPullback::g_EAContext.NewsFilter != NULL) { delete ApexPullback::g_EAContext.NewsFilter; ApexPullback::g_EAContext.NewsFilter = NULL; }
+        if (ApexPullback::g_EAContext.SessionManager != NULL) { delete ApexPullback::g_EAContext.SessionManager; ApexPullback::g_EAContext.SessionManager = NULL; }
+        if (ApexPullback::g_EAContext.RiskManager != NULL) { delete ApexPullback::g_EAContext.RiskManager; ApexPullback::g_EAContext.RiskManager = NULL; }
+        if (ApexPullback::g_EAContext.TradeManager != NULL) { delete ApexPullback::g_EAContext.TradeManager; ApexPullback::g_EAContext.TradeManager = NULL; }
+        if (ApexPullback::g_EAContext.PositionManager != NULL) { delete ApexPullback::g_EAContext.PositionManager; ApexPullback::g_EAContext.PositionManager = NULL; }
+        if (ApexPullback::g_EAContext.SwingDetector != NULL) { delete ApexPullback::g_EAContext.SwingDetector; ApexPullback::g_EAContext.SwingDetector = NULL; }
+        if (ApexPullback::g_EAContext.MarketProfile != NULL) { delete ApexPullback::g_EAContext.MarketProfile; ApexPullback::g_EAContext.MarketProfile = NULL; }
+        if (ApexPullback::g_EAContext.PatternDetector != NULL) { delete ApexPullback::g_EAContext.PatternDetector; ApexPullback::g_EAContext.PatternDetector = NULL; }
+        if (ApexPullback::g_EAContext.PerformanceTracker != NULL) { delete ApexPullback::g_EAContext.PerformanceTracker; ApexPullback::g_EAContext.PerformanceTracker = NULL; }
+        if (ApexPullback::g_EAContext.PortfolioManager != NULL) { delete ApexPullback::g_EAContext.PortfolioManager; ApexPullback::g_EAContext.PortfolioManager = NULL; }
+        if (ApexPullback::g_EAContext.IndicatorUtils != NULL) { 
+            // IndicatorUtils might handle its own indicator handle releases in its destructor
+            // Or call a specific cleanup method if needed before deleting IndicatorUtils
+            // ApexPullback::g_EAContext.IndicatorUtils.ReleaseAllIndicators(); // Example
+            delete ApexPullback::g_EAContext.IndicatorUtils; ApexPullback::g_EAContext.IndicatorUtils = NULL; 
+        }
+        // Note: Global indicator handles like g_hMA_Fast are now ideally managed by IndicatorUtils.
+        // If not, they need separate handling or to be added to EAContext for cleanup.
+        // ReleaseIndicatorHandles(); // This global function will need to be updated or its logic moved.
+
+        // Logger (part of context) is deleted when g_EAContext is deleted
+        if (ApexPullback::g_EAContext.Logger != NULL) {
+            // Log final cleanup message with the context's logger before it's deleted with the context
+            // No need to delete ApexPullback::g_EAContext.Logger separately if g_EAContext itself is deleted.
+        }
+        delete ApexPullback::g_EAContext;
+        ApexPullback::g_EAContext = NULL;
+    } else {
+        // Fallback to old global variable cleanup if g_EAContext was never initialized or already cleaned up - This block should ideally not be reached.
+        Print("CleanupPartialInit: EAContext was NULL. Global fallbacks for Dashboard, AssetProfileManager, Logger are removed.");
+    }
+    // Global indicator handles are now managed by CIndicatorUtils within g_EAContext.
+
+    if (loggerToUse != NULL) { 
+        loggerToUse.LogInfo("Hoàn tất dọn dẹp do khởi tạo thất bại.");
+    } else {
+        Print("Hoàn tất dọn dẹp do khởi tạo thất bại (Logger không khả dụng).");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Hàm khởi tạo EA                                                |
 //+------------------------------------------------------------------+
 int OnInit() {
-    Print("APEX Pullback EA v15.0 - Đang khởi tạo trên ", _Symbol);
-    
-    // Kiểm tra nếu đang ở chế độ backtest
-    g_IsBacktestMode = (MQLInfoInteger(MQL_TESTER) || MQLInfoInteger(MQL_OPTIMIZATION));
-    
-    // Khởi tạo trạng thái EA
-    g_CurrentState = STATE_INIT;
-    
-    // Khởi tạo Logger - module quan trọng nhất, phải khởi tạo đầu tiên
-    g_Logger = new ApexPullback::CLogger();
-    if (g_Logger == NULL) {
-        Print("LỖI: Không thể tạo Logger - bộ nhớ không đủ");
+    int result = INIT_SUCCEEDED;
+
+    // Initialize EA Context first
+    ApexPullback::g_EAContext = new ApexPullback::EAContext();
+    if (ApexPullback::g_EAContext == NULL) {
+        Print("[LỖI NGHIÊM TRỌNG] Không thể khởi tạo EAContext. EA không thể khởi động.");
         return INIT_FAILED;
     }
     
-    if (!g_Logger.Initialize("ApexPullbackV15", EnableDetailedLogs, EnableCsvLog, CsvLogFilename, 
-                           EnableTelegramNotify, TelegramBotToken, TelegramChatID, TelegramImportantOnly)) {
-        Print("LỖI: Không thể khởi tạo Logger");
+    // --- Bước 0: Kiểm tra tính hợp lệ của tham số đầu vào ---
+    // Logger for ValidateInputParameters might not be initialized yet if it's part of context
+    // So ValidateInputParameters should handle potential null logger or use Print for critical errors.
+    if (!ValidateInputParameters()) { // This function needs to be aware g_Logger might be null or use g_EAContext.Logger if available
+        Print("[LỖI NGHIÊM TRỌNG] Tham số đầu vào không hợp lệ. EA không thể khởi động.");
+        delete ApexPullback::g_EAContext; ApexPullback::g_EAContext = NULL;
+        return INIT_PARAMETERS_INCORRECT;
+    }
+    
+    // --- Bước 1: Khởi tạo Logger với kiểm tra bộ nhớ ---
+    // Logger phải được khởi tạo đầu tiên để ghi lại toàn bộ quá trình khởi tạo.
+    
+    // Kiểm tra bộ nhớ khả dụng trước khi khởi tạo
+    if (!CheckMemoryAvailable()) {
+        Print("[LỖI NGHIÊM TRỌNG] Không đủ bộ nhớ để khởi tạo EA.");
+        delete ApexPullback::g_EAContext; ApexPullback::g_EAContext = NULL;
         return INIT_FAILED;
     }
     
-    // Ghi log bắt đầu quá trình khởi tạo
-    LogMessage("APEX Pullback EA v15.0 - Bắt đầu khởi tạo trên " + _Symbol, true);
-    
-    // Lấy ngày hiện tại và equity ban đầu
-    MqlDateTime time;
-    TimeToStruct(TimeCurrent(), time);
-    g_CurrentDay = time.day;
-    g_DayStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-    g_CurrentRisk = RiskPercent; // Risk ban đầu
-    
-    // Khởi tạo mảng lưu trữ spread
-    for (int i = 0; i < 10; i++) {
-        g_SpreadHistory[i] = 0;
-    }
-    
-    // [NEW] Khởi tạo cache chỉ báo
-    InitializeIndicatorCache();
-    
-    // Khởi tạo các module chính
-    if (!InitializeModules()) {
-        LogMessage("LỖI: Không thể khởi tạo các module chính", true);
-        CleanupModules(); // Dọn dẹp nếu khởi tạo thất bại
+    ApexPullback::g_EAContext.Logger = new CLogger();
+    if (ApexPullback::g_EAContext.Logger == NULL) {
+        Print("[LỖI NGHIÊM TRỌNG] Không thể khởi tạo Logger trong EAContext. EA không thể tiếp tục.");
+        CleanupPartialInit(); // CleanupPartialInit will handle g_EAContext deletion
         return INIT_FAILED;
     }
     
-    // Nạp cấu hình
-    if (!LoadConfiguration()) {
-        LogMessage("CẢNH BÁO: Không thể nạp cấu hình, sử dụng giá trị mặc định", true);
+    // Khởi tạo Logger với các tham số đầu vào
+    if (!ApexPullback::g_EAContext.Logger.Initialize(
+        EAName,                  // Prefix
+        EnableDetailedLogs,      // Enable detailed logs
+        EnableCsvLog,            // Enable CSV log
+        CsvLogFilename,          // CSV log filename
+        EnableTelegramNotify,    // Enable Telegram notifications
+        TelegramBotToken,        // Telegram bot token
+        TelegramChatID,          // Telegram chat ID
+        TelegramImportantOnly    // Only important Telegram notifications
+    )) {
+        Print("[LỖI NGHIÊM TRỌNG] Không thể khởi tạo Logger với các tham số. EA không thể tiếp tục.");
+        CleanupPartialInit();
+        return INIT_FAILED;
     }
+    ApexPullback::g_EAContext.Logger.LogInfo("Bắt đầu khởi tạo APEX Pullback EA v14.0...");
+
+    // --- Bước 2: Thiết lập các biến trong EAContext từ tham số đầu vào ---    
+    ApexPullback::g_EAContext.Logger.LogDebug("Thiết lập các biến context từ tham số đầu vào...");
+    // Many of these g_ variables will now be members of g_EAContext or specific managers
+    // g_EAContext.Logger.SetVerboseLogging(InpEnableDetailedLogs); // Logger should handle this in its constructor or an init method
+    // ApexPullback::g_AlertsEnabled = AlertsEnabled; // To be part of a notification manager or context
+    // ApexPullback::g_SendNotifications = SendNotifications; // To be part of a notification manager or context
+    // ApexPullback::g_SendEmailAlerts = SendEmailAlerts; // To be part of a notification manager or context
+    // ApexPullback::g_EnableTelegramNotify = EnableTelegramNotify; // Handled by Logger init
+    // ApexPullback::g_TelegramImportantOnly = TelegramImportantOnly; // Handled by Logger init
+    // g_EAContext.DisplayDashboard = InpDisplayDashboard; // This is now part of EAContext and set via input parameter directly if needed or managed by Dashboard module
+    // ApexPullback::g_EnableIndicatorCache = EnableIndicatorCache; // Input for IndicatorUtils
+    ApexPullback::g_EAContext.MaxDrawdown = MaxDrawdown;
+    ApexPullback::g_EAContext.MaxSpreadPoints = MaxSpreadPoints;
+    ApexPullback::g_EAContext.MaxTradesPerDay = MaxTradesPerDay;
+    ApexPullback::g_EAContext.AllowNewTrades = InpAllowNewTrades;
+    ApexPullback::g_EAContext.VolatilityThreshold = VolatilityThreshold;
+    ApexPullback::g_EAContext.MinPullbackPct = MinPullbackPercent;
+    ApexPullback::g_EAContext.MaxPullbackPct = MaxPullbackPercent;
     
-    // Cập nhật ATR trung bình và dữ liệu thị trường
-    UpdateAtrHistory();
-    if (!UpdateMarketData()) {
-        LogMessage("CẢNH BÁO: Cập nhật dữ liệu thị trường không thành công", true);
+    // Khởi tạo các cấu trúc dữ liệu
+    // ApexPullback::g_CurrentProfileData will be part of MarketProfile or context
+    ApexPullback::g_EAContext.Logger.LogDebug("Đã thiết lập các biến context.");
+
+    // --- Bước 3: Khởi tạo IndicatorUtils (bao gồm Cache nếu bật) và các Indicators Kỹ thuật ---
+    ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo IndicatorUtils và các Indicators kỹ thuật...");
+    ApexPullback::g_EAContext.IndicatorUtils = new ApexPullback::CIndicatorUtils(ApexPullback::g_EAContext.Logger, MainTimeframe, EnableIndicatorCache); // Pass EnableIndicatorCache here
+    if (ApexPullback::g_EAContext.IndicatorUtils == NULL) {
+        ApexPullback::g_EAContext.Logger.LogError("LỖI: Không thể khởi tạo IndicatorUtils.");
+        CleanupPartialInit();
+        return INIT_FAILED;
     }
-    
-    // Cập nhật spread trung bình
-    UpdateSpreadHistory();
-    
-    // Tạo Dashboard nếu được bật
-    if (DisplayDashboard && (!g_IsBacktestMode || !DisableDashboardInBacktest)) {
-        LogMessage("Tạo Dashboard hiển thị...");
-        g_Dashboard = new ApexPullback::CDashboard();
-        if (g_Dashboard != NULL) {
-            g_Dashboard.Initialize(_Symbol, OrderComment);
-            g_Dashboard.Update(g_CurrentProfile);
-        } else {
-            LogMessage("CẢNH BÁO: Không thể tạo Dashboard", true);
+    // CIndicatorUtils::Initialize now handles the initialization of all indicators, including the logic previously in GlobalInitializeIndicatorCache and the old InitializeIndicators function.
+    // We pass `true` for `forceRefreshCache` to ensure handles are fresh on EA initialization.
+    if (!ApexPullback::g_EAContext.IndicatorUtils.Initialize(_Symbol, MainTimeframe, InpHigherTimeframe, EnableIndicatorCache, EnableDetailedLogs, true)) { 
+        ApexPullback::g_EAContext.Logger.LogError("LỖI: Không thể khởi tạo CIndicatorUtils (bao gồm các indicators kỹ thuật).");
+        CleanupPartialInit();
+        return INIT_FAILED;
+    }
+    ApexPullback::g_EAContext.Logger.LogDebug("CIndicatorUtils (bao gồm các indicators kỹ thuật) đã được khởi tạo thành công.");
+    // Note: The global ApexPullback::InitializeIndicators() and g_IndicatorHandles have been refactored and are now managed by CIndicatorUtils.
+        
+    // --- Bước 4: Khởi tạo các Module Chính của EA ---
+    // Sử dụng try-catch để bắt các ngoại lệ trong quá trình khởi tạo module.
+    try {
+        ApexPullback::g_EAContext.Logger.LogInfo("Bắt đầu khởi tạo các module chính...");
+
+        // Module MarketProfile
+        ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo Module MarketProfile...");
+        ApexPullback::g_EAContext.MarketProfile = new CMarketProfile(ApexPullback::g_EAContext.Logger, _Symbol, MainTimeframe);
+        if (ApexPullback::g_EAContext.MarketProfile == NULL) {
+            throw new CException("Không thể khởi tạo Module MarketProfile.");
         }
+        ApexPullback::g_EAContext.Logger.LogDebug("Module MarketProfile đã được khởi tạo.");
+        
+        // Module SwingDetector
+        ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo Module SwingDetector...");
+        ApexPullback::g_EAContext.SwingDetector = new CSwingPointDetector(ApexPullback::g_EAContext.Logger, _Symbol, MainTimeframe);
+        if (ApexPullback::g_EAContext.SwingDetector == NULL) {
+            throw new CException("Không thể khởi tạo Module SwingDetector.");
+        }
+        ApexPullback::g_EAContext.Logger.LogDebug("Module SwingDetector đã được khởi tạo.");
+        
+        // Module PositionManager
+        ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo Module PositionManager...");
+        ApexPullback::g_EAContext.PositionManager = new CPositionManager(ApexPullback::g_EAContext.Logger, MagicNumber, OrderComment);
+        if (ApexPullback::g_EAContext.PositionManager == NULL) {
+            throw new CException("Không thể khởi tạo Module PositionManager.");
+        }
+        // ApexPullback::g_EAContext.PositionManager.SetDetailedLogging(InpEnableDetailedLogs); // Logger now passed in constructor, verbose logging is set on the logger instance
+        ApexPullback::g_EAContext.Logger.LogDebug("Module PositionManager đã được khởi tạo.");
+        
+        // Module RiskManager (Initialize before TradeManager if TradeManager depends on it)
+        ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo Module RiskManager...");
+        ApexPullback::g_EAContext.RiskManager = new CRiskManager(ApexPullback::g_EAContext.Logger, RiskPercent, StopLoss_ATR, TakeProfit_RR, DailyLossLimit, MaxDrawdown, MaxTradesPerDay, MaxConsecutiveLosses, MaxPositions, PropFirmMode);
+        if (ApexPullback::g_EAContext.RiskManager == NULL) {
+            throw new CException("Không thể khởi tạo Module RiskManager.");
+        }
+        // ApexPullback::g_EAContext.RiskManager.SetDetailedLogging(InpEnableDetailedLogs); // Logger now passed in constructor
+        ApexPullback::g_EAContext.Logger.LogDebug("Module RiskManager đã được khởi tạo.");
+
+        // Module TradeManager
+        ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo Module TradeManager...");
+        ApexPullback::g_EAContext.TradeManager = new CTradeManager(ApexPullback::g_EAContext.Logger, MagicNumber, OrderComment, ApexPullback::g_EAContext.PositionManager, ApexPullback::g_EAContext.RiskManager);
+        if (ApexPullback::g_EAContext.TradeManager == NULL) {
+            throw new CException("Không thể khởi tạo Module TradeManager.");
+        }
+        // ApexPullback::g_EAContext.TradeManager.SetDetailedLogging(InpEnableDetailedLogs); // Logger now passed in constructor
+        ApexPullback::g_EAContext.Logger.LogDebug("Module TradeManager đã được khởi tạo.");
+        
+        // Module SessionManager
+        ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo Module SessionManager...");
+        ApexPullback::g_EAContext.SessionManager = new CSessionManager(ApexPullback::g_EAContext.Logger);
+        if (ApexPullback::g_EAContext.SessionManager == NULL) {
+            throw new CException("Không thể khởi tạo Module SessionManager.");
+        }
+        ApexPullback::g_EAContext.Logger.LogDebug("Module SessionManager đã được khởi tạo.");
+
+        // Module NewsFilter
+        ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo Module NewsFilter...");
+        ApexPullback::g_EAContext.NewsFilter = new CNewsFilter(ApexPullback::g_EAContext.Logger);
+        if (ApexPullback::g_EAContext.NewsFilter == NULL) {
+            throw new CException("Không thể khởi tạo Module NewsFilter.");
+        }
+        ApexPullback::g_EAContext.Logger.LogDebug("Module NewsFilter đã được khởi tạo.");
+        
+        // Module Dashboard (Tùy chọn)
+        if (DisplayDashboard && (!::MQLInfoInteger(MQL_TESTER) || !DisableDashboardInBacktest)) {
+            ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo Module Dashboard...");
+            ApexPullback::g_EAContext.Dashboard = new CDashboard(ApexPullback::g_EAContext.Logger, EAName, EAVersion, DashboardTheme);
+            if (ApexPullback::g_EAContext.Dashboard == NULL) {
+                ApexPullback::g_EAContext.Logger.LogWarning("LƯU Ý: Không thể khởi tạo Module Dashboard. Tiếp tục mà không có Dashboard.");
+            } else {
+                ApexPullback::g_EAContext.Logger.LogDebug("Module Dashboard đã được khởi tạo.");
+            }
+        } else {
+            ApexPullback::g_EAContext.Logger.LogInfo("Module Dashboard không được kích hoạt hoặc đang trong backtest.");
+        }
+        
+        // Module AssetProfileManager (Tùy chọn)
+        if (UseAssetProfiler) { // Assuming UseAssetProfiler is an input parameter
+            ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo Module AssetProfileManager...");
+            ApexPullback::g_EAContext.AssetProfileManager = new CAssetProfileManager(ApexPullback::g_EAContext.Logger);
+            if (ApexPullback::g_EAContext.AssetProfileManager == NULL) {
+                ApexPullback::g_EAContext.Logger.LogWarning("LƯU Ý: Không thể khởi tạo Module AssetProfileManager. Tiếp tục mà không có AssetProfiler.");
+            } else {
+                ApexPullback::g_EAContext.Logger.LogDebug("Module AssetProfileManager đã được khởi tạo.");
+            }
+        } else {
+            ApexPullback::g_EAContext.Logger.LogInfo("Module AssetProfileManager không được kích hoạt.");
+        }
+
+        // Initialize Performance Tracker
+        ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo Module PerformanceTracker...");
+        ApexPullback::g_EAContext.PerformanceTracker = new CPerformanceTracker(ApexPullback::g_EAContext.Logger);
+        if (ApexPullback::g_EAContext.PerformanceTracker == NULL) {
+            throw new CException("Không thể khởi tạo Module PerformanceTracker.");
+        }
+        ApexPullback::g_EAContext.Logger.LogDebug("Module PerformanceTracker đã được khởi tạo.");
+
+        // Initialize Pattern Detector
+        ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo Module PatternDetector...");
+        ApexPullback::g_EAContext.PatternDetector = new CPatternDetector(ApexPullback::g_EAContext.Logger);
+        if (ApexPullback::g_EAContext.PatternDetector == NULL) {
+            throw new CException("Không thể khởi tạo Module PatternDetector.");
+        }
+        ApexPullback::g_EAContext.Logger.LogDebug("Module PatternDetector đã được khởi tạo.");
+
+        // Initialize PortfolioManager (only for the Master EA instance)
+        // TODO: Add input parameter to designate this EA as Master Portfolio Manager
+        // For now, let's assume an input 'IsMasterPortfolioManager' exists or a specific symbol is used.
+        input bool IsMasterPortfolioManager = false; // Placeholder for actual input parameter
+        if(IsMasterPortfolioManager) { // Replace with actual input check
+            ApexPullback::g_EAContext.Logger.LogDebug("Khởi tạo Module PortfolioManager...");
+            // Ensure dependent modules are initialized before PortfolioManager
+            if (ApexPullback::g_EAContext.NewsFilter == NULL || ApexPullback::g_EAContext.PositionManager == NULL || ApexPullback::g_EAContext.RiskManager == NULL) {
+                ApexPullback::g_EAContext.Logger.LogError("LỖI: Các module phụ thuộc (NewsFilter, PositionManager, RiskManager) chưa được khởi tạo trước PortfolioManager.");
+                CleanupPartialInit();
+                return INIT_FAILED;
+            }
+            ApexPullback::g_EAContext.PortfolioManager = new CPortfolioManager(
+                ApexPullback::g_EAContext.Logger,
+                ApexPullback::g_EAContext.NewsFilter,
+                ApexPullback::g_EAContext.PositionManager,
+                ApexPullback::g_EAContext.RiskManager
+            );
+            // TODO: Pass actual configuration for MaxTotalRisk and MaxCorrelationAllowed from inputs
+            input double PortfolioMaxTotalRisk = 0.1; // Placeholder
+            input double PortfolioMaxCorrelation = 0.75; // Placeholder
+            if(!ApexPullback::g_EAContext.PortfolioManager.Initialize(PortfolioMaxTotalRisk, PortfolioMaxCorrelation)) { 
+                ApexPullback::g_EAContext.Logger.LogError("LỖI: Không thể khởi tạo Module PortfolioManager.");
+                CleanupPartialInit();
+                return INIT_FAILED;
+            }
+            ApexPullback::g_EAContext.Logger.LogDebug("Module PortfolioManager đã được khởi tạo cho Master EA.");
+        } else {
+            ApexPullback::g_EAContext.PortfolioManager = NULL; 
+            ApexPullback::g_EAContext.Logger.LogInfo("Module PortfolioManager không được khởi tạo (không phải Master EA hoặc chưa được kích hoạt).");
+        }
+
+        // Initialize Asset Profiler (if different from AssetProfileManager or a sub-component)
+        // This seems to be covered by AssetProfileManager logic above if UseAssetProfiler is the controlling input
+        // If CAssetProfiler is a distinct class, initialize it here if needed.
+        // if (UseSomeOtherProfiler) { ... }
+
+        ApexPullback::g_EAContext.Logger.LogInfo("Hoàn tất khởi tạo các module chính.");
+
+        // --- Bước 5: Cập nhật dữ liệu và cấu hình ban đầu ---
+        ApexPullback::g_Logger.LogDebug("Cập nhật dữ liệu thị trường ban đầu...");
+        if (!UpdateMarketData()) {
+            ApexPullback::g_Logger.LogWarning("Không thể cập nhật dữ liệu thị trường ban đầu. Tiếp tục với dữ liệu mặc định.");
+        }
+        ApexPullback::g_Logger.LogDebug("Dữ liệu thị trường ban đầu đã được cập nhật.");
+        
+        if (ApexPullback::MarketPreset != ENUM_MARKET_PRESET::PRESET_AUTO) { 
+            ApexPullback::g_Logger.LogDebug("Áp dụng preset thị trường: " + EnumToString(ApexPullback::MarketPreset) + "...");
+            if (!ApexPullback::AdjustParametersByPreset(ApexPullback::MarketPreset)) {
+                ApexPullback::g_Logger.LogWarning("Không thể áp dụng đầy đủ preset thị trường.");
+            }
+            ApexPullback::g_Logger.LogDebug("Preset thị trường đã được áp dụng.");
+        }
+        
+        ApexPullback::g_Logger.LogDebug("Nạp cấu hình từ file (nếu có)...");
+        if (!ApexPullback::LoadConfiguration()) {
+            ApexPullback::g_Logger.LogWarning("Không thể nạp cấu hình từ file. Sử dụng cấu hình mặc định.");
+        }
+        ApexPullback::g_Logger.LogDebug("Cấu hình đã được nạp.");
+        
+        ApexPullback::g_Logger.LogDebug("Thiết lập các biến toàn cục của Terminal...");
+        GlobalVariableSet("EMA_Fast", ApexPullback::EMA_Fast);
+        GlobalVariableSet("EMA_Medium", ApexPullback::EMA_Medium);
+        GlobalVariableSet("EMA_Slow", ApexPullback::EMA_Slow);
+        ApexPullback::g_Logger.LogDebug("Các biến toàn cục của Terminal đã được thiết lập.");
+        
+        // Đánh dấu EA đã được khởi tạo thành công
+        ApexPullback::g_EAContext.IsInitialized = true;
+        
+        string initSuccessMessage = "APEX Pullback EA v14.0 đã khởi động thành công!";
+        initSuccessMessage += " | Ticks: 0 | Errors: 0 | Memory: " + DoubleToString(GetMemoryUsage(), 2) + "MB"; // GetMemoryUsage might need context if it uses logger
+        
+        ApexPullback::g_EAContext.Logger.LogInfo(initSuccessMessage);
+        if (EnableTelegramNotify) { // Use input param directly or context field if set
+             ApexPullback::g_EAContext.Logger.SendTelegramMessage(initSuccessMessage, true); // Gửi thông báo quan trọng qua Telegram
+        }
+        
+        // Log thông tin hệ thống
+        LogSystemInfo(); // This function will need to be updated to use g_EAContext.Logger
+        
+        return INIT_SUCCEEDED;
+    } catch (const CException* e) {
+        string error_message = "LỖI NGOẠI LỆ trong OnInit: " + e.Description();
+        if (ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.Logger != NULL) {
+            ApexPullback::g_EAContext.Logger.LogError(error_message);
+        } else {
+            Print(error_message);
+        }
+        e.Delete();
+        CleanupPartialInit();
+        return INIT_FAILED;
+    } catch (...) {
+        string error_message = "LỖI NGOẠI LỆ KHÔNG XÁC ĐỊNH trong OnInit.";
+        if (ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.Logger != NULL) {
+            ApexPullback::g_EAContext.Logger.LogError(error_message);
+        } else {
+            Print(error_message);
+        }
+        CleanupPartialInit();
+        return INIT_FAILED;
     }
-    
-    // Thiết lập timer cho xử lý nền
-    if (!g_IsBacktestMode) {
-        EventSetTimer(60); // Cập nhật mỗi 60 giây
-        LogMessage("Đã thiết lập timer cho xử lý nền");
-    }
-    
-    // Cập nhật trạng thái EA
-    g_CurrentState = STATE_RUNNING;
-    g_Initialized = true;
-    
-    // Lưu thời gian khởi tạo
-    g_LastUpdateTime = TimeCurrent();
-    
-    // Cập nhật lần cuối
-    UpdateEAState();
-    UpdateDashboard();
-    
-    LogMessage("APEX Pullback EA v15.0 đã khởi tạo thành công", true);
-    return INIT_SUCCEEDED;
 }
 
 //+------------------------------------------------------------------+
-//| Expert deinitialization function                                 |
+//| Hàm xử lý mỗi tick                                              |
 //+------------------------------------------------------------------+
-void OnDeinit(const int reason) {
-    // Lưu thống kê nếu được cấu hình
-    if (g_Initialized && SaveStatistics) {
-        SaveConfiguration();
-    }
-    
-    // Ghi log lý do kết thúc
-    LogMessage("Dừng EA - Lý do: " + GetDeinitReasonText(reason), true);
-    
-    // Hủy timer
-    EventKillTimer();
-    
-    // [NEW] Xóa cache chỉ báo
-    ClearIndicatorCache();
-    
-    // Xóa dashboard nếu có
-    if (g_Dashboard != NULL) {
-        g_Dashboard.Clear();
-    }
-    
-    // Dọn dẹp các đối tượng
-    CleanupModules();
-    
-    // Đặt trạng thái đã kết thúc
-    g_Initialized = false;
-    
-    Print("APEX Pullback EA v15.0 đã kết thúc");
-}
 
 //+------------------------------------------------------------------+
-//| Expert tick function                                             |
+//| Expert tick function - MT5 entry point                           |
 //+------------------------------------------------------------------+
 void OnTick() {
-    // Kiểm tra EA đã khởi tạo chưa
-    if (!g_Initialized) return;
-    
-    // Kiểm tra tần suất xử lý (không xử lý quá nhiều)
-    static uint lastBarTime = 0;
-    uint currentBarTime = (uint)iTime(_Symbol, MainTimeframe, 0);
-    
-    // Kiểm tra nến mới
-    bool isNewBar = false;
-    if (currentBarTime != lastBarTime) {
-        isNewBar = true;
-        lastBarTime = currentBarTime;
-    }
-    
-    if (!g_IsBacktestMode && !isNewBar) {
-        // Giới hạn tần suất xử lý trong thởi gian thực
-        static datetime lastProcessTime = 0;
-        datetime currentTime = TimeCurrent();
-        
-        // [UPDATED] Sử dụng tham số tần suất cập nhật
-        if (currentTime - lastProcessTime < UpdateFrequencySeconds)
-            return;
-        
-        lastProcessTime = currentTime;
-    }
-    lastBarTime = currentBarTime;
-    
-    // Cập nhật thống kê ngày
-    UpdateDailyStats();
-    
-    // Quản lý trạng thái EA
-    UpdateEAState();
-    ManageEAState();
-    
-    // Nếu đang tạm dừng, skip xử lý chính
-    if (g_CurrentState == STATE_PAUSED) {
-        // Kiểm tra nếu đã hết thởi gian tạm dừng
-        if (TimeCurrent() >= g_PauseEndTime) {
-            g_CurrentState = STATE_RUNNING;
-            LogMessage("EA tự động tiếp tục hoạt động sau thởi gian tạm dừng", true);
-            UpdateEAState();
-        } else {
-            // Vẫn đang trong thởi gian tạm dừng
-            return;
-        }
-    }
-    
-    // Kiểm tra các điều kiện thị trường
-    if (!IsSpreadAcceptable()) {
-        LogMessage("Spread hiện tại không phù hợp: " + 
-                 DoubleToString(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD), 1) + " điểm");
-        return;
-    }
-    
-    if (FilterBySession && !IsSessionActive()) {
-        LogMessage("Không phải phiên giao dịch đã cấu hình");
-        return;
-    }
-    
-    if (NewsFilter != NEWS_NONE && IsNewsTimeFilter()) {
-        LogMessage("Có tin tức quan trọng sắp diễn ra");
-        return;
-    }
-    
-    // Cập nhật dữ liệu thị trường nhẹ nhàng
-    static datetime lastMarketUpdateTime = 0;
-    datetime currentTime = TimeCurrent();
-    // Sử dụng namespace để tránh lỗi ambiguous
-    bool isNewBar = ApexPullback::IsNewBar();
-    
-    // [UPDATED] Sử dụng ShouldUpdateCalculations để giảm tính toán
-    if (isNewBar || ShouldUpdateCalculations(lastMarketUpdateTime)) {
-        if (UpdateMarketData()) {
-            lastMarketUpdateTime = currentTime;
-        }
-    }
-    
-    // Quản lý vị thế đang mở
-    ManageOpenPositions();
-    
-    // Kiểm tra điều kiện vào lệnh mới
-    int positions = g_TradeManager.CountPositions();
-    if (AllowNewTrades && positions < MaxPositions) {
-        if (g_DayTrades < MaxTradesPerDay || !PropFirmMode) {
-            CheckNewTradeOpportunities();
-        } else {
-            LogMessage("Đã đạt giới hạn lệnh trong ngày: " + IntegerToString(g_DayTrades) + 
-                     "/" + IntegerToString(MaxTradesPerDay));
-        }
-    }
-    
-    // Cập nhật Dashboard nếu có
-    if (g_Dashboard != NULL && DisplayDashboard) {
-        static datetime lastDashboardUpdate = 0;
-        if (currentTime - lastDashboardUpdate > 2) { // Cập nhật mỗi 2 giây
-            g_Dashboard.Update(g_CurrentProfile);
-            lastDashboardUpdate = currentTime;
+    // The global OnTick() now directly calls the namespaced OnTickLogic with the context.
+    if (ApexPullback::g_EAContext != NULL) {
+        ApexPullback::OnTickLogic(ApexPullback::g_EAContext);
+    } else {
+        // Minimal logging if context is not available, to avoid spamming Print
+        static ulong error_print_counter = 0;
+        error_print_counter++;
+        if (error_print_counter % 1000 == 0) { // Print every 1000th uninitialized tick
+            Print("APEX Pullback EA Error: EAContext is NULL in OnTick. Initialization might have failed.");
         }
     }
 }
 
 //+------------------------------------------------------------------+
-//| Timer function                                                   |
+//| Implementation của các hàm bổ sung                               |
 //+------------------------------------------------------------------+
-void OnTimer() {
-    // Trong chế độ backtest, không cần xử lý timer
-    if (g_IsBacktestMode) return;
-    
-    // Xử lý cập nhật nền ít tốn tài nguyên
-    static datetime lastTimerUpdate = 0;
-    datetime currentTime = TimeCurrent();
-    
-    // Chỉ xử lý mỗi 60 giây
-    if (currentTime - lastTimerUpdate < 60)
+
+namespace ApexPullback {
+
+// Hàm logic chính của OnTick, nhận EAContext làm tham số
+void OnTickLogic(EAContext* context) {
+    if (context == NULL) {
+        // This case should ideally be caught by the caller, but as a safeguard:
+        static ulong internal_error_counter = 0;
+        internal_error_counter++;
+        if (internal_error_counter % 1000 == 0) {
+             Print("APEX Pullback EA Error: EAContext is NULL inside OnTickLogic.");
+        }
         return;
-    
-    lastTimerUpdate = currentTime;
-    
-    // Cập nhật dữ liệu thị trường nếu cần
-    if (ShouldUpdateCalculations(g_LastUpdateTime)) {
-        UpdateMarketData();
-        g_LastUpdateTime = currentTime;
+    }
+
+    // Kiểm tra trạng thái khẩn cấp và khởi tạo
+    if (context.EmergencyStop || context.IsShuttingDown || !context.IsInitialized) {
+        return;
     }
     
-    // Cập nhật ATR trung bình nếu là thứ 2 đầu tuần
+    // Kiểm tra xem các module quan trọng đã được khởi tạo chưa
+    if (context.Logger == NULL || context.TradeManager == NULL || context.PositionManager == NULL) {
+        context.ErrorCounter++;
+        if (context.ErrorCounter % 100 == 0) { // Chỉ log mỗi 100 lần để tránh spam
+            Print("LỖI: Các module chính (Logger, TradeManager, PositionManager) chưa được khởi tạo trong EAContext. OnTick bị bỏ qua. (Lần thứ " + IntegerToString(context.ErrorCounter) + ")");
+        }
+        return;
+    }
+
+    // Sử dụng try-catch để bắt lỗi trong OnTick
+    try {
+        datetime currentTime = TimeCurrent();
+        datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+        bool isNewBar = (currentBarTime != context.LastBarTime);
+        
+        context.TickCounter++;
+        context.LastTickTime = currentTime;
+        
+        // Kiểm tra tần suất tick quá cao (có thể là lỗi)
+        static datetime lastTickCheck = 0;
+        static int ticksInSecond = 0;
+        
+        if (currentTime != lastTickCheck) {
+            if (ticksInSecond > 1000) { // Quá 1000 ticks/giây
+                context.Logger.LogWarning("Phát hiện tần suất tick bất thường: " + IntegerToString(ticksInSecond) + " ticks/giây");
+            }
+            ticksInSecond = 0;
+            lastTickCheck = currentTime;
+        } else {
+            ticksInSecond++;
+        }
+        
+        // Ghi log debug có điều kiện và thông minh hơn
+        if (context.EnableDetailedLogs) {
+            if (isNewBar || (context.TickCounter % 500 == 0)) {
+                context.Logger.LogDebug("OnTick #" + IntegerToString(context.TickCounter) + 
+                                " - Bar: " + TimeToString(currentBarTime) + 
+                                " - Spread: " + DoubleToString(GetCachedSpread(context), 1)); // GetCachedSpread now takes context
+            }
+        }
+
+        // Kiểm tra điều kiện giao dịch cơ bản
+        if (!context.AllowNewTrades) {
+            if (context.EnableDetailedLogs && isNewBar) {
+                context.Logger.LogDebug("Giao dịch mới hiện đang bị vô hiệu hóa.");
+            }
+            ManageExistingPositions(context);
+            UpdateDashboardIfNeeded(currentTime, context);
+            return;
+        }
+
+        // Xử lý nến mới với logic tối ưu
+        if (isNewBar) {
+            context.LastBarTime = currentBarTime;
+            ProcessNewBar(currentTime, currentBarTime, context); // This call is already correct, ensuring it stays this way.
+        }
+
+        // Kiểm tra các điều kiện giao dịch với cache
+        if (!CheckTradingConditionsOptimized(currentTime, context)) {
+            ManageExistingPositions(context);
+            UpdateDashboardIfNeeded(currentTime, context);
+            return;
+        }
+
+        // Xử lý tín hiệu giao dịch với bảo vệ lỗi
+        ProcessTradeSignalsWithProtection(context);
+
+        // Quản lý các vị thế đang mở
+        ManageExistingPositions(context);
+
+        // Cập nhật dashboard và hiệu suất định kỳ
+        UpdateDashboardIfNeeded(currentTime, context);
+        UpdatePerformanceMetrics(currentTime, context); // This call is already correct
+        
+        // Reset error counter khi thành công
+        if (context.ErrorCounter > 0) {
+            context.ErrorCounter = 0;
+        }
+        
+    } catch (const CException* e) {
+        context.ErrorCounter++;
+        context.Logger.LogError("Lỗi ngoại lệ trong OnTick #" + IntegerToString(context.TickCounter) + ": " + e.Description());
+        } // Keep original catch blocks for CException and generic exception
+    
+        e.Delete();
+        
+        // Kích hoạt emergency stop nếu quá nhiều lỗi
+        if (g_ErrorCounter > 1000) {
+            g_EmergencyStop = true;
+            g_Logger.LogError("EMERGENCY STOP: Quá nhiều lỗi liên tiếp (" + IntegerToString(g_ErrorCounter) + ")");
+        }
+    } catch (...) {
+        g_ErrorCounter++;
+        if (g_Logger != NULL) {
+            g_Logger.LogError("Lỗi không xác định trong OnTick #" + IntegerToString(g_TickCounter));
+        }
+        
+        // Kích hoạt emergency stop nếu quá nhiều lỗi
+        if (g_ErrorCounter > 1000) {
+            g_EmergencyStop = true;
+            if (g_Logger != NULL) {
+                g_Logger.LogError("EMERGENCY STOP: Quá nhiều lỗi không xác định (" + IntegerToString(g_ErrorCounter) + ")");
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Hàm kiểm tra các điều kiện giao dịch với tối ưu hóa cache      |
+//+------------------------------------------------------------------+
+bool ApexPullback::CheckTradingConditionsOptimized(datetime currentTime, CLogger* logger, CRiskManager* riskManager) {
+    // Cache kết quả kiểm tra để tránh tính toán lặp lại
+    static bool lastSessionCheck = true;
+    static bool lastNewsCheck = false;
+    static datetime lastSessionCheckTime = 0;
+    static datetime lastNewsCheckTime = 0;
+    
+    // Kiểm tra phiên giao dịch (cache 60 giây)
+    if (currentTime - lastSessionCheckTime > 60) {
+        lastSessionCheck = IsAllowedTradingSession();
+        lastSessionCheckTime = currentTime;
+    }
+    
+    if (!lastSessionCheck) {
+        if (g_EAContext.Logger != NULL && g_EAContext.Logger.IsVerboseLogging() && currentTime - lastSessionCheckTime < 5) {
+            g_Logger.LogDebug("Ngoài phiên giao dịch cho phép.");
+        }
+        return false;
+    }
+
+    // Kiểm tra ảnh hưởng tin tức (cache 30 giây)
+    if (currentTime - lastNewsCheckTime > 30) {
+        lastNewsCheck = IsNewsImpactPeriod();
+        lastNewsCheckTime = currentTime;
+    }
+    
+    if (lastNewsCheck) {
+        if (g_EAContext.Logger != NULL && g_EAContext.Logger.IsVerboseLogging() && currentTime - lastNewsCheckTime < 5) {
+            g_Logger.LogDebug("Hiện đang trong thời gian ảnh hưởng tin tức. Giao dịch tạm dừng.");
+        }
+        return false;
+    }
+
+    // Kiểm tra spread với cache thông minh
+    double currentSpread = GetCachedSpread(context); // Pass context
+    double maxSpreadValue = context.MaxSpreadPoints * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+    
+    if (currentSpread > maxSpreadValue) {
+        if (context.EnableDetailedLogs && context.Logger != NULL) {
+            context.Logger.LogDebug("Spread hiện tại (" + DoubleToString(currentSpread, 2) + 
+                             ") vượt quá ngưỡng tối đa (" + DoubleToString(maxSpreadValue, 2) + ")");
+        }
+        return false;
+    }
+    
+    // Kiểm tra drawdown hiện tại
+    if (context.RiskManager != NULL && context.RiskManager.GetCurrentDrawdownPercent() > context.MaxDrawdown * 0.8) { // Cảnh báo khi gần đạt max drawdown
+        if (context.Logger != NULL && context.EnableDetailedLogs) {
+            context.Logger.LogWarning("Drawdown hiện tại (" + DoubleToString(context.RiskManager.GetCurrentDrawdownPercent(), 2) +
+                              "%) gần đạt giới hạn tối đa (" + DoubleToString(context.MaxDrawdown, 2) + "%)");
+        }
+        return false;
+    }
+    
+    // Kiểm tra số lệnh trong ngày
+    if (context.DayTrades >= context.MaxTradesPerDay) {
+        if (context.EnableDetailedLogs && context.Logger != NULL) {
+            context.Logger.LogDebug("Đã đạt số lệnh tối đa trong ngày: " + IntegerToString(context.DayTrades));
+        }
+        return false;
+    }
+    
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Hàm lấy spread với cache để tối ưu hiệu suất                   |
+//+------------------------------------------------------------------+
+double GetCachedSpread(EAContext* context) { // Accept context
+    if (context == NULL) return SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(_Symbol, SYMBOL_POINT); // Fallback if context is null
+
+    datetime currentTime = TimeCurrent();
+    
+    // Cache spread trong 2 giây
+    if (currentTime - context.SpreadCacheTime > 2) {
+        context.CachedSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+        context.SpreadCacheTime = currentTime;
+    }
+    
+    return context.CachedSpread;
+}
+
+//+------------------------------------------------------------------+
+//| Hàm quản lý các vị thế đang mở                                  |
+//+------------------------------------------------------------------+
+void ApexPullback::ManageExistingPositions(EAContext* context) { // Accept context
+    if (context == NULL || context.PositionManager == NULL) return;
+
+    try {
+        context.PositionManager.UpdateOpenPositions();
+    } catch (...) {
+        if (context.Logger != NULL) {
+            context.Logger.LogError("Lỗi khi cập nhật vị thế đang mở");
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Hàm cập nhật dashboard có điều kiện và tối ưu                  |
+//+------------------------------------------------------------------+
+void ApexPullback::UpdateDashboardIfNeeded(datetime currentTime, EAContext* context) { // Accept context
+    if (context == NULL || context.Dashboard == NULL || !context.DisplayDashboard) return;
+    
+    // Cập nhật dashboard mỗi 5 giây để tránh lag (tăng từ 3 giây)
+    if (currentTime - context.LastDashboardUpdateTime >= 5) {
+        try {
+            context.Dashboard.Update();
+            context.LastDashboardUpdateTime = currentTime;
+            
+            // Reset error count khi thành công
+            if (context.DashboardErrorCount > 0) {
+                context.DashboardErrorCount = 0;
+            }
+        } catch (...) {
+            context.DashboardErrorCount++;
+            if (context.Logger != NULL && context.DashboardErrorCount < 10) { // Chỉ log 10 lỗi đầu tiên
+                context.Logger.LogError("Lỗi khi cập nhật dashboard (lần thứ " + IntegerToString(context.DashboardErrorCount) + ")");
+            }
+            
+            // Vô hiệu hóa dashboard nếu quá nhiều lỗi
+            if (context.DashboardErrorCount > 50) {
+                context.DisplayDashboard = false; // Update context's display flag
+                if (context.Logger != NULL) {
+                    context.Logger.LogError("Vô hiệu hóa dashboard do quá nhiều lỗi liên tiếp");
+                }
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Hàm xử lý nến mới với logic tối ưu                             |
+//+------------------------------------------------------------------+
+void ApexPullback::ProcessNewBar(datetime currentTime, datetime currentBarTime, EAContext* context) {
+    if (context == NULL) return;
+
+    if (context.Logger != NULL) {
+        context.Logger.LogInfo("Nến mới được phát hiện tại " + TimeToString(currentBarTime));
+    }
+    
+    // Cập nhật dữ liệu thị trường với xử lý lỗi
+    if (!UpdateMarketDataOptimized(currentTime, context)) { // Call with context
+        if (context.Logger != NULL) {
+            context.Logger.LogWarning("Không thể cập nhật dữ liệu thị trường.");
+        }
+        return;
+    }
+    
+    // Cập nhật các điểm swing nếu cần
+    if (context.SwingDetector != NULL) {
+        try {
+            context.SwingDetector.Update();
+        } catch (...) {
+            if (context.Logger != NULL) {
+                context.Logger.LogError("Lỗi khi cập nhật SwingDetector");
+            }
+        }
+    }
+    
+    // Phân tích và tìm tín hiệu với xử lý lỗi
+    ProcessNewBarSignals(context); // Call with context
+    
+    // Thích ứng với điều kiện thị trường dài hạn (mỗi 4 giờ thay vì 24 giờ)
+    if (currentTime - context.LastAdaptationTime > 14400) { // 14400 giây = 4 giờ
+        if (context.RiskManager != NULL) {
+            try {
+                if (context.RiskManager.AdaptToMarketCycle()) {
+                    context.LastAdaptationTime = currentTime;
+                    if (context.Logger != NULL) {
+                        context.Logger.LogInfo("Đã thích ứng với chu kỳ thị trường.");
+                    }
+                }
+            } catch (...) {
+                if (context.Logger != NULL) {
+                    context.Logger.LogError("Lỗi khi thích ứng chu kỳ thị trường");
+                }
+            }
+        }
+    }
+    
+    // Reset daily trade counter vào đầu ngày mới
+    static int lastDay = -1;
     MqlDateTime dt;
     TimeToStruct(currentTime, dt);
     
-    static int lastUpdateDay = -1;
-    if (dt.day_of_week == 1 && dt.day != lastUpdateDay) {
-        UpdateAtrHistory();
-        UpdateSpreadHistory();
-        lastUpdateDay = dt.day;
+    if (dt.day != lastDay) {
+        context.DayTrades = 0; // Use context.DayTrades
+        lastDay = dt.day;
+        if (context.Logger != NULL) {
+            context.Logger.LogInfo("Reset bộ đếm giao dịch ngày mới: " + TimeToString(currentTime));
+        }
     }
-    
-    // Cập nhật tin tức nếu sử dụng bộ lọc tin
-    if (::NewsFilter != NEWS_NONE && g_NewsFilter != NULL) {
-        g_NewsFilter.UpdateNews();
-    }
-    
-    // Kiểm tra bảo vệ DD
-    CheckDrawdownProtection();
-    
-    // Cập nhật Dashboard
-    if (g_Dashboard != NULL && DisplayDashboard) {
-        g_Dashboard.Update(g_CurrentProfile);
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Trade transaction function                                       |
-//+------------------------------------------------------------------+
-void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest& request, const MqlTradeResult& result) {
-    // Cho TradeManager xử lý giao dịch
-    if (g_TradeManager != NULL) {
-        g_TradeManager.ProcessTransaction(trans, request, result);
-    }
-    
-    // Xử lý khi có lệnh đóng
-    if (trans.type == TRADE_TRANSACTION_DEAL_ADD && trans.deal > 0) {
-        // Chỉ xử lý giao dịch thuộc EA này
-        if (HistoryDealGetInteger(trans.deal, DEAL_MAGIC) == MagicNumber && 
-            HistoryDealGetInteger(trans.deal, DEAL_ENTRY) == DEAL_ENTRY_OUT) {
-            
-            // Lấy thông tin lệnh
-            double profit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT);
-            bool isWin = (profit > 0);
-            
-            // Xử lý comment để lấy scenario
-            string dealComment = HistoryDealGetString(trans.deal, DEAL_COMMENT);
-            string scenario = ""; 
-            
-            // Cố gắng trích xuất scenario từ comment
-            if (StringFind(dealComment, "SCENARIO=") >= 0) {
-                int startPos = StringFind(dealComment, "SCENARIO=") + 9;
-                int endPos = StringFind(dealComment, ";", startPos);
-                if (endPos < 0) endPos = StringLen(dealComment);
-                
-                scenario = StringSubstr(dealComment, startPos, endPos - startPos);
-            } else {
-                scenario = "PULLBACK"; // Mặc định
-            }
-            
-            // Cập nhật thống kê
-            if (isWin) {
-                g_ConsecutiveLosses = 0;
-                LogMessage("Lệnh đóng lãi: " + DoubleToString(profit, 2) + " " + AccountInfoString(ACCOUNT_CURRENCY), true);
-                
-                // Cập nhật Asset Profile nếu bật
-                if (EnableAssetProfile && g_AssetProfiler != NULL) {
-                    UpdateAssetProfile(true, profit, scenario);
-                }
-            } else {
-                g_ConsecutiveLosses++;
-                LogMessage("Lệnh đóng lỗ: " + DoubleToString(profit, 2) + " " + AccountInfoString(ACCOUNT_CURRENCY) + 
-                         ", Thua liên tiếp: " + IntegerToString(g_ConsecutiveLosses), true);
-                
-                // Cập nhật Asset Profile nếu bật
-                if (EnableAssetProfile && g_AssetProfiler != NULL) {
-                    UpdateAssetProfile(false, profit, scenario);
-                }
-                
-                // Kiểm tra điều kiện tạm dừng do chuỗi thua
-                if (EnableAutoPause && g_ConsecutiveLosses >= MaxConsecutiveLosses) {
-                    g_CurrentState = STATE_PAUSED;
-                    g_PauseEndTime = TimeCurrent() + PauseDurationMinutes * 60;
-                    LogMessage("EA tạm dừng do đạt giới hạn thua liên tiếp: " + IntegerToString(g_ConsecutiveLosses) + 
-                             " lệnh. Tiếp tục sau: " + TimeToString(g_PauseEndTime, TIME_DATE|TIME_MINUTES), true);
-                    
-                    // Gửi thông báo
-                    if (AlertsEnabled) {
-                        SendAlert("EA tạm dừng do thua " + IntegerToString(g_ConsecutiveLosses) + " lệnh liên tiếp", true);
-                        
-                        // Gửi thông báo riêng cho sự kiện rủi ro
-                        if (EnableRiskEventNotify && EnableTelegramNotify && g_Logger != NULL) {
-                            string riskMsg = "⚠️ CẢNH BÁO RỦI RO: Thua " + IntegerToString(g_ConsecutiveLosses) + 
-                                          " lệnh liên tiếp! EA tạm dừng đến " + 
-                                          TimeToString(g_PauseEndTime, TIME_DATE|TIME_MINUTES);
-                            g_Logger.SendTelegramMessage(riskMsg);
-                        }
-                    }
-                    
-                    UpdateEAState();
+}"Lỗi khi thích ứng chu kỳ thị trường");
                 }
             }
-            
-            // Cập nhật Dashboard nếu có
-            if (g_Dashboard != NULL && DisplayDashboard) {
-                g_Dashboard.Update(g_CurrentProfile);
-            }
+        }
+    }
+    
+    // Reset daily trade counter vào đầu ngày mới
+    static int lastDay = -1;
+    MqlDateTime dt;
+    TimeToStruct(currentTime, dt);
+    
+    if (dt.day != lastDay) {
+        g_DayTrades = 0;
+        lastDay = dt.day;
+        if (logger != NULL) {
+            logger.LogInfo("Reset bộ đếm giao dịch ngày mới: " + TimeToString(currentTime));
         }
     }
 }
 
 //+------------------------------------------------------------------+
-//| Khởi tạo các module chính                                        |
+//| Hàm cập nhật dữ liệu thị trường với tối ưu hóa                 |
 //+------------------------------------------------------------------+
-bool InitializeModules() {
-    // Đã khởi tạo Logger ở OnInit, kiểm tra lại
-    if (g_Logger == NULL) {
-        Print("LỖI: Logger chưa được khởi tạo");
-        return false;
-    }
-    
-    // Khởi tạo SessionManager
-    g_SessionManager = new ApexPullback::CSessionManager();
-    if (g_SessionManager == NULL) {
-        LogMessage("LỖI: Không thể tạo Session Manager", true);
-        return false;
-    }
-    
-    if (!g_SessionManager.Initialize(FilterBySession, GmtOffset, (int)SessionFilter, 
-                                  TradeLondonOpen, TradeNewYorkOpen)) {
-        LogMessage("LỖI: Không thể khởi tạo Session Manager", true);
-        return false;
-    }
-    
-    // Khởi tạo MarketProfile
-    g_MarketProfile = new ApexPullback::CMarketProfile();
-    if (g_MarketProfile == NULL) {
-        LogMessage("LỖI: Không thể tạo Market Profile", true);
-        return false;
-    }
-    
-    if (!g_MarketProfile.Initialize(_Symbol, MainTimeframe, EMA_Fast, EMA_Medium, EMA_Slow,
-                                UseMultiTimeframe, HigherTimeframe, g_Logger)) {
-        LogMessage("LỖI: Không thể khởi tạo Market Profile", true);
-        return false;
-    }
-    
-    // Thiết lập tham số thêm
-    g_MarketProfile.SetParameters(MinAdxValue, MaxAdxValue, GetAdaptiveVolatilityThreshold(), MarketPreset);
-    
-    // Khởi tạo SwingDetector
-    g_SwingDetector = new ApexPullback::CSwingDetector();
-    if (g_SwingDetector == NULL) {
-        LogMessage("LỖI: Không thể tạo Swing Detector", true);
-        return false;
-    }
-    
-    if (!g_SwingDetector.Initialize(_Symbol, MainTimeframe, g_Logger)) {
-        LogMessage("LỖI: Không thể khởi tạo Swing Detector", true);
-        return false;
-    }
-    g_SwingDetector.SetParameters(EnableSwingLevels);
-    
-    // Khởi tạo PatternDetector
-    g_PatternDetector = new ApexPullback::CPatternDetector();
-    if (g_PatternDetector == NULL) {
-        LogMessage("LỖI: Không thể tạo Pattern Detector", true);
-        return false;
-    }
-    
-    if (!g_PatternDetector.Initialize(_Symbol, MainTimeframe, g_Logger)) {
-        LogMessage("LỖI: Không thể khởi tạo Pattern Detector", true);
-        return false;
-    }
-    
-    // Khởi tạo RiskManager
-    g_RiskManager = new ApexPullback::CRiskManager();
-    if (g_RiskManager == NULL) {
-        LogMessage("LỖI: Không thể tạo Risk Manager", true);
-        return false;
-    }
-    
-    if (!g_RiskManager.Initialize(RiskPercent, PropFirmMode, DailyLossLimit, MaxDrawdown,
-                               MaxTradesPerDay, MaxConsecutiveLosses, DrawdownReduceThreshold, 
-                               g_DayStartEquity, g_Logger)) {
-        LogMessage("LỖI: Không thể khởi tạo Risk Manager", true);
-        return false;
-    }
-    
-    // Thiết lập tham số thêm
-    g_RiskManager.SetTaperedRisk(EnableTaperedRisk, MinRiskMultiplier);
-    
-    // Khởi tạo TradeManager
-    g_TradeManager = new ApexPullback::CTradeManager();
-    if (g_TradeManager == NULL) {
-        LogMessage("LỖI: Không thể tạo Trade Manager", true);
-        return false;
-    }
-    
-    if (!g_TradeManager.Initialize(_Symbol, MagicNumber, OrderComment, g_Logger)) {
-        LogMessage("LỖI: Không thể khởi tạo Trade Manager", true);
-        return false;
-    }
-    
-    // Thiết lập tham số
-    g_TradeManager.SetEntryMode(EntryMode);
-    g_TradeManager.SetTrailingParameters(UseAdaptiveTrailing, TrailingMode, TrailingAtrMultiplier,
-                                      BreakEvenAfterR, BreakEvenBuffer);
-    
-    // Khởi tạo PositionManager
-    g_PositionManager = new ApexPullback::CPositionManager();
-    if (g_PositionManager == NULL) {
-        LogMessage("LỖI: Không thể tạo Position Manager", true);
-        return false;
-    }
-    
-    if (!g_PositionManager.Initialize(_Symbol, MagicNumber, g_TradeManager, g_Logger)) {
-        LogMessage("LỖI: Không thể khởi tạo Position Manager", true);
-        return false;
-    }
-    
-    // Thiết lập tham số
-    g_PositionManager.SetPartialCloseParameters(UsePartialClose, PartialCloseR1, PartialCloseR2, 
-                                             PartialClosePercent1, PartialClosePercent2);
-    g_PositionManager.SetScalingParameters(EnableScaling, MaxScalingCount, ScalingRiskPercent, 
-                                        RequireBreakEvenForScaling);
-    g_PositionManager.EnableChandelierExit(UseChandelierExit, ChandelierPeriod, ChandelierMultiplier);
-    
-    // Khởi tạo NewsFilter
-    if (NewsFilter != NEWS_NONE) {
-        g_NewsFilter = new ApexPullback::CNewsFilter();
-        if (g_NewsFilter == NULL) {
-            LogMessage("LỖI: Không thể tạo News Filter", true);
-            return false;
-        }
-        
-        if (!g_NewsFilter.Initialize(_Symbol, (int)NewsFilter, NewsImportance, 
-                                  MinutesBeforeNews, MinutesAfterNews, NewsDataFile, g_Logger)) {
-            LogMessage("CẢNH BÁO: Không thể khởi tạo News Filter. Bộ lọc tin tức có thể không hoạt động chính xác", true);
-        }
-    }
-    
-    // Khởi tạo Asset Profiler nếu được bật
-    if (EnableAssetProfile) {
-        g_AssetProfiler = new ApexPullback::CAssetProfiler();
-        if (g_AssetProfiler == NULL) {
-            LogMessage("LỖI: Không thể tạo Asset Profiler", true);
-            return false;
-        }
-        
-        if (!g_AssetProfiler.Initialize(_Symbol, MinimumTradesForProfile, ProfileAdaptPercent, g_Logger)) {
-            LogMessage("CẢNH BÁO: Không thể khởi tạo Asset Profiler. Tính năng tự học có thể không hoạt động chính xác", true);
-        } else {
-            // Phân tích hồ sơ tài sản
-            if (g_AssetProfiler.AnalyzeAsset(AssetProfileDays)) {
-                LogMessage("Asset Profile được tạo thành công cho " + _Symbol);
-            } else {
-                LogMessage("CẢNH BÁO: Không thể tạo Asset Profile đầy đủ", true);
-            }
-        }
-    }
-    
-    LogMessage("Đã khởi tạo tất cả các module thành công");
-    return true;
-}
+bool ApexPullback::UpdateMarketDataOptimized(datetime currentTime, EAContext* context) {
+    if (context == NULL) return false;
 
-//+------------------------------------------------------------------+
-//| Dọn dẹp module khi kết thúc                                      |
-//+------------------------------------------------------------------+
-void CleanupModules() {
-    // Dọn dẹp theo thứ tự ngược lại với khởi tạo
-    
-    // Dashboard
-    if (g_Dashboard != NULL) {
-        delete g_Dashboard;
-        g_Dashboard = NULL;
+    // Chỉ cập nhật nếu đã qua 30 giây từ lần cập nhật cuối
+    if (currentTime - context.LastMarketDataUpdate < 30) {
+        return true; // Sử dụng dữ liệu cache
     }
     
-    // Asset Profiler
-    if (g_AssetProfiler != NULL) {
-        delete g_AssetProfiler;
-        g_AssetProfiler = NULL;
-    }
-    
-    // NewsFilter
-    if (g_NewsFilter != NULL) {
-        delete g_NewsFilter;
-        g_NewsFilter = NULL;
-    }
-    
-    // PositionManager
-    if (g_PositionManager != NULL) {
-        delete g_PositionManager;
-        g_PositionManager = NULL;
-    }
-    
-    // TradeManager
-    if (g_TradeManager != NULL) {
-        delete g_TradeManager;
-        g_TradeManager = NULL;
-    }
-    
-    // RiskManager
-    if (g_RiskManager != NULL) {
-        delete g_RiskManager;
-        g_RiskManager = NULL;
-    }
-    
-    // PatternDetector
-    if (g_PatternDetector != NULL) {
-        delete g_PatternDetector;
-        g_PatternDetector = NULL;
-    }
-    
-    // SwingDetector
-    if (g_SwingDetector != NULL) {
-        delete g_SwingDetector;
-        g_SwingDetector = NULL;
-    }
-    
-    // MarketProfile
-    if (g_MarketProfile != NULL) {
-        delete g_MarketProfile;
-        g_MarketProfile = NULL;
-    }
-    
-    // SessionManager
-    if (g_SessionManager != NULL) {
-        delete g_SessionManager;
-        g_SessionManager = NULL;
-    }
-    
-    // Logger - xóa cuối cùng
-    if (g_Logger != NULL) {
-        delete g_Logger;
-        g_Logger = NULL;
+    try {
+        // UpdateMarketData will need to be refactored to use context or be context-aware
+        bool result = UpdateMarketData(); // Assuming UpdateMarketData will be refactored or is context-aware
+        if (result) {
+            context.LastMarketDataUpdate = currentTime;
+        }
+        return result;
+    } catch (...) {
+        if (context.Logger != NULL) {
+            context.Logger.LogError("Lỗi trong UpdateMarketDataOptimized");
+        }
+        return false;
     }
 }
 
 //+------------------------------------------------------------------+
-//| Cập nhật trạng thái EA                                           |
+//| Hàm xử lý tín hiệu giao dịch với bảo vệ lỗi nâng cao           |
 //+------------------------------------------------------------------+
-void UpdateEAState() {
-    // Lưu trạng thái trước đó để kiểm tra thay đổi
-    ENUM_EA_STATE previousState = g_CurrentState;
+void ApexPullback::ProcessTradeSignalsWithProtection(EAContext* context) {
+    static int signalErrorCount = 0;
+    static datetime lastSignalError = 0;
     
-    // Kiểm tra điều kiện tạm dừng
-    
-    // 1. Kiểm tra tạm dừng do Drawdown
-    if (g_CurrentState == STATE_RUNNING && g_RiskManager != NULL) {
-        double currentDD = g_RiskManager.GetCurrentDrawdown();
+    try {
+        ProcessTradeSignals(context);
         
-        if (currentDD >= MaxDrawdown) {
-            g_CurrentState = STATE_PAUSED;
-            g_PauseEndTime = TimeCurrent() + PauseDurationMinutes * 60;
-            LogMessage("EA tạm dừng do vượt ngưỡng Drawdown: " + DoubleToString(currentDD, 2) + 
-                     "% > " + DoubleToString(MaxDrawdown, 2) + "%", true);
-            
-            // Gửi thông báo riêng cho sự kiện rủi ro
-            if (EnableRiskEventNotify && EnableTelegramNotify && g_Logger != NULL) {
-                string riskMsg = "⚠️ CẢNH BÁO RỦI RO: Drawdown " + DoubleToString(currentDD, 2) + 
-                              "% vượt ngưỡng " + DoubleToString(MaxDrawdown, 2) + 
-                              "%! EA tạm dừng đến " + TimeToString(g_PauseEndTime, TIME_DATE|TIME_MINUTES);
-                g_Logger.SendTelegramMessage(riskMsg);
-            }
+        // Reset error count khi thành công
+        if (signalErrorCount > 0) {
+            signalErrorCount = 0;
         }
-        else if (currentDD >= DrawdownReduceThreshold && EnableTaperedRisk) {
-            g_CurrentState = STATE_REDUCED_RISK;
-            LogMessage("EA chuyển sang chế độ giảm risk do DD: " + DoubleToString(currentDD, 2) + "%", true);
-        }
-    }
-    
-    // 2. Kiểm tra tạm dừng do volatility
-    if (g_CurrentState == STATE_RUNNING && EnableVolatilityFilter && g_MarketProfile != NULL && !SkipVolatilityCheck) {
-        double volatilityRatio = g_CurrentProfile.atrRatio;
-        double adaptiveThreshold = GetAdaptiveVolatilityThreshold();
-        
-        if (volatilityRatio > adaptiveThreshold) {
-            g_CurrentState = STATE_PAUSED;
-            g_PauseEndTime = TimeCurrent() + PauseDurationMinutes * 60;
-            LogMessage("EA tạm dừng do biến động quá cao: " + DoubleToString(volatilityRatio, 2) + 
-                     "x > " + DoubleToString(adaptiveThreshold, 2) + "x ATR trung bình", true);
-        }
-    }
-    
-    // 3. Kiểm tra tạm dừng do spread cao
-    if (g_CurrentState == STATE_RUNNING && !IsSpreadAcceptable()) {
-        static datetime lastSpreadPause = 0;
+    } catch (...) {
+        signalErrorCount++;
         datetime currentTime = TimeCurrent();
         
-        // Chỉ tạm dừng mỗi 5 phút do spread cao để tránh quá nhiều log
-        if (currentTime - lastSpreadPause > 300) {
-            // Sử dụng spread max thích ứng
-            double maxSpread = EnableAdaptiveThresholds ? GetAdaptiveMaxSpread() : MaxSpreadPoints;
-            
-            g_CurrentState = STATE_PAUSED;
-            g_PauseEndTime = currentTime + 300; // Tạm dừng 5 phút
-            LogMessage("EA tạm dừng do spread cao: " + 
-                     DoubleToString(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD), 1) + 
-                     " > " + DoubleToString(maxSpread, 1) + " điểm", true);
-            lastSpreadPause = currentTime;
-        }
-    }
-    
-    // 4. Kiểm tra điều kiện tự động resume
-    if (g_CurrentState == STATE_PAUSED && EnableAutoResume) {
-        datetime currentTime = TimeCurrent();
-        
-        // Hết thởi gian tạm dừng
-        if (currentTime >= g_PauseEndTime) {
-            g_CurrentState = STATE_RUNNING;
-            LogMessage("EA tự động tiếp tục hoạt động sau thởi gian tạm dừng", true);
+        if (context.Logger != NULL && (currentTime - lastSignalError > 60)) { // Chỉ log mỗi phút
+            context.Logger.LogError("Lỗi khi xử lý tín hiệu giao dịch (lần thứ " + IntegerToString(signalErrorCount) + ")");
+            lastSignalError = currentTime;
         }
         
-        // Kiểm tra phiên London Open
-        if (ResumeOnLondonOpen && g_SessionManager != NULL && g_SessionManager.IsLondonOpening()) {
-            g_CurrentState = STATE_RUNNING;
-            LogMessage("EA tự động tiếp tục vào phiên mở cửa London", true);
-        }
-    }
-    
-    // Ghi log khi có thay đổi trạng thái
-    if (previousState != g_CurrentState) {
-        LogMessage("Trạng thái EA thay đổi: " + GetStateDescription(previousState) + 
-                 " -> " + GetStateDescription(g_CurrentState), true);
-        
-        // Cập nhật Dashboard
-        if (g_Dashboard != NULL && DisplayDashboard) {
-            g_Dashboard.Update(g_CurrentProfile);
-        }
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Quản lý trạng thái EA                                           |
-//+------------------------------------------------------------------+
-void ManageEAState() {
-    // Xử lý theo trạng thái hiện tại
-    switch (g_CurrentState) {
-        case STATE_RUNNING:
-            // Trạng thái bình thường, sử dụng risk bình thường
-            g_CurrentRisk = RiskPercent;
-            break;
-            
-        case STATE_REDUCED_RISK:
-            // Giảm risk theo drawdown
-            g_CurrentRisk = CalculateAdaptiveRiskPercent();
-            break;
-            
-        case STATE_PAUSED:
-            // Tạm dừng, không làm gì
-            break;
-            
-        default:
-            // Các trạng thái khác
-            break;
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Lấy mô tả trạng thái EA                                         |
-//+------------------------------------------------------------------+
-string GetStateDescription(ENUM_EA_STATE state) {
-    switch (state) {
-        case STATE_INIT:       return "Đang khởi tạo";
-        case STATE_RUNNING:    return "Đang hoạt động";
-        case STATE_PAUSED:     return "Tạm dừng";
-        case STATE_REDUCED_RISK: return "Giảm risk";
-        case STATE_ERROR:      return "Lỗi";
-        default:               return "Không xác định";
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Cập nhật dữ liệu thị trường                                      |
-//+------------------------------------------------------------------+
-bool UpdateMarketData() {
-    if (g_MarketProfile == NULL || g_SwingDetector == NULL)
-        return false;
-    
-    // Cập nhật MarketProfile
-    if (!g_MarketProfile.Update()) {
-        LogMessage("Không thể cập nhật Market Profile", true);
-        return false;
-    }
-    
-    // Cập nhật SwingDetector
-    if (!g_SwingDetector.Update()) {
-        LogMessage("Không thể cập nhật Swing Detector", true);
-        return false;
-    }
-    
-    // Phân tích profile thị trường
-    g_CurrentProfile = AnalyzeMarketProfile();
-    
-    // Log thông tin thị trường
-    if (EnableDetailedLogs) {
-        string profileInfo = StringFormat("Market Profile: POC: %.5f, VAH: %.5f, VAL: %.5f", 
-                                        g_CurrentProfile.pointOfControl, 
-                                        g_CurrentProfile.valueAreaHigh, g_CurrentProfile.valueAreaLow);
-        LogMessage(profileInfo);
-    }
-    
-    // Log thông tin thị trường (chỉ khi log chi tiết)
-    if (EnableDetailedLogs) {
-        string profileDesc = StringFormat(
-            "Market Profile: Trend=%s, Session=%s, ATR=%.5f (%.1f%%), ADX=%.1f, Volatility=%s, Transitioning=%s",
-            EnumToString((ENUM_TREND_TYPE)g_CurrentProfile.trend),
-            EnumToString(g_CurrentProfile.currentSession),
-            g_CurrentProfile.atrCurrent,
-            g_CurrentProfile.volatilityRatio * 100,
-            g_CurrentProfile.adxValue,
-            (g_CurrentProfile.isVolatile ? "High" : "Normal"),
-            (g_CurrentProfile.isTransitioning ? "Yes" : "No"));
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Phân tích profile thị trường                                     |
-//+------------------------------------------------------------------+
-MarketProfileData AnalyzeMarketProfile()
-{
-    MarketProfileData profile;
-    
-    // Khai báo các biến cần thiết
-    double rsiValue = 50.0;
-    double rsiSlope = 0.0;
-    double macdValue = 0.0;
-    double macdSignal = 0.0;
-    double macdHist = 0.0;
-    double macdHistSlope = 0.0;
-    double atrValue = 0.0;
-    
-    // Lấy giá trị RSI từ indicator
-    int handleRSI = iRSI(_Symbol, PERIOD_CURRENT, 14, PRICE_CLOSE);
-    if (handleRSI != INVALID_HANDLE) {
-        double rsiBuffer[];
-        ArraySetAsSeries(rsiBuffer, true);
-        if (CopyBuffer(handleRSI, 0, 0, 3, rsiBuffer) > 0) {
-            rsiValue = rsiBuffer[0];
-            // Tính RSI slope (chênh lệch giữa giá trị hiện tại và trước)
-            rsiSlope = rsiBuffer[0] - rsiBuffer[1];
-        }
-        IndicatorRelease(handleRSI);
-    }
-    
-    // Lấy giá trị MACD
-    int handleMACD = iMACD(_Symbol, PERIOD_CURRENT, 12, 26, 9, PRICE_CLOSE);
-    if (handleMACD != INVALID_HANDLE) {
-        double macdMainBuffer[];
-        double macdSignalBuffer[];
-        ArraySetAsSeries(macdMainBuffer, true);
-        ArraySetAsSeries(macdSignalBuffer, true);
-        
-        if (CopyBuffer(handleMACD, 0, 0, 3, macdMainBuffer) > 0 &&
-            CopyBuffer(handleMACD, 1, 0, 3, macdSignalBuffer) > 0) {
-            macdValue = macdMainBuffer[0];
-            macdSignal = macdSignalBuffer[0];
-            macdHist = macdValue - macdSignal;
-            macdHistSlope = (macdMainBuffer[0] - macdSignalBuffer[0]) - 
-                           (macdMainBuffer[1] - macdSignalBuffer[1]);
-        }
-        IndicatorRelease(handleMACD);
-    }
-    
-    // Lấy giá trị ATR
-    int handleATR = iATR(_Symbol, PERIOD_CURRENT, 14);
-    if (handleATR != INVALID_HANDLE) {
-        double atrBuffer[];
-        ArraySetAsSeries(atrBuffer, true);
-        if (CopyBuffer(handleATR, 0, 0, 1, atrBuffer) > 0) {
-            atrValue = atrBuffer[0];
-        }
-        IndicatorRelease(handleATR);
-    }
-    
-    // Thiết lập các giá trị cơ bản cho profile
-    profile.rsiValue = rsiValue;
-    profile.rsiSlope = rsiSlope;
-    profile.macdValue = macdValue;
-    profile.macdSignal = macdSignal;
-    profile.macdHistogram = macdHist;
-    profile.macdHistogramSlope = macdHistSlope;
-    profile.atrValue = atrValue;
-    
-    // Trước tiên, kiểm tra nếu module MarketProfile đã được khởi tạo
-    if (g_MarketProfile != NULL) { 
-        if (g_lastProfileTime != iTime(_Symbol, PERIOD_CURRENT, 0)) {
-            g_lastProfileTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-            // Tạm thời sử dụng các giá trị từ indicator, sẽ cập nhật profile sau khi biết chính xác tên các method
-            // Cần phải xem lại MarketProfile.mqh để biết cách truy cập đúng
-            g_CurrentProfile.pointOfControl = iClose(_Symbol, PERIOD_CURRENT, 0); // Tạm dùng giá đóng của
-            // Dùng ATR để tính ValueArea
-            double atr = iATR(_Symbol, PERIOD_CURRENT, 14);
-            g_CurrentProfile.valueAreaHigh = g_CurrentProfile.pointOfControl + atr;
-            g_CurrentProfile.valueAreaLow = g_CurrentProfile.pointOfControl - atr;
-            
-            // Đảm bảo các giá trị indicator đả được cập nhật
-            profile.rsiValue = rsiValue;
-            profile.rsiSlope = rsiSlope;
-            profile.macdValue = macdValue;
-            profile.macdSignal = macdSignal;
-            profile.macdHistogram = macdHist;
-            profile.macdHistogramSlope = macdHistSlope;
-            profile.atrValue = atrValue;
-            
-            // Tính tỷ lệ ATR hiện tại so với trung bình
-            if (g_AssetProfileManager != NULL) {
-                // Tạm thởi sử dụng giá trị mặc định cho averageATR
-                double avgATR = atrValue * 1.2; // Giả sử giá trị trung bình là 120% giá trị hiện tại
-                profile.atrRatio = (atrValue > 0 && avgATR > 0) 
-                               ? atrValue / avgATR 
-                                : 1.0;
-            }
-        } else {
-            if (g_Logger != NULL) {
-                g_Logger->LogError("Lỗi khi cập nhật Market Profile");
-            }
-            // Mặc định cho profile nếu có lỗi
-            profile.regime = REGIME_RANGING_STABLE;
-            profile.trend = MARKET_TREND_RANGING;
-            
-            // Tìm swing high/low nếu không có MarketProfile
-            double high[], low[];
-            ArraySetAsSeries(high, true);
-            ArraySetAsSeries(low, true);
-            CopyHigh(_Symbol, PERIOD_CURRENT, 0, 50, high);
-            CopyLow(_Symbol, PERIOD_CURRENT, 0, 50, low);
-            
-            // Tìm đỉnh và đáy gần nhất
-            for (int i = 5; i < 45; i++) { // 50-5 = 45
-                // Đỉnh - cao hơn 5 cây nến trước và 5 cây nến sau
-                bool isHigh = true;
-                for (int j = i-5; j <= i+5; j++) {
-                    if (j != i && j >= 0 && j < 50 && high[j] > high[i]) {
-                        isHigh = false;
-                        break;
-                    }
-                }
-                if (isHigh) {
-                    profile.recentSwingHigh = high[i];
-                    break;
-                }
-            }
-            
-            for (int i = 5; i < 45; i++) { // 50-5 = 45
-                // Đáy - thấp hơn 5 cây nến trước và 5 cây nến sau
-                bool isLow = true;
-                for (int j = i-5; j <= i+5; j++) {
-                    if (j != i && j >= 0 && j < 50 && low[j] < low[i]) {
-                        isLow = false;
-                        break;
-                    }
-                }
-                if (isLow) {
-                    profile.recentSwingLow = low[i];
-                    break;
-                }
+        // Tạm dừng xử lý tín hiệu nếu quá nhiều lỗi
+        if (signalErrorCount > 20) {
+            context.AllowNewTrades = false;
+            if (context.Logger != NULL) {
+                context.Logger.LogError("Tạm dừng giao dịch mới do quá nhiều lỗi xử lý tín hiệu");
             }
         }
     }
-    
-    // Lấy giá trị RSI
-    profile.rsiValue = 50.0; // Giá trị mặc định
-    int rsiHandle = iRSI(_Symbol, PERIOD_CURRENT, 14, PRICE_CLOSE);
-    if (rsiHandle != INVALID_HANDLE) {
-        double rsiBuffer[1];
-        if (CopyBuffer(rsiHandle, 0, 0, 1, rsiBuffer) > 0) {
-            profile.rsiValue = rsiBuffer[0];
-        }
-    }
-    
-    // Xác định xu hướng dựa trên MA
-    double ma20 = 0, ma50 = 0;
-    int ma20Handle = iMA(_Symbol, PERIOD_CURRENT, 20, 0, MODE_EMA, PRICE_CLOSE);
-    int ma50Handle = iMA(_Symbol, PERIOD_CURRENT, 50, 0, MODE_EMA, PRICE_CLOSE);
-    
-    if (ma20Handle != INVALID_HANDLE && ma50Handle != INVALID_HANDLE) {
-        double ma20Buffer[1], ma50Buffer[1];
-        if (CopyBuffer(ma20Handle, 0, 0, 1, ma20Buffer) > 0) ma20 = ma20Buffer[0];
-        if (CopyBuffer(ma50Handle, 0, 0, 1, ma50Buffer) > 0) ma50 = ma50Buffer[0];
-        
-        if (ma20 > ma50 && profile.rsiValue > 50)
-            profile.trend = MARKET_TREND_UP;
-        else if (ma20 < ma50 && profile.rsiValue < 50)
-            profile.trend = MARKET_TREND_DOWN;
-        else if (MathAbs(ma20 - ma50) < 0.0001 * ma50)
-            profile.trend = MARKET_TREND_RANGING;
-        else
-            profile.trend = MARKET_TREND_UNKNOWN;
-    }
-    
-    // Tính toán tỷ lệ biến động
-    double atrBaseline = 0;
-    int atrHandle14D = iATR(_Symbol, PERIOD_D1, 14);
-    if (atrHandle14D != INVALID_HANDLE) {
-        double atrBuffer[1];
-        if (CopyBuffer(atrHandle14D, 0, 0, 1, atrBuffer) > 0) atrBaseline = atrBuffer[0];
-    }
-    
-    if (atrBaseline > 0)
-        profile.volatilityRatio = profile.atrValue / atrBaseline;
-    else
-        profile.volatilityRatio = 1.0;
-    
-    // Xác định trạng thái biến động
-    profile.isVolatile = (profile.volatilityRatio > g_VolatilityThreshold);
-    
-    // Lấy thông tin phiên giao dịch hiện tại
-    profile.currentSession = DetermineSession(TimeCurrent());
-    
-    // Không cần chuyển đổi vì ENUM_SESSION_TYPE và ENUM_SESSION đã được đồng bộ
-    
-    // Lấy dữ liệu ADX và RSI bằng cách sử dụng indicator của MQL5
-    int adxHandle = iADX(Symbol(), Period(), 14);
-    int rsiHandle = iRSI(Symbol(), Period(), 14, PRICE_CLOSE);
-    
-    // Khai báo mảng để lưu trữ dữ liệu
-    double adxValues[1], rsiValues[1];
-    
-    // Lấy giá trị từ các indicator
-    if(CopyBuffer(adxHandle, 0, 0, 1, adxValues) > 0 && 
-       CopyBuffer(rsiHandle, 0, 0, 1, rsiValues) > 0) {
-        profile.adxValue = adxValues[0];
-        profile.rsiValue = rsiValues[0];
-    }
-    
-    // Sử dụng giá trị mặc định cho POC và VA dựa trên một số logic đơn giản
-    double high = iHigh(Symbol(), Period(), 0);
-    double low = iLow(Symbol(), Period(), 0);
-    double close = iClose(Symbol(), Period(), 0);
-    
-    // Gán giá trị vào profile
-    profile.pointOfControl = (high + low + close) / 3.0; // POC đơn giản dựa trên giá OHLC
-    profile.valueAreaHigh = high;
-    profile.valueAreaLow = low;
-    
-    // Lấy giá trị swing points
-    profile.recentSwingHigh = FindHighest(20); // Chỉ cần 1 tham số
-    profile.recentSwingLow = FindLowest(20);   // Chỉ cần 1 tham số
-    
-    return profile;
 }
 
 //+------------------------------------------------------------------+
-//| Kiểm tra xác nhận momentum                                       |
+//| Hàm cập nhật các chỉ số hiệu suất                              |
 //+------------------------------------------------------------------+
-bool IsMomentumConfirmed(bool isLong) {
-    // Lấy giá trị slope của RSI và MACD Histogram
-    double rsiSlope = g_CurrentProfile.rsiSlope;
-    double macdHistSlope = g_CurrentProfile.macdHistogramSlope;
-    double rsiValue = g_CurrentProfile.rsiValue;
-    double macdHist = g_CurrentProfile.macdHistogram;
-    
-    bool momentumConfirmed = false;
-    
-    if (isLong) {
-        // Xu hướng tăng - RSI vuột xuống dưới 40 và đang tăng trở lại
-        // + MACD Histogram tăng hoặc vuột trên 0
-        bool rsiConfirm = (rsiValue < 60 && rsiValue > 30 && rsiSlope > 0);
-        bool macdConfirm = (macdHist > 0 || macdHistSlope > 0) || 
-                          (macdHist < 0 && macdHistSlope > 0.1); // Đang tăng từ âm sang
-        
-        momentumConfirmed = rsiConfirm || macdConfirm;
-    } else {
-        // Cho xu hướng giảm, cần RSI slope < -0.25 hoặc MACD Histogram đảo chiều giảm
-        bool rsiConfirm = (rsiValue < 55.0 && rsiSlope < -0.25);
-        bool macdConfirm = (macdHist < 0 && macdHistSlope < 0) || 
-                          (macdHist > 0 && macdHistSlope < -0.1); // Đang giảm từ dương xuống
-        
-        momentumConfirmed = rsiConfirm || macdConfirm;
-    }
-    
-    if (momentumConfirmed) {
-        if (isLong) {
-            LogMessage("Xác nhận momentum: RSI slope=" + DoubleToString(rsiSlope, 2) + 
-                     ", MACD Hist slope=" + DoubleToString(macdHistSlope, 2));
-        } else {
-            LogMessage("Xác nhận momentum: RSI slope=" + DoubleToString(rsiSlope, 2) + 
-                     ", MACD Hist slope=" + DoubleToString(macdHistSlope, 2));
-        }
-    }
-    
-    return momentumConfirmed;
-}
-
-//+------------------------------------------------------------------+
-//| Ghi log message                                                  |
-//+------------------------------------------------------------------+
-void LogMessage(string message, bool isError = false) {
-    if (g_Logger != NULL) {
-        if (isError)
-            g_Logger.LogError(message);
-        else
-            g_Logger.LogInfo(message);
-    } else {
-        Print(message);
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Gửi cảnh báo/thông báo                                         |
-//+------------------------------------------------------------------+
-void SendAlert(string message, bool isImportant) {
-    // Ghi log luôn
-    LogMessage(message, isImportant);
-    
-    // Nếu cảnh báo bị tắt, return
-    if (!AlertsEnabled) return;
-    
-    // Alert trong terminal
-    if (isImportant) {
-        Alert("APEX: " + message);
-    }
-    
-    // Push notification
-    if (SendNotifications && isImportant) {
-        SendNotification("APEX: " + message);
-    }
-    
-    // Email
-    if (SendEmailAlerts && isImportant) {
-        SendMail("APEX Pullback EA v15.0 - " + _Symbol, message);
-    }
-    
-    // Telegram
-    if (EnableTelegramNotify && g_Logger != NULL && 
-       (!TelegramImportantOnly || isImportant)) {
-        g_Logger.SendTelegramMessage(message);
-    }
-}
-
-// Kiểm tra nến mới đã được định nghĩa ở trên
-// Xóa định nghĩa trùng để tránh lỗi
-
-//+------------------------------------------------------------------+
-//| Cập nhật Dashboard                                              |
-//+------------------------------------------------------------------+
-void UpdateDashboard() {
-    if (g_Dashboard == NULL || !DisplayDashboard) return;
-    
-    // Cập nhật dashboard
-    g_Dashboard.Update(g_CurrentProfile);
-}
-
-//+------------------------------------------------------------------+
-//| Chuyển đổi timeframe sang chuỗi                                 |
-//+------------------------------------------------------------------+
-string TimeframeToString(ENUM_TIMEFRAMES tf) {
-    switch (tf) {
-        case PERIOD_M1:  return "M1";
-        case PERIOD_M5:  return "M5";
-        case PERIOD_M15: return "M15";
-        case PERIOD_M30: return "M30";
-        case PERIOD_H1:  return "H1";
-        case PERIOD_H4:  return "H4";
-        case PERIOD_D1:  return "D1";
-        case PERIOD_W1:  return "W1";
-        case PERIOD_MN1: return "MN";
-        default:         return "Unknown";
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Lấy mô tả lý do kết thúc                                        |
-//+------------------------------------------------------------------+
-string GetDeinitReasonText(const int reason) {
-    switch (reason) {
-        case REASON_PROGRAM:     return "EA tự kết thúc";
-        case REASON_REMOVE:      return "EA bị xóa khỏi biểu đồ";
-        case REASON_RECOMPILE:   return "EA được biên dịch lại";
-        case REASON_CHARTCHANGE: return "Symbol hoặc khung thời gian đã thay đổi";
-        case REASON_CHARTCLOSE:  return "Biểu đồ đã đóng";
-        case REASON_PARAMETERS:  return "Tham số input đã thay đổi";
-        case REASON_ACCOUNT:     return "Tài khoản thay đổi hoặc kết nối lại";
-        case REASON_TEMPLATE:    return "Áp dụng template mới";
-        case REASON_INITFAILED:  return "OnInit() thất bại";
-        case REASON_CLOSE:       return "Terminal đã đóng";
-        default:                 return "Lý do không xác định (" + IntegerToString(reason) + ")";
-    }
-}
-
-//+------------------------------------------------------------------+
-//| [NEW] Kiểm tra thời gian cập nhật tính toán                     |
-//+------------------------------------------------------------------+
-bool ShouldUpdateCalculations(datetime lastUpdateTime) {
-    datetime currentTime = TimeCurrent();
-    return currentTime - lastUpdateTime > 300; // 5 phút
-}
-
-//+------------------------------------------------------------------+
-//| [NEW] Khởi tạo cache chỉ báo                                    |
-//+------------------------------------------------------------------+
-void InitializeIndicatorCache() {
-    if (!EnableIndicatorCache) return;
-    
-    for (int i = 0; i < 10; i++) {
-        g_IndicatorCache[i] = INVALID_HANDLE;
-    }
-}
-
-//+------------------------------------------------------------------+
-//| [NEW] Xóa cache chỉ báo                                         |
-//+------------------------------------------------------------------+
-void ClearIndicatorCache() {
-    if (!EnableIndicatorCache) return;
-    
-    for (int i = 0; i < 10; i++) {
-        if (g_IndicatorCache[i] != INVALID_HANDLE) {
-            IndicatorRelease(g_IndicatorCache[i]);
-            g_IndicatorCache[i] = INVALID_HANDLE;
-        }
-    }
-}
-
-//+------------------------------------------------------------------+
-//| [NEW] Lấy handle chỉ báo từ cache                               |
-//+------------------------------------------------------------------+
-int GetIndicatorHandle(int indicatorType, string symbol, ENUM_TIMEFRAMES timeframe) {
-    if (!EnableIndicatorCache) {
-        // Không sử dụng cache, tạo mới mỗi lần
-        switch (indicatorType) {
-            case 0: // RSI
-                return iRSI(symbol, timeframe, 14, PRICE_CLOSE);
-            case 1: // MACD
-                return iMACD(symbol, timeframe, 12, 26, 9, PRICE_CLOSE);
-            case 2: // ATR
-                return iATR(symbol, timeframe, 14);
-            default:
-                return INVALID_HANDLE;
-        }
-    }
-    
-    // Sử dụng cache
-    if (g_IndicatorCache[indicatorType] == INVALID_HANDLE) {
-        switch (indicatorType) {
-            case 0: // RSI
-                g_IndicatorCache[indicatorType] = iRSI(symbol, timeframe, 14, PRICE_CLOSE);
-                break;
-            case 1: // MACD
-                g_IndicatorCache[indicatorType] = iMACD(symbol, timeframe, 12, 26, 9, PRICE_CLOSE);
-                break;
-            case 2: // ATR
-                g_IndicatorCache[indicatorType] = iATR(symbol, timeframe, 14);
-                break;
-            default:
-                return INVALID_HANDLE;
-        }
-    }
-    
-    return g_IndicatorCache[indicatorType];
-}
-
-//+------------------------------------------------------------------+
-//| Nạp cấu hình                                                    |
-//+------------------------------------------------------------------+
-bool LoadConfiguration() {
-    string filename = "ApexPullback_" + _Symbol + ".conf";
-    
-    if (!FileIsExist(filename, FILE_COMMON)) {
-        LogMessage("Không tìm thấy file cấu hình: " + filename);
-        return false;
-    }
-    
-    int fileHandle = FileOpen(filename, FILE_READ|FILE_TXT|FILE_COMMON);
-    if (fileHandle == INVALID_HANDLE) {
-        LogMessage("Không thể mở file cấu hình: " + IntegerToString(GetLastError()));
-        return false;
-    }
-    
-    // Đọc từng dòng cấu hình
-    while (!FileIsEnding(fileHandle)) {
-        string line = FileReadString(fileHandle);
-        
-        // Bỏ qua dòng trống hoặc comment
-        if (StringLen(line) == 0 || StringGetCharacter(line, 0) == '#') {
-            continue;
-        }
-        
-        // Tách key=value
-        string parts[];
-        if (StringSplit(line, '=', parts) == 2) {
-            // Sử dụng biến trung gian để tránh lỗi l-value
-            string tempKey = StringTrimLeft(parts[0]);
-            string key = StringTrimRight(tempKey);
-            
-            string tempValue = StringTrimLeft(parts[1]);
-            string value = StringTrimRight(tempValue);
-            
-            // Xử lý các tham số
-            if (key == "RiskPercent") {
-                RiskPercent = StringToDouble(value);
-            }
-            else if (key == "MaxDrawdown") {
-                MaxDrawdown = StringToDouble(value);
-            }
-            else if (key == "DailyLossLimit") {
-                DailyLossLimit = StringToDouble(value);
-            }
-            else if (key == "SL_ATR") {
-                SL_ATR = StringToDouble(value);
-            }
-            else if (key == "TP_RR") {
-                TP_RR = StringToDouble(value);
-            }
-            else if (key == "MinAdxValue") {
-                MinAdxValue = StringToDouble(value);
-            }
-            else if (key == "StrictPriceAction") {
-                StrictPriceAction = (StringCompare(value, "true") == 0 || StringToInteger(value) == 1);
-            }
-            else if (key == "RequireSwingStructure") {
-                RequireSwingStructure = (StringCompare(value, "true") == 0 || StringToInteger(value) == 1);
-            }
-            // Thêm các tham số khác nếu cần
-        }
-    }
-    
-    FileClose(fileHandle);
-    LogMessage("Đã nạp cấu hình từ file: " + filename);
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| Lưu cấu hình                                                    |
-//+------------------------------------------------------------------+
-void SaveConfiguration() {
-    string filename = "ApexPullback_" + _Symbol + ".conf";
-    
-    int fileHandle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_COMMON);
-    if (fileHandle == INVALID_HANDLE) {
-        LogMessage("Không thể tạo file cấu hình: " + IntegerToString(GetLastError()), true);
+void ApexPullback::UpdatePerformanceMetrics(datetime currentTime, EAContext* context) {
+    // Cập nhật mỗi 5 phút
+    if (currentTime - context.LastPerformanceUpdate < 300) {
         return;
     }
     
-    // Thông tin file
-    FileWriteString(fileHandle, "# APEX Pullback EA v15.0 Configuration\n");
-    FileWriteString(fileHandle, "# Last Updated: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\n\n");
-    
-    // Lưu các tham số
-    FileWriteString(fileHandle, "RiskPercent=" + DoubleToString(RiskPercent, 2) + "\n");
-    FileWriteString(fileHandle, "MaxDrawdown=" + DoubleToString(MaxDrawdown, 2) + "\n");
-    FileWriteString(fileHandle, "DailyLossLimit=" + DoubleToString(DailyLossLimit, 2) + "\n");
-    FileWriteString(fileHandle, "SL_ATR=" + DoubleToString(SL_ATR, 2) + "\n");
-    FileWriteString(fileHandle, "TP_RR=" + DoubleToString(TP_RR, 2) + "\n");
-    FileWriteString(fileHandle, "StrictPriceAction=" + (StrictPriceAction ? "true" : "false") + "\n");
-    FileWriteString(fileHandle, "RequireSwingStructure=" + (RequireSwingStructure ? "true" : "false") + "\n");
-    
-    // Thống kê
-    if (SaveStatistics) {
-        FileWriteString(fileHandle, "\n# Statistics\n");
-        FileWriteString(fileHandle, "TotalTrades=" + IntegerToString(g_DayTrades) + "\n");
-        FileWriteString(fileHandle, "ConsecutiveLosses=" + IntegerToString(g_ConsecutiveLosses) + "\n");
+    try {
+        if (context.PerformanceTracker != NULL) {
+            context.PerformanceTracker.UpdateMetrics();
+        }
         
-        // Thêm thông tin Asset Profile nếu có
-        if (EnableAssetProfile && g_AssetProfiler != NULL) {
-            string profileStats = g_AssetProfiler.GetProfileStats();
-            FileWriteString(fileHandle, "\n# Asset Profile\n");
-            FileWriteString(fileHandle, profileStats);
+        // Cập nhật drawdown hiện tại
+        if (context.RiskManager != NULL) {
+            context.CurrentDrawdownPct = context.RiskManager.GetCurrentDrawdownPercent();
+        }
+        
+        context.LastPerformanceUpdate = currentTime;
+    } catch (...) {
+        if (context.Logger != NULL) {
+            context.Logger.LogError("Lỗi khi cập nhật chỉ số hiệu suất");
         }
     }
-    
-    FileClose(fileHandle);
-    LogMessage("Đã lưu cấu hình vào file: " + filename);
 }
 
 //+------------------------------------------------------------------+
-//| End of APEX Pullback EA v15.0                                    |
+//| Hàm xử lý tín hiệu trên nến mới                                 |
 //+------------------------------------------------------------------+
+void ApexPullback::ProcessNewBarSignals(EAContext* context) {
+    if (context == NULL) return;
+    try {
+        // Tìm kiếm tín hiệu giao dịch
+        FindTradeSignals(context); // Call with context
+    } catch (...) {
+        if (context.Logger != NULL) {
+            context.Logger.LogError("Lỗi khi tìm kiếm tín hiệu giao dịch");
+        }
+    }
+}
 
-// End of EA code
+// Hàm tìm kiếm tín hiệu giao dịch
+bool ApexPullback::FindTradeSignals(EAContext* context) {
+    if (context == NULL || context.Logger == NULL || context.MarketProfile == NULL || context.SwingDetector == NULL) {
+        if (context != NULL && context.Logger != NULL) {
+            context.Logger.LogError("Không thể tìm tín hiệu giao dịch: Module thiếu trong context.");
+        }
+        return false;
+    }
+
+    // Cài đặt cờ tín hiệu
+    bool signalFound = false;
+    
+    // Thực hiện tìm kiếm tín hiệu
+    try {
+        // Phân tích thị trường hiện tại
+        ENUM_MARKET_TREND currentTrend = context.CurrentProfileData.trend;
+        ENUM_MARKET_REGIME currentRegime = context.CurrentProfileData.regime;
+        
+        // Tìm kiếm tín hiệu pullback dựa trên xu hướng
+        if (currentTrend == TREND_UP_STRONG || currentTrend == TREND_UP_NORMAL) {
+            if (context.EnableDetailedLogs && context.Logger != NULL) {
+            context.Logger.LogDebug("Đang tìm kiếm tín hiệu pullback trong xu hướng tăng...");
+            }
+            
+            // Logic phát hiện pullback ở đây
+            // ...
+            
+        } else if (currentTrend == TREND_DOWN_STRONG || currentTrend == TREND_DOWN_NORMAL) {
+            if (context.EnableDetailedLogs && context.Logger != NULL) {
+                context.Logger.LogDebug("Đang tìm kiếm tín hiệu pullback trong xu hướng giảm...");
+            }
+            
+            // Logic phát hiện pullback ở đây
+            // ...
+            
+        } else {
+            if (context.EnableDetailedLogs && context.Logger != NULL) {
+                context.Logger.LogDebug("Không có xu hướng rõ ràng. Bỏ qua tìm kiếm tín hiệu.");
+            }
+        }
+        
+        return signalFound;
+    } catch (...) {
+        if (context.Logger != NULL) {
+            context.Logger.LogError("Lỗi không xác định trong FindTradeSignals()");
+        }
+        return false;
+    }
+}
+
+// Hàm xử lý tín hiệu giao dịch
+void ApexPullback::ProcessTradeSignals(EAContext* context) {
+    if (context == NULL || context.Logger == NULL || context.TradeManager == NULL || context.RiskManager == NULL || context.PositionManager == NULL) {
+        if (context != NULL && context.Logger != NULL) {
+            context.Logger.LogError("Không thể xử lý tín hiệu giao dịch: Module thiếu trong context.");
+        }
+        return;
+    }
+    
+    // Kiểm tra số lệnh tối đa trong ngày
+    if (context.DayTrades >= context.MaxTradesPerDay) {
+        if (context.Logger != NULL && context.EnableDetailedLogs) {
+            context.Logger.LogDebug("Đã đạt số lệnh tối đa trong ngày (" + IntegerToString(context.MaxTradesPerDay) + ")");
+        }
+        return;
+    }
+    
+    // Kiểm tra các vị thế đang mở
+    int openPositions = 0;
+    if (context.PositionManager != NULL) {
+        openPositions = context.PositionManager.GetOpenPositionsCount();
+    }
+    
+    if (openPositions >= context.MaxPositions) {
+        if (context.Logger != NULL && context.EnableDetailedLogs) {
+            context.Logger.LogDebug("Đã đạt số vị thế tối đa (" + IntegerToString(context.MaxPositions) + ")");
+        }
+        return;
+    }
+    
+    // Logic xử lý tín hiệu giao dịch
+    // ...
+}
+
+} // End namespace ApexPullback
+
+//+------------------------------------------------------------------+
+//| ChartEvent function                                              |
+//+------------------------------------------------------------------+
+void OnChartEvent(const int id,
+                  const long &lparam,
+                  const double &dparam,
+                  const string &sparam)
+  {
+//--- handle click on a graphical object
+   if(id==CHARTEVENT_OBJECT_CLICK)
+     {
+      // Call the OnClick event handler in CDashboard
+      if(ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.Dashboard != NULL)
+        {
+         ApexPullback::g_EAContext.Dashboard.OnClick(sparam);
+        }
+      // Fallback to g_Dashboard removed, g_EAContext.Dashboard should be used and checked before this point.
+     }
+  }
+
+// GetDeinitReasonText đã được định nghĩa trong FunctionDefinitions.mqh
+
+// SaveConfiguration đã được định nghĩa trong FunctionDefinitions.mqh
+
+// Định nghĩa OnDeinit
+void OnDeinit(const int reason) {
+    if (ApexPullback::g_EAContext != NULL) {
+        ApexPullback::g_EAContext.IsShuttingDown = true;
+    } else {
+        // Fallback if context is somehow null, though this shouldn't happen if OnInit was successful
+        ApexPullback::g_IsShuttingDown = true; 
+    }
+    
+    string deinit_reason_text = ApexPullback::GetDeinitReasonText(reason);
+    string deinitMessage = "APEX Pullback EA v14.0 đang kết thúc. Lý do: " + deinit_reason_text;
+    
+    // Thêm thống kê tổng quan (sử dụng context nếu có, fallback to globals if not)
+    long tickCounter = (ApexPullback::g_EAContext != NULL) ? ApexPullback::g_EAContext.TickCounter : ApexPullback::g_TickCounter;
+    long errorCounter = (ApexPullback::g_EAContext != NULL) ? ApexPullback::g_EAContext.ErrorCounter : ApexPullback::g_ErrorCounter;
+    int successfulTrades = (ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.PerformanceTracker != NULL) ? ApexPullback::g_EAContext.PerformanceTracker.GetSuccessfulTrades() : ApexPullback::g_SuccessfulTrades;
+    int failedTrades = (ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.PerformanceTracker != NULL) ? ApexPullback::g_EAContext.PerformanceTracker.GetFailedTrades() : ApexPullback::g_FailedTrades;
+
+    deinitMessage += " | Tổng Ticks: " + IntegerToString(tickCounter);
+    deinitMessage += " | Tổng Lỗi: " + IntegerToString(errorCounter);
+    deinitMessage += " | Giao dịch thành công: " + IntegerToString(successfulTrades);
+    deinitMessage += " | Giao dịch thất bại: " + IntegerToString(failedTrades);
+
+    CLogger* logger = (ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.Logger != NULL) ? ApexPullback::g_EAContext.Logger : NULL;
+
+    if (logger != NULL) {
+        logger.LogInfo(deinitMessage);
+    } else {
+        Print(deinitMessage);
+    }
+
+    // Lưu cấu hình và thống kê nếu cần
+    try {
+        if (SaveStatistics && ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.PerformanceTracker != NULL) {
+            if (logger != NULL) logger.LogInfo("Đang lưu thống kê hiệu suất...");
+            if (!ApexPullback::g_EAContext.PerformanceTracker.SavePerformanceData("PerformanceStats.csv")) {
+                if (logger != NULL) logger.LogWarning("Không thể lưu thống kê hiệu suất.");
+            } else {
+                if (logger != NULL) logger.LogInfo("Thống kê hiệu suất đã được lưu thành công.");
+            }
+        }
+        
+        // Lưu cấu hình hiện tại (SaveConfiguration might need access to g_EAContext or its logger)
+        if (ApexPullback::SaveConfiguration(ApexPullback::g_EAContext)) { // Pass context if needed
+            if (logger != NULL) logger.LogInfo("Cấu hình EA đã được lưu thành công.");
+        } else {
+            if (logger != NULL) logger.LogWarning("Không thể lưu cấuHình EA.");
+        }
+    } catch(...) {
+        if (logger != NULL) logger.LogError("Lỗi khi lưu cấu hình và thống kê.");
+        else Print("Lỗi khi lưu cấu hình và thống kê.");
+    }
+
+    // Giải phóng các module thông qua EAContext
+    try {
+        if (ApexPullback::g_EAContext != NULL) {
+            if (ApexPullback::g_EAContext.Dashboard != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng Dashboard..."); delete ApexPullback::g_EAContext.Dashboard; ApexPullback::g_EAContext.Dashboard = NULL; }
+            if (ApexPullback::g_EAContext.TradeManager != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng TradeManager..."); delete ApexPullback::g_EAContext.TradeManager; ApexPullback::g_EAContext.TradeManager = NULL; }
+            if (ApexPullback::g_EAContext.PositionManager != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng PositionManager..."); delete ApexPullback::g_EAContext.PositionManager; ApexPullback::g_EAContext.PositionManager = NULL; }
+            if (ApexPullback::g_EAContext.RiskManager != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng RiskManager..."); delete ApexPullback::g_EAContext.RiskManager; ApexPullback::g_EAContext.RiskManager = NULL; }
+            if (ApexPullback::g_EAContext.PatternDetector != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng PatternDetector..."); delete ApexPullback::g_EAContext.PatternDetector; ApexPullback::g_EAContext.PatternDetector = NULL; }
+            if (ApexPullback::g_EAContext.SwingDetector != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng SwingDetector..."); delete ApexPullback::g_EAContext.SwingDetector; ApexPullback::g_EAContext.SwingDetector = NULL; }
+            if (ApexPullback::g_EAContext.MarketProfile != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng MarketProfile..."); delete ApexPullback::g_EAContext.MarketProfile; ApexPullback::g_EAContext.MarketProfile = NULL; }
+            // if (ApexPullback::g_EAContext.AssetProfiler != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng AssetProfiler..."); delete ApexPullback::g_EAContext.AssetProfiler; ApexPullback::g_EAContext.AssetProfiler = NULL; } // Assuming AssetProfiler is part of AssetProfileManager or distinct
+            if (ApexPullback::g_EAContext.NewsFilter != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng NewsFilter..."); delete ApexPullback::g_EAContext.NewsFilter; ApexPullback::g_EAContext.NewsFilter = NULL; }
+            if (ApexPullback::g_EAContext.SessionManager != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng SessionManager..."); delete ApexPullback::g_EAContext.SessionManager; ApexPullback::g_EAContext.SessionManager = NULL; }
+            if (ApexPullback::g_EAContext.AssetProfileManager != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng AssetProfileManager..."); delete ApexPullback::g_EAContext.AssetProfileManager; ApexPullback::g_EAContext.AssetProfileManager = NULL; }
+            if (ApexPullback::g_EAContext.PerformanceTracker != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng PerformanceTracker..."); delete ApexPullback::g_EAContext.PerformanceTracker; ApexPullback::g_EAContext.PerformanceTracker = NULL; }
+            if (ApexPullback::g_EAContext.PortfolioManager != NULL) { if (logger != NULL) logger.LogDebug("Giải phóng PortfolioManager..."); delete ApexPullback::g_EAContext.PortfolioManager; ApexPullback::g_EAContext.PortfolioManager = NULL; }
+            if (ApexPullback::g_EAContext.IndicatorUtils != NULL) { 
+                if (logger != NULL) logger.LogDebug("Giải phóng IndicatorUtils...");
+                // IndicatorUtils destructor should handle releasing its own indicators
+                delete ApexPullback::g_EAContext.IndicatorUtils; ApexPullback::g_EAContext.IndicatorUtils = NULL; 
+            }
+        } else { // Fallback to old global deallocation if context is null - This block should ideally not be reached.
+             Print("OnDeinit: EAContext was NULL. Global fallbacks for Dashboard and other managers are removed.");
+        }
+
+        // Global indicator handles and cache are now managed by CIndicatorUtils within g_EAContext.
+        // Calls to ApexPullback::ReleaseIndicatorHandles() and ApexPullback::ClearIndicatorCache() are removed.
+
+    } catch(...) {
+        if (logger != NULL) logger.LogError("Lỗi trong quá trình giải phóng các module.");
+        else Print("Lỗi trong quá trình giải phóng các module.");
+    }
+
+    if (logger != NULL) {
+        logger.LogInfo("APEX Pullback EA v14.0 đã giải phóng tất cả các module.");
+        bool enableTelegram = (ApexPullback::g_EAContext != NULL) ? ApexPullback::g_EAContext.Logger.IsTelegramEnabled() : ApexPullback::g_EnableTelegramNotify;
+        if (enableTelegram) {
+             logger.SendTelegramMessage("APEX Pullback EA v14.0 đã kết thúc. Lý do: " + deinit_reason_text, true);
+        }
+    }
+
+    // Giải phóng Logger LÀ BƯỚC CUỐI CÙNG, if it's the one in context, it will be deleted with the context.
+    // If it was the old global g_Logger and context was null, delete it here.
+    try {
+        if (ApexPullback::g_EAContext != NULL) {
+            if (ApexPullback::g_EAContext.Logger != NULL) {
+                ApexPullback::g_EAContext.Logger.Deinitialize();
+                // Logger will be deleted when g_EAContext is deleted
+            }
+            delete ApexPullback::g_EAContext;
+            ApexPullback::g_EAContext = NULL;
+        } else { // If context was null and its logger was null, or old global logger was already handled/null
+            Print("OnDeinit: EAContext was NULL and no fallback global logger to deinitialize.");
+        }
+    } catch(...) {
+        Print("APEX Pullback EA v14.0 - Lỗi khi giải phóng Logger hoặc EAContext.");
+    }
+    
+    ObjectsDeleteAll(0, -1, -1);
+    ChartRedraw();
+    
+    Print("APEX Pullback EA v14.0 đã kết thúc hoàn toàn.");
+}
+
+//+------------------------------------------------------------------+
+//| Hàm kiểm tra bộ nhớ khả dụng                                   |
+//+------------------------------------------------------------------+
+bool CheckMemoryAvailable() {
+    // Kiểm tra bộ nhớ khả dụng (ít nhất 50MB)
+    double memoryUsage = GetMemoryUsage();
+    if (memoryUsage > 500.0) { // Hơn 500MB có thể có vấn đề
+        Print("CẢNH BÁO: Sử dụng bộ nhớ cao: " + DoubleToString(memoryUsage, 2) + "MB");
+        return false;
+    }
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Hàm lấy thông tin sử dụng bộ nhớ                               |
+//+------------------------------------------------------------------+
+double GetMemoryUsage() {
+    double estimatedMemory = 0.0;
+    if (ApexPullback::g_EAContext != NULL) {
+        if (ApexPullback::g_EAContext.Logger != NULL) estimatedMemory += 2.0;
+        if (ApexPullback::g_EAContext.Dashboard != NULL) estimatedMemory += 5.0;
+        if (ApexPullback::g_EAContext.TradeManager != NULL) estimatedMemory += 3.0;
+        if (ApexPullback::g_EAContext.PositionManager != NULL) estimatedMemory += 2.0;
+        if (ApexPullback::g_EAContext.RiskManager != NULL) estimatedMemory += 2.0;
+        if (ApexPullback::g_EAContext.MarketProfile != NULL) estimatedMemory += 4.0;
+        if (ApexPullback::g_EAContext.SwingDetector != NULL) estimatedMemory += 3.0;
+        if (ApexPullback::g_EAContext.IndicatorUtils != NULL) {
+            // Estimate memory for IndicatorUtils, including its managed indicators
+            // This is a rough estimate; IndicatorUtils could provide a more accurate GetMemoryUsage method.
+            estimatedMemory += 2.0 + ApexPullback::g_EAContext.IndicatorUtils.GetManagedIndicatorCount() * 1.0; 
+        }
+    } else {
+        // Fallback to old global estimates if context is null - This should not happen in normal operation.
+        Print("GetMemoryUsage: EAContext is NULL. Cannot estimate memory accurately.");
+        // Globals like g_Logger, g_Dashboard are removed, so no direct estimation here.
+        // g_IndicatorCount is no longer used, CIndicatorUtils manages its own indicator counts/memory.
+    }
+    return estimatedMemory;
+}
+
+//+------------------------------------------------------------------+
+//| Hàm log thông tin hệ thống                                     |
+//+------------------------------------------------------------------+
+void LogSystemInfo() {
+    CLogger* logger = (ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext.Logger != NULL) ? ApexPullback::g_EAContext.Logger : NULL;
+    if (logger == NULL) {
+        Print("LogSystemInfo: Logger not available.");
+        return;
+    }
+    
+    string systemInfo = "Thông tin hệ thống: ";
+    systemInfo += "Symbol: " + _Symbol;
+    systemInfo += " | Timeframe: " + EnumToString(PERIOD_CURRENT);
+    systemInfo += " | Digits: " + IntegerToString(_Digits);
+    systemInfo += " | Point: " + DoubleToString(_Point, _Digits);
+    systemInfo += " | Spread: " + DoubleToString(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD), 1);
+    systemInfo += " | Server: " + AccountInfoString(ACCOUNT_SERVER);
+    systemInfo += " | Build: " + IntegerToString(TerminalInfoInteger(TERMINAL_BUILD));
+    
+    logger.LogInfo(systemInfo);
+}
+
+} // End namespace ApexPullback
+
+

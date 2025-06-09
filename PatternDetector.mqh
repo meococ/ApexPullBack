@@ -1,13 +1,16 @@
 //+------------------------------------------------------------------+
 //| PatternDetector.mqh                                             |
-//| Copyright 2025, ApexPullback Team                               |
 //| Phát hiện mẫu hình giá thông minh cho EA                        |
 //+------------------------------------------------------------------+
-#property strict
+
+#ifndef PATTERN_DETECTOR_MQH_
+#define PATTERN_DETECTOR_MQH_
 
 #include "CommonStructs.mqh"
-#include "Logger.mqh"
 #include "Enums.mqh"
+#include "Logger.mqh"         // Thêm include Logger.mqh để tránh lỗi forward declaration
+
+namespace ApexPullback {
 
 // Định nghĩa các tỷ lệ Fibonacci phổ biến
 #define FIB_0_236 0.236
@@ -47,8 +50,8 @@ struct DetectedPattern {
     int endBar;                   // Nến kết thúc mẫu hình
     string description;           // Mô tả mẫu hình
     
-    // Constructor để khởi tạo giá trị mặc định
-    DetectedPattern() {
+    // Phương thức khởi tạo giá trị mặc định
+    void Initialize() {
         type = PATTERN_NONE;
         isValid = false;
         isBullish = false;
@@ -67,18 +70,43 @@ struct DetectedPattern {
 //+------------------------------------------------------------------+
 class CPatternDetector {
 private:
+    string m_Symbol;
+    ENUM_TIMEFRAMES m_Timeframe;
+    CLogger* m_Logger;
+    CMarketProfile* m_MarketProfile;
+    
+    // Cấu hình
+    double m_MinPullbackPercent;      // % pullback tối thiểu
+    double m_MaxPullbackPercent;      // % pullback tối đa
+    double m_PriceActionQualityThreshold; // Ngưỡng chất lượng price action
+    double m_MomentumThreshold;       // Ngưỡng momentum
+    double m_VolumeThreshold;         // Ngưỡng volume
+    
+    // Bộ lọc nâng cao 
+    double m_AdxThreshold;            // Ngưỡng ADX
+    double m_VolatilityThreshold;     // Ngưỡng biến động
+    bool m_RequirePriceActionConfirmation; // Yêu cầu xác nhận price action
+    bool m_RequireMomentumConfirmation;    // Yêu cầu xác nhận momentum
+    bool m_RequireVolumeConfirmation;      // Yêu cầu xác nhận volume
+    bool m_EnableMarketRegimeFilter;       // Bật lọc market regime
+    
+    // Bộ lọc pullback chặt chẽ
+    bool m_StrictPullbackFilter;      // Bật bộ lọc pullback chặt chẽ
+    int m_MinConfirmationBars;        // Số nến xác nhận tối thiểu
+    int m_MaxRejectionCount;          // Số lần từ chối tối đa
+    
+    // Biến hỗ trợ phân tích
+    double m_LastPatternQuality;      // Chất lượng mẫu hình cuối cùng
+    ENUM_PATTERN_TYPE m_LastPatternType; // Loại mẫu hình cuối cùng
+    datetime m_LastDetectionTime;     // Thời gian phát hiện cuối cùng
+    
     // Thành viên dữ liệu cơ bản
-    string m_symbol;                  // Cặp tiền tệ
-    ENUM_TIMEFRAMES m_timeframe;      // Khung thời gian
-    CLogger* m_logger;                // Con trỏ đến logger
     bool m_isInitialized;             // Trạng thái khởi tạo
     
     // Tham số cấu hình
     int m_minBarsForPattern;          // Số nến tối thiểu cho mẫu hình
     int m_maxBarsForPattern;          // Số nến tối đa cho mẫu hình
     double m_fibTolerance;            // Dung sai cho tỷ lệ Fibonacci (±%)
-    double m_minPullbackPct;          // % pullback tối thiểu
-    double m_maxPullbackPct;          // % pullback tối đa
     double m_atr;                     // Giá trị ATR hiện tại
     bool m_useVolume;                 // Có xét đến volume hay không
     
@@ -146,6 +174,9 @@ public:
     bool CheckBatPattern(bool isBullish, DetectedPattern& pattern);
     bool CheckCrabPattern(bool isBullish, DetectedPattern& pattern);
 
+    // Cài đặt bộ lọc pullback chặt chẽ
+    void SetStrictPullbackFilter(bool enable, int minConfirmationBars = 2, int maxRejectionCount = 1);
+
 private:
     // Hàm phụ trợ nội bộ
     bool DetectPullbackPatterns();
@@ -165,6 +196,8 @@ private:
     int FindLastSwingLow(int startBar, int lookback);
     int FindSwingPoint(bool findHigh, int startBar, int lookback, double& price);
     double CalculateFibonacciRetracementLevel(double startPrice, double endPrice, double retracementRatio, bool isBullish);
+
+    bool DetectPullbackPattern(bool isBullish, DetectedPattern& pattern);
 };
 
 //+------------------------------------------------------------------+
@@ -172,7 +205,7 @@ private:
 //+------------------------------------------------------------------+
 CPatternDetector::CPatternDetector() {
     m_isInitialized = false;
-    m_logger = NULL;
+    m_Logger = NULL;
     m_atrHandle = INVALID_HANDLE;
     
     // Thiết lập các giá trị mặc định
@@ -208,14 +241,14 @@ bool CPatternDetector::Initialize(string symbol, ENUM_TIMEFRAMES timeframe, CLog
         Release();
     }
     
-    m_symbol = symbol;
-    m_timeframe = timeframe;
-    m_logger = logger;
+    m_Symbol = symbol;
+    m_Timeframe = timeframe;
+    m_Logger = logger;
     
     // Tạo handle cho indicator ATR
-    m_atrHandle = iATR(m_symbol, m_timeframe, 14);
+    m_atrHandle = iATR(m_Symbol, m_Timeframe, 14);
     if (m_atrHandle == INVALID_HANDLE) {
-        if (m_logger) m_logger.LogError("Không thể tạo handle ATR trong PatternDetector");
+        if (m_Logger != NULL) m_Logger.LogError("Không thể tạo handle ATR trong PatternDetector");
         return false;
     }
     
@@ -248,7 +281,7 @@ bool CPatternDetector::Initialize(string symbol, ENUM_TIMEFRAMES timeframe, CLog
 //| Thiết lập logger                                                 |
 //+------------------------------------------------------------------+
 void CPatternDetector::SetLogger(CLogger* logger) {
-    m_logger = logger;
+    m_Logger = logger;
 }
 
 //+------------------------------------------------------------------+
@@ -281,38 +314,40 @@ bool CPatternDetector::RefreshData(int bars = 100) {
     ArrayResize(m_time, bars);
     
     // Copy dữ liệu giá
-    if (CopyHigh(m_symbol, m_timeframe, 0, bars, m_high) != bars) {
-        if (m_logger) m_logger.LogError("Không thể copy dữ liệu giá high");
+    if (CopyHigh(m_Symbol, m_Timeframe, 0, bars, m_high) != bars) {
+        if (m_Logger != NULL) m_Logger.LogError("Không thể copy dữ liệu giá high");
         return false;
     }
     
-    if (CopyLow(m_symbol, m_timeframe, 0, bars, m_low) != bars) {
-        if (m_logger) m_logger.LogError("Không thể copy dữ liệu giá low");
+    if (CopyLow(m_Symbol, m_Timeframe, 0, bars, m_low) != bars) {
+        if (m_Logger != NULL) m_Logger.LogError("Không thể copy dữ liệu giá low");
         return false;
     }
     
-    if (CopyClose(m_symbol, m_timeframe, 0, bars, m_close) != bars) {
-        if (m_logger) m_logger.LogError("Không thể copy dữ liệu giá close");
+    if (CopyClose(m_Symbol, m_Timeframe, 0, bars, m_close) != bars) {
+        if (m_Logger != NULL) m_Logger.LogError("Không thể copy dữ liệu giá close");
         return false;
     }
     
-    if (CopyOpen(m_symbol, m_timeframe, 0, bars, m_open) != bars) {
-        if (m_logger) m_logger.LogError("Không thể copy dữ liệu giá open");
+    if (CopyOpen(m_Symbol, m_Timeframe, 0, bars, m_open) != bars) {
+        if (m_Logger != NULL) m_Logger.LogError("Không thể copy dữ liệu giá open");
         return false;
     }
     
     // Copy dữ liệu khối lượng nếu cần
     if (m_useVolume) {
-        if (CopyTickVolume(m_symbol, m_timeframe, 0, bars, m_volume) != bars) {
-            if (m_logger) m_logger.LogDebug("Volume không khả dụng cho " + m_symbol);
-            m_useVolume = false;  // Tắt sử dụng volume nếu không có dữ liệu
+        if (CopyTickVolume(m_Symbol, m_Timeframe, 0, bars, m_volume) != bars) {
+            if (m_Logger != NULL) {
+                m_Logger.LogDebug("Volume không khả dụng cho " + m_Symbol);
+                m_useVolume = false;  // Tắt sử dụng volume nếu không có dữ liệu
+            }
         }
     }
     
     // Copy dữ liệu ATR
     if (m_atrHandle != INVALID_HANDLE) {
         if (CopyBuffer(m_atrHandle, 0, 0, bars, m_atrBuffer) != bars) {
-            if (m_logger) m_logger.LogWarning("Không thể copy dữ liệu ATR");
+            if (m_Logger != NULL) m_Logger.LogWarning("Không thể copy dữ liệu ATR");
         }
         else {
             // Cập nhật ATR hiện tại
@@ -320,9 +355,9 @@ bool CPatternDetector::RefreshData(int bars = 100) {
         }
     }
     
-    // Copy dữ liệu thời gian
-    if (CopyTime(m_symbol, m_timeframe, 0, bars, m_time) != bars) {
-        if (m_logger) m_logger.LogError("Không thể copy dữ liệu thời gian");
+    // Copy dữ liệu thởi gian
+    if (CopyTime(m_Symbol, m_Timeframe, 0, bars, m_time) != bars) {
+        if (m_Logger != NULL) m_Logger.LogError("Không thể copy dữ liệu thời gian");
         return false;
     }
     
@@ -336,1067 +371,58 @@ void CPatternDetector::SetATR(double atr) {
     m_atr = atr;
 }
 
-//+------------------------------------------------------------------+
 //| Phát hiện mẫu hình và trả về thông tin                           |
 //+------------------------------------------------------------------+
 bool CPatternDetector::DetectPattern(ENUM_PATTERN_TYPE& scenario, double& strength) {
     if (!m_isInitialized || m_atr <= 0) {
-        if (m_logger) m_logger.LogError("PatternDetector chưa được khởi tạo đúng cách hoặc ATR không hợp lệ");
-        scenario = SCENARIO_NONE;
-        strength = 0.0;
-        return false;
-    }
-    
-    // Làm mới dữ liệu mới nhất
-    if (!RefreshData()) {
-        scenario = SCENARIO_NONE;
+        if (m_Logger != NULL) m_Logger.LogError("PatternDetector chưa được khởi tạo đúng cách hoặc ATR không hợp lệ");
+        scenario = PATTERN_NONE;
         strength = 0.0;
         return false;
     }
     
     // Phát hiện các loại mẫu hình
-    bool foundPullback = DetectPullbackPatterns();
-    bool foundReversal = DetectReversalPatterns();
-    bool foundHarmonic = DetectHarmonicPatterns();
+    bool foundPattern = false;
     
-    // Chọn mẫu hình mạnh nhất
-    DetectedPattern strongestPattern;
-    strongestPattern.strength = 0.0;
-    
-    if (foundPullback && m_detectedPullback.strength > strongestPattern.strength) {
-        strongestPattern = m_detectedPullback;
-    }
-    
-    if (foundReversal && m_detectedReversal.strength > strongestPattern.strength) {
-        strongestPattern = m_detectedReversal;
-    }
-    
-    if (foundHarmonic && m_detectedHarmonic.strength > strongestPattern.strength) {
-        strongestPattern = m_detectedHarmonic;
-    }
-    
-    // Lưu lại mẫu hình được phát hiện gần nhất
-    m_lastDetectedPattern = strongestPattern;
-    
-    // Trả về kết quả
-    if (strongestPattern.strength > 0.0 && strongestPattern.isValid) {
-        scenario = strongestPattern.type;
-        strength = strongestPattern.strength;
-        
-        if (m_logger) {
-            m_logger.LogDebug("Phát hiện mẫu hình: " + 
-                           EnumToString(strongestPattern.type) + 
-                           ", Strength: " + DoubleToString(strength, 2) + 
-                           ", " + (strongestPattern.isBullish ? "Bullish" : "Bearish") + 
-                           ", " + strongestPattern.description);
-        }
-        return true;
-    }
-    
-    scenario = SCENARIO_NONE;
+    // Khởi tạo các giá trị mặc định
+    scenario = PATTERN_NONE;
     strength = 0.0;
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| Phát hiện các mẫu hình pullback                                  |
-//+------------------------------------------------------------------+
-bool CPatternDetector::DetectPullbackPatterns() {
-    // Reset mẫu hình pullback đã phát hiện
-    m_detectedPullback = DetectedPattern();
     
-    // Kiểm tra các loại pullback khác nhau
-    DetectedPattern strongPullbackBull, strongPullbackBear;
-    DetectedPattern bullishPullback, bearishPullback;
-    DetectedPattern fibPullbackBull, fibPullbackBear;
-    
-    bool foundStrongBull = CheckStrongPullback(true, strongPullbackBull);
-    bool foundStrongBear = CheckStrongPullback(false, strongPullbackBear);
-    bool foundBullish = CheckBullishPullback(bullishPullback);
-    bool foundBearish = CheckBearishPullback(bearishPullback);
-    bool foundFibBull = CheckFibonacciPullback(true, fibPullbackBull);
-    bool foundFibBear = CheckFibonacciPullback(false, fibPullbackBear);
-    
-    // Xác định mẫu pullback mạnh nhất
-    DetectedPattern strongestPullback;
-    strongestPullback.strength = 0.0;
-    
-    if (foundStrongBull && strongPullbackBull.strength > strongestPullback.strength) {
-        strongestPullback = strongPullbackBull;
-    }
-    
-    if (foundStrongBear && strongPullbackBear.strength > strongestPullback.strength) {
-        strongestPullback = strongPullbackBear;
-    }
-    
-    if (foundBullish && bullishPullback.strength > strongestPullback.strength) {
-        strongestPullback = bullishPullback;
-    }
-    
-    if (foundBearish && bearishPullback.strength > strongestPullback.strength) {
-        strongestPullback = bearishPullback;
-    }
-    
-    if (foundFibBull && fibPullbackBull.strength > strongestPullback.strength) {
-        strongestPullback = fibPullbackBull;
-    }
-    
-    if (foundFibBear && fibPullbackBear.strength > strongestPullback.strength) {
-        strongestPullback = fibPullbackBear;
-    }
-    
-    // Lưu kết quả nếu tìm thấy
-    if (strongestPullback.strength > 0.0) {
-        m_detectedPullback = strongestPullback;
-        return true;
-    }
-    
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| Phát hiện các mẫu hình đảo chiều                                 |
-//+------------------------------------------------------------------+
-bool CPatternDetector::DetectReversalPatterns() {
-    // Reset mẫu hình reversal đã phát hiện
-    m_detectedReversal = DetectedPattern();
-    
-    // Kiểm tra các loại mẫu hình đảo chiều
-    DetectedPattern engulfingBull, engulfingBear;
-    
-    bool foundEngulfingBull = CheckEngulfingPattern(true, engulfingBull);
-    bool foundEngulfingBear = CheckEngulfingPattern(false, engulfingBear);
-    
-    // Xác định mẫu hình đảo chiều mạnh nhất
-    DetectedPattern strongestReversal;
-    strongestReversal.strength = 0.0;
-    
-    if (foundEngulfingBull && engulfingBull.strength > strongestReversal.strength) {
-        strongestReversal = engulfingBull;
-    }
-    
-    if (foundEngulfingBear && engulfingBear.strength > strongestReversal.strength) {
-        strongestReversal = engulfingBear;
-    }
-    
-    // Lưu kết quả nếu tìm thấy
-    if (strongestReversal.strength > 0.0) {
-        m_detectedReversal = strongestReversal;
-        return true;
-    }
-    
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| Phát hiện các mẫu hình harmonic                                  |
-//+------------------------------------------------------------------+
-bool CPatternDetector::DetectHarmonicPatterns() {
-    // Reset mẫu hình harmonic đã phát hiện
-    m_detectedHarmonic = DetectedPattern();
-    
-    // Kiểm tra các loại mẫu hình harmonic
-    DetectedPattern gartleyBull, gartleyBear;
-    DetectedPattern butterflyBull, butterflyBear;
-    DetectedPattern batBull, batBear;
-    DetectedPattern crabBull, crabBear;
-    
-    bool foundGartleyBull = CheckGartleyPattern(true, gartleyBull);
-    bool foundGartleyBear = CheckGartleyPattern(false, gartleyBear);
-    bool foundButterflyBull = CheckButterflyPattern(true, butterflyBull);
-    bool foundButterflyBear = CheckButterflyPattern(false, butterflyBear);
-    bool foundBatBull = CheckBatPattern(true, batBull);
-    bool foundBatBear = CheckBatPattern(false, batBear);
-    bool foundCrabBull = CheckCrabPattern(true, crabBull);
-    bool foundCrabBear = CheckCrabPattern(false, crabBear);
-    
-    // Xác định mẫu hình harmonic mạnh nhất
-    DetectedPattern strongestHarmonic;
-    strongestHarmonic.strength = 0.0;
-    
-    if (foundGartleyBull && gartleyBull.strength > strongestHarmonic.strength) {
-        strongestHarmonic = gartleyBull;
-    }
-    
-    if (foundGartleyBear && gartleyBear.strength > strongestHarmonic.strength) {
-        strongestHarmonic = gartleyBear;
-    }
-    
-    if (foundButterflyBull && butterflyBull.strength > strongestHarmonic.strength) {
-        strongestHarmonic = butterflyBull;
-    }
-    
-    if (foundButterflyBear && butterflyBear.strength > strongestHarmonic.strength) {
-        strongestHarmonic = butterflyBear;
-    }
-    
-    if (foundBatBull && batBull.strength > strongestHarmonic.strength) {
-        strongestHarmonic = batBull;
-    }
-    
-    if (foundBatBear && batBear.strength > strongestHarmonic.strength) {
-        strongestHarmonic = batBear;
-    }
-    
-    if (foundCrabBull && crabBull.strength > strongestHarmonic.strength) {
-        strongestHarmonic = crabBull;
-    }
-    
-    if (foundCrabBear && crabBear.strength > strongestHarmonic.strength) {
-        strongestHarmonic = crabBear;
-    }
-    
-    // Lưu kết quả nếu tìm thấy
-    if (strongestHarmonic.strength > 0.0) {
-        m_detectedHarmonic = strongestHarmonic;
-        return true;
-    }
-    
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra pullback Fibonacci                                      |
-//+------------------------------------------------------------------+
-bool CPatternDetector::CheckFibonacciPullback(bool isBullish, DetectedPattern& pattern) {
-    // Reset pattern
-    pattern = DetectedPattern();
-    pattern.type = SCENARIO_FIBONACCI_PULLBACK;
-    pattern.isBullish = isBullish;
-    
-    if (m_atr <= 0) {
-        LogPattern("FibonacciPullback " + (isBullish ? "Bull" : "Bear"), false, "ATR không hợp lệ");
-        return false;
-    }
-    
-    // Tìm điểm swing gần đây
-    int swingBar = 0;
-    double swingPrice = 0.0;
-    bool foundSwing = (isBullish) ? 
-                     FindSwingPoint(false, 3, 15, swingPrice) > 0 : 
-                     FindSwingPoint(true, 3, 15, swingPrice) > 0;
-    
-    if (!foundSwing) {
-        LogPattern("FibonacciPullback " + (isBullish ? "Bull" : "Bear"), false, "Không tìm thấy điểm swing gần đây");
-        return false;
-    }
-    
-    // Tìm điểm swing đối diện
-    int oppositeSwingBar = 0;
-    double oppositeSwingPrice = 0.0;
-    bool foundOppositeSwing = (isBullish) ? 
-                              FindSwingPoint(true, swingBar + 1, 20, oppositeSwingPrice) > 0 : 
-                              FindSwingPoint(false, swingBar + 1, 20, oppositeSwingPrice) > 0;
-    
-    if (!foundOppositeSwing) {
-        LogPattern("FibonacciPullback " + (isBullish ? "Bull" : "Bear"), false, "Không tìm thấy điểm swing đối diện");
-        return false;
-    }
-    
-    // Tính toán tỷ lệ pullback
-    double range = MathAbs(oppositeSwingPrice - swingPrice);
-    double currentPrice = isBullish ? m_close[0] : m_close[0];
-    double pullbackRatio = 0.0;
-    
-    if (isBullish) {
-        pullbackRatio = (oppositeSwingPrice - currentPrice) / range;
-    } else {
-        pullbackRatio = (currentPrice - oppositeSwingPrice) / range;
-    }
-    
-    // Kiểm tra tỷ lệ Fibonacci
-    bool isFibLevel = false;
-    string fibLevel = "";
-    
-    if (IsValidFibonacciRatio(pullbackRatio, FIB_0_382)) {
-        isFibLevel = true;
-        fibLevel = "38.2%";
-    } else if (IsValidFibonacciRatio(pullbackRatio, FIB_0_5)) {
-        isFibLevel = true;
-        fibLevel = "50.0%";
-    } else if (IsValidFibonacciRatio(pullbackRatio, FIB_0_618)) {
-        isFibLevel = true;
-        fibLevel = "61.8%";
-    } else if (IsValidFibonacciRatio(pullbackRatio, FIB_0_786)) {
-        isFibLevel = true;
-        fibLevel = "78.6%";
-    }
-    
-    if (!isFibLevel) {
-        LogPattern("FibonacciPullback " + (isBullish ? "Bull" : "Bear"), false, 
-                 "Không nằm tại mức Fibonacci (" + DoubleToString(pullbackRatio * 100, 1) + "%)");
-        return false;
-    }
-    
-    // Kiểm tra xu hướng
-    bool isCorrectTrend = isBullish ? IsUptrend(20, 5) : IsDowntrend(20, 5);
-    
-    if (!isCorrectTrend) {
-        LogPattern("FibonacciPullback " + (isBullish ? "Bull" : "Bear"), false, 
-                 "Không phát hiện xu hướng " + (isBullish ? "tăng" : "giảm") + " rõ ràng");
-        return false;
-    }
-    
-    // Thiết lập thông tin cho pattern hợp lệ
-    pattern.isValid = true;
-    pattern.entryLevel = currentPrice;
-    pattern.stopLoss = isBullish ? 
-                      swingPrice - m_atr * 0.5 : 
-                      swingPrice + m_atr * 0.5;
-    pattern.takeProfit = isBullish ? 
-                        oppositeSwingPrice + m_atr : 
-                        oppositeSwingPrice - m_atr;
-    pattern.startBar = MathMax(swingBar, oppositeSwingBar);
-    pattern.endBar = 0;
-    pattern.description = "Fibonacci Pullback " + fibLevel + " " + (isBullish ? "Bullish" : "Bearish");
-    
-    // Tính toán độ mạnh của mẫu hình
-    pattern.strength = CalculatePatternStrength(pattern);
-    
-    LogPattern("FibonacciPullback " + (isBullish ? "Bull" : "Bear"), true, 
-             "Tại mức Fibonacci " + fibLevel + ", Strength: " + DoubleToString(pattern.strength, 2));
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra Bullish Pullback                                        |
-//+------------------------------------------------------------------+
-bool CPatternDetector::CheckBullishPullback(DetectedPattern& pattern) {
-    // Reset pattern
-    pattern = DetectedPattern();
-    pattern.type = SCENARIO_BULLISH_PULLBACK;
-    pattern.isBullish = true;
-    
-    if (m_atr <= 0) {
-        LogPattern("BullishPullback", false, "ATR không hợp lệ");
-        return false;
-    }
-    
-    // Tìm điểm swing low gần đây
-    double swingLowPrice = 0.0;
-    int swingLowBar = FindSwingPoint(false, 1, 10, swingLowPrice);
-    
-    if (swingLowBar <= 0) {
-        LogPattern("BullishPullback", false, "Không tìm thấy swing low");
-        return false;
-    }
-    
-    // Tìm điểm swing high gần đây
-    double swingHighPrice = 0.0;
-    int swingHighBar = FindSwingPoint(true, swingLowBar + 1, 15, swingHighPrice);
-    
-    if (swingHighBar <= 0) {
-        LogPattern("BullishPullback", false, "Không tìm thấy swing high");
-        return false;
-    }
-    
-    // Kiểm tra điều kiện pullback
-    double pullbackDepth = 0.0;
-    if (!IsValidPullbackDepth(swingHighPrice, swingLowPrice, pullbackDepth)) {
-        LogPattern("BullishPullback", false, "Độ sâu pullback không hợp lệ: " + DoubleToString(pullbackDepth * 100, 1) + "%");
-        return false;
-    }
-    
-    // Kiểm tra xu hướng tăng
-    if (!IsUptrend(20, 5)) {
-        LogPattern("BullishPullback", false, "Không phát hiện xu hướng tăng");
-        return false;
-    }
-    
-    // Kiểm tra giá hiện tại cao hơn swing low
-    if (m_close[0] <= swingLowPrice) {
-        LogPattern("BullishPullback", false, "Giá hiện tại không cao hơn swing low");
-        return false;
-    }
-    
-    // Thiết lập thông tin cho pattern hợp lệ
-    pattern.isValid = true;
-    pattern.entryLevel = m_close[0];
-    pattern.stopLoss = swingLowPrice - m_atr * 0.3;
-    pattern.takeProfit = swingHighPrice + m_atr;
-    pattern.startBar = swingHighBar;
-    pattern.endBar = 0;
-    pattern.description = "Bullish Pullback (" + DoubleToString(pullbackDepth * 100, 1) + "%)";
-    
-    // Tính toán độ mạnh của mẫu hình
-    pattern.strength = CalculatePatternStrength(pattern);
-    
-    LogPattern("BullishPullback", true, 
-             "Pullback: " + DoubleToString(pullbackDepth * 100, 1) + "%, Strength: " + DoubleToString(pattern.strength, 2));
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra Bearish Pullback                                        |
-//+------------------------------------------------------------------+
-bool CPatternDetector::CheckBearishPullback(DetectedPattern& pattern) {
-    // Reset pattern
-    pattern = DetectedPattern();
-    pattern.type = SCENARIO_BEARISH_PULLBACK;
-    pattern.isBullish = false;
-    
-    if (m_atr <= 0) {
-        LogPattern("BearishPullback", false, "ATR không hợp lệ");
-        return false;
-    }
-    
-    // Tìm điểm swing high gần đây
-    double swingHighPrice = 0.0;
-    int swingHighBar = FindSwingPoint(true, 1, 10, swingHighPrice);
-    
-    if (swingHighBar <= 0) {
-        LogPattern("BearishPullback", false, "Không tìm thấy swing high");
-        return false;
-    }
-    
-    // Tìm điểm swing low gần đây
-    double swingLowPrice = 0.0;
-    int swingLowBar = FindSwingPoint(false, swingHighBar + 1, 15, swingLowPrice);
-    
-    if (swingLowBar <= 0) {
-        LogPattern("BearishPullback", false, "Không tìm thấy swing low");
-        return false;
-    }
-    
-    // Kiểm tra điều kiện pullback
-    double pullbackDepth = 0.0;
-    if (!IsValidPullbackDepth(swingLowPrice, swingHighPrice, pullbackDepth)) {
-        LogPattern("BearishPullback", false, "Độ sâu pullback không hợp lệ: " + DoubleToString(pullbackDepth * 100, 1) + "%");
-        return false;
-    }
-    
-    // Kiểm tra xu hướng giảm
-    if (!IsDowntrend(20, 5)) {
-        LogPattern("BearishPullback", false, "Không phát hiện xu hướng giảm");
-        return false;
-    }
-    
-    // Kiểm tra giá hiện tại thấp hơn swing high
-    if (m_close[0] >= swingHighPrice) {
-        LogPattern("BearishPullback", false, "Giá hiện tại không thấp hơn swing high");
-        return false;
-    }
-    
-    // Thiết lập thông tin cho pattern hợp lệ
-    pattern.isValid = true;
-    pattern.entryLevel = m_close[0];
-    pattern.stopLoss = swingHighPrice + m_atr * 0.3;
-    pattern.takeProfit = swingLowPrice - m_atr;
-    pattern.startBar = swingLowBar;
-    pattern.endBar = 0;
-    pattern.description = "Bearish Pullback (" + DoubleToString(pullbackDepth * 100, 1) + "%)";
-    
-    // Tính toán độ mạnh của mẫu hình
-    pattern.strength = CalculatePatternStrength(pattern);
-    
-    LogPattern("BearishPullback", true, 
-             "Pullback: " + DoubleToString(pullbackDepth * 100, 1) + "%, Strength: " + DoubleToString(pattern.strength, 2));
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra Strong Pullback                                         |
-//+------------------------------------------------------------------+
-bool CPatternDetector::CheckStrongPullback(bool isBullish, DetectedPattern& pattern) {
-    // Reset pattern
-    pattern = DetectedPattern();
-    pattern.type = SCENARIO_STRONG_PULLBACK;
-    pattern.isBullish = isBullish;
-    
-    if (m_atr <= 0) {
-        LogPattern("StrongPullback " + (isBullish ? "Bull" : "Bear"), false, "ATR không hợp lệ");
-        return false;
-    }
-    
-    // Kiểm tra xu hướng
-    bool isCorrectTrend = isBullish ? IsUptrend(20, 5) : IsDowntrend(20, 5);
-    
-    if (!isCorrectTrend) {
-        LogPattern("StrongPullback " + (isBullish ? "Bull" : "Bear"), false, 
-                 "Không phát hiện xu hướng " + (isBullish ? "tăng" : "giảm") + " rõ ràng");
-        return false;
-    }
-    
-    // Kiểm tra nếu có volume tăng mạnh (nếu có dữ liệu volume)
-    bool hasVolumeSpike = false;
-    if (m_useVolume) {
-        long avgVolume = 0;
-        for (int i = 1; i < 5; i++) {
-            avgVolume += m_volume[i];
-        }
-        avgVolume /= 4;
-        
-        hasVolumeSpike = (m_volume[0] > avgVolume * 1.5);
-    }
-    
-    // Tìm điểm swing và điều kiện pullback
-    double swingPoint1 = 0.0, swingPoint2 = 0.0;
-    int swingBar1 = 0, swingBar2 = 0;
-    
-    if (isBullish) {
-        swingBar1 = FindSwingPoint(true, 5, 15, swingPoint1);  // Swing high
-        swingBar2 = FindSwingPoint(false, 1, 8, swingPoint2);  // Swing low
-    } else {
-        swingBar1 = FindSwingPoint(false, 5, 15, swingPoint1); // Swing low
-        swingBar2 = FindSwingPoint(true, 1, 8, swingPoint2);   // Swing high
-    }
-    
-    if (swingBar1 <= 0 || swingBar2 <= 0) {
-        LogPattern("StrongPullback " + (isBullish ? "Bull" : "Bear"), false, "Không tìm thấy đủ điểm swing");
-        return false;
-    }
-    
-    // Kiểm tra độ sâu pullback
-    double pullbackDepth = 0.0;
-    if (isBullish) {
-        pullbackDepth = (swingPoint1 - swingPoint2) / swingPoint1;
-    } else {
-        pullbackDepth = (swingPoint2 - swingPoint1) / swingPoint1;
-    }
-    
-    if (pullbackDepth < m_minPullbackPct / 100.0 || pullbackDepth > m_maxPullbackPct / 100.0) {
-        LogPattern("StrongPullback " + (isBullish ? "Bull" : "Bear"), false, 
-                 "Độ sâu pullback không hợp lệ: " + DoubleToString(pullbackDepth * 100, 1) + "%");
-        return false;
-    }
-    
-    // Kiểm tra hành động giá hiện tại
-    if (isBullish) {
-        // Cho bullish: giá hiện tại phải cao hơn swing low và đang bật lên
-        if (m_close[0] <= swingPoint2 || m_close[0] <= m_open[0]) {
-            LogPattern("StrongPullback Bull", false, "Giá hiện tại không phù hợp");
-            return false;
-        }
-    } else {
-        // Cho bearish: giá hiện tại phải thấp hơn swing high và đang giảm
-        if (m_close[0] >= swingPoint2 || m_close[0] >= m_open[0]) {
-            LogPattern("StrongPullback Bear", false, "Giá hiện tại không phù hợp");
-            return false;
-        }
-    }
-    
-    // Kiểm tra động lượng mạnh
-    double momentum = MathAbs(m_close[0] - m_open[0]) / m_atr;
-    bool hasStrongMomentum = (momentum > 0.3);
-    
-    // Thiết lập thông tin cho pattern hợp lệ
-    pattern.isValid = true;
-    pattern.entryLevel = m_close[0];
-    
-    if (isBullish) {
-        pattern.stopLoss = swingPoint2 - m_atr * 0.5;
-        pattern.takeProfit = swingPoint1 + m_atr;
-    } else {
-        pattern.stopLoss = swingPoint2 + m_atr * 0.5;
-        pattern.takeProfit = swingPoint1 - m_atr;
-    }
-    
-    pattern.startBar = MathMax(swingBar1, swingBar2);
-    pattern.endBar = 0;
-    pattern.description = "Strong " + (isBullish ? "Bullish" : "Bearish") + " Pullback (" + 
-                       DoubleToString(pullbackDepth * 100, 1) + "%)";
-    
-    // Tính toán độ mạnh của mẫu hình
-    pattern.strength = CalculatePatternStrength(pattern);
-    
-    // Tăng độ mạnh nếu có thêm điều kiện
-    if (hasVolumeSpike) pattern.strength *= 1.2;
-    if (hasStrongMomentum) pattern.strength *= 1.1;
-    
-    // Giới hạn độ mạnh tối đa là 1.0
-    pattern.strength = MathMin(pattern.strength, 1.0);
-    
-    LogPattern("StrongPullback " + (isBullish ? "Bull" : "Bear"), true, 
-             "Pullback: " + DoubleToString(pullbackDepth * 100, 1) + "%, Strength: " + DoubleToString(pattern.strength, 2));
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra Engulfing Pattern                                       |
-//+------------------------------------------------------------------+
-bool CPatternDetector::CheckEngulfingPattern(bool isBullish, DetectedPattern& pattern) {
-    // Reset pattern
-    pattern = DetectedPattern();
-    pattern.type = SCENARIO_MOMENTUM_SHIFT;
-    pattern.isBullish = isBullish;
-    
-    if (m_atr <= 0) {
-        LogPattern("Engulfing " + (isBullish ? "Bull" : "Bear"), false, "ATR không hợp lệ");
-        return false;
-    }
-    
-    // Kiểm tra xu hướng trước mẫu hình
-    bool isCorrectTrend = isBullish ? IsDowntrend(10, 3) : IsUptrend(10, 3);
-    
-    if (!isCorrectTrend) {
-        LogPattern("Engulfing " + (isBullish ? "Bull" : "Bear"), false, 
-                 "Không phát hiện xu hướng " + (isBullish ? "giảm" : "tăng") + " trước mẫu hình");
-        return false;
-    }
-    
-    // Kiểm tra điều kiện engulfing
-    bool isEngulfing = false;
-    
-    if (isBullish) {
-        // Bullish engulfing: nến trước giảm, nến hiện tại tăng và "nuốt" nến trước
-        isEngulfing = (m_close[1] < m_open[1]) &&  // Nến trước giảm
-                      (m_close[0] > m_open[0]) &&  // Nến hiện tại tăng
-                      (m_close[0] > m_open[1]) &&  // Đóng cửa hiện tại cao hơn mở cửa trước
-                      (m_open[0] < m_close[1]);    // Mở cửa hiện tại thấp hơn đóng cửa trước
-    } else {
-        // Bearish engulfing: nến trước tăng, nến hiện tại giảm và "nuốt" nến trước
-        isEngulfing = (m_close[1] > m_open[1]) &&  // Nến trước tăng
-                      (m_close[0] < m_open[0]) &&  // Nến hiện tại giảm
-                      (m_close[0] < m_open[1]) &&  // Đóng cửa hiện tại thấp hơn mở cửa trước
-                      (m_open[0] > m_close[1]);    // Mở cửa hiện tại cao hơn đóng cửa trước
-    }
-    
-    if (!isEngulfing) {
-        LogPattern("Engulfing " + (isBullish ? "Bull" : "Bear"), false, "Không phát hiện mẫu hình engulfing");
-        return false;
-    }
-    
-    // Kiểm tra kích thước nến
-    double candleSize = MathAbs(m_close[0] - m_open[0]);
-    if (candleSize < m_atr * 0.5) {
-        LogPattern("Engulfing " + (isBullish ? "Bull" : "Bear"), false, "Kích thước nến quá nhỏ");
-        return false;
-    }
-    
-    // Kiểm tra nếu có volume tăng mạnh (nếu có dữ liệu volume)
-    bool hasVolumeConfirmation = false;
-    if (m_useVolume) {
-        hasVolumeConfirmation = (m_volume[0] > m_volume[1] * 1.2);
-    }
-    
-    // Thiết lập thông tin cho pattern hợp lệ
-    pattern.isValid = true;
-    pattern.entryLevel = m_close[0];
-    
-    if (isBullish) {
-        pattern.stopLoss = MathMin(m_low[0], m_low[1]) - m_atr * 0.3;
-        pattern.takeProfit = m_close[0] + (m_close[0] - pattern.stopLoss) * 2;
-    } else {
-        pattern.stopLoss = MathMax(m_high[0], m_high[1]) + m_atr * 0.3;
-        pattern.takeProfit = m_close[0] - (pattern.stopLoss - m_close[0]) * 2;
-    }
-    
-    pattern.startBar = 1;
-    pattern.endBar = 0;
-    pattern.description = "Engulfing " + (isBullish ? "Bullish" : "Bearish") + 
-                       (hasVolumeConfirmation ? " (Volume Confirmation)" : "");
-    
-    // Tính toán độ mạnh của mẫu hình
-    pattern.strength = 0.65;  // Giá trị cơ sở
-    
-    // Điều chỉnh độ mạnh
-    if (candleSize > m_atr * 0.8) pattern.strength += 0.1;
-    if (hasVolumeConfirmation) pattern.strength += 0.1;
-    
-    LogPattern("Engulfing " + (isBullish ? "Bull" : "Bear"), true, 
-             "Strength: " + DoubleToString(pattern.strength, 2));
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra Gartley Pattern                                         |
-//+------------------------------------------------------------------+
-bool CPatternDetector::CheckGartleyPattern(bool isBullish, DetectedPattern& pattern) {
-    // Reset pattern
-    pattern = DetectedPattern();
-    pattern.type = SCENARIO_HARMONIC_PATTERN;
-    pattern.isBullish = isBullish;
-    
-    if (m_atr <= 0) {
-        LogPattern("Gartley " + (isBullish ? "Bull" : "Bear"), false, "ATR không hợp lệ");
-        return false;
-    }
-    
-    // Tìm các điểm swing cho mẫu hình Gartley (cần 5 điểm: X, A, B, C, D)
-    double pointX = 0.0, pointA = 0.0, pointB = 0.0, pointC = 0.0, pointD = 0.0;
-    int barX = 0, barA = 0, barB = 0, barC = 0, barD = 0;
-    
-    // Đây là logic đơn giản hóa cho việc tìm các điểm swing
-    // Trong thực tế, cần logic phức tạp hơn để tìm chính xác các điểm này
-    
-    if (isBullish) {
-        // Tìm các điểm cho Bullish Gartley
-        barX = FindSwingPoint(false, 30, 50, pointX);
-        barA = FindSwingPoint(true, barX - 5, 20, pointA);
-        barB = FindSwingPoint(false, barA - 5, 15, pointB);
-        barC = FindSwingPoint(true, barB - 5, 10, pointC);
-        barD = 0;  // Điểm D là hiện tại
-        pointD = m_close[0];
-    } else {
-        // Tìm các điểm cho Bearish Gartley
-        barX = FindSwingPoint(true, 30, 50, pointX);
-        barA = FindSwingPoint(false, barX - 5, 20, pointA);
-        barB = FindSwingPoint(true, barA - 5, 15, pointB);
-        barC = FindSwingPoint(false, barB - 5, 10, pointC);
-        barD = 0;  // Điểm D là hiện tại
-        pointD = m_close[0];
-    }
-    
-    // Kiểm tra nếu tìm thấy đủ các điểm
-    if (barX <= 0 || barA <= 0 || barB <= 0 || barC <= 0) {
-        LogPattern("Gartley " + (isBullish ? "Bull" : "Bear"), false, "Không tìm thấy đủ điểm swing");
-        return false;
-    }
-    
-    // Tính toán các tỷ lệ Fibonacci
-    double retracementXA_B = 0.0;
-    double retracementAB_C = 0.0;
-    double retracementXA_D = 0.0;
-    
-    if (isBullish) {
-        retracementXA_B = (pointA - pointB) / (pointA - pointX);
-        retracementAB_C = (pointB - pointC) / (pointA - pointB);
-        retracementXA_D = (pointA - pointD) / (pointA - pointX);
-    } else {
-        retracementXA_B = (pointB - pointA) / (pointX - pointA);
-        retracementAB_C = (pointC - pointB) / (pointB - pointA);
-        retracementXA_D = (pointD - pointA) / (pointX - pointA);
-    }
-    
-    // Kiểm tra các tỷ lệ Fibonacci của Gartley
-    bool isGartley = IsValidFibonacciRatio(retracementXA_B, GARTLEY_B) &&
-                   IsValidFibonacciRatio(retracementAB_C, GARTLEY_C) &&
-                   IsValidFibonacciRatio(retracementXA_D, GARTLEY_D);
-    
-    if (!isGartley) {
-        LogPattern("Gartley " + (isBullish ? "Bull" : "Bear"), false, "Tỷ lệ Fibonacci không phù hợp");
-        return false;
-    }
-    
-    // Thiết lập thông tin cho pattern hợp lệ
-    pattern.isValid = true;
-    pattern.entryLevel = pointD;
-    
-    if (isBullish) {
-        pattern.stopLoss = pointD - m_atr * 0.8;
-        pattern.takeProfit = pointC + (pointC - pointD) * 0.618;
-    } else {
-        pattern.stopLoss = pointD + m_atr * 0.8;
-        pattern.takeProfit = pointC - (pointD - pointC) * 0.618;
-    }
-    
-    pattern.startBar = barX;
-    pattern.endBar = 0;
-    pattern.description = "Gartley " + (isBullish ? "Bullish" : "Bearish");
-    
-    // Tính toán độ mạnh của mẫu hình
-    pattern.strength = 0.75;  // Giá trị cơ sở cho Harmonic Patterns
-    
-    // Điều chỉnh độ mạnh dựa trên sự chính xác của các tỷ lệ
-    double fibAccuracy = (
-        (1.0 - MathAbs(retracementXA_B - GARTLEY_B) / GARTLEY_B) +
-        (1.0 - MathAbs(retracementAB_C - GARTLEY_C) / GARTLEY_C) +
-        (1.0 - MathAbs(retracementXA_D - GARTLEY_D) / GARTLEY_D)
-    ) / 3.0;
-    
-    pattern.strength *= fibAccuracy;
-    
-    LogPattern("Gartley " + (isBullish ? "Bull" : "Bear"), true, 
-             "Strength: " + DoubleToString(pattern.strength, 2));
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra Butterfly Pattern                                       |
-//+------------------------------------------------------------------+
-bool CPatternDetector::CheckButterflyPattern(bool isBullish, DetectedPattern& pattern) {
-    // Reset pattern
-    pattern = DetectedPattern();
-    pattern.type = SCENARIO_HARMONIC_PATTERN;
-    pattern.isBullish = isBullish;
-    
-    if (m_atr <= 0) {
-        LogPattern("Butterfly " + (isBullish ? "Bull" : "Bear"), false, "ATR không hợp lệ");
-        return false;
-    }
-    
-    // Logic tương tự như CheckGartleyPattern nhưng với các tỷ lệ của Butterfly
-    // Đây là phiên bản đơn giản hóa, trong thực tế cần logic phức tạp hơn
-    
-    // Giả định đã tìm thấy các điểm và kiểm tra tỷ lệ
-    bool isButterfly = false;  // Cần thực hiện kiểm tra thực tế
-    
-    if (!isButterfly) {
-        LogPattern("Butterfly " + (isBullish ? "Bull" : "Bear"), false, "Tỷ lệ không phù hợp");
-        return false;
-    }
-    
-    // Thiết lập thông tin cho pattern giả định
-    pattern.isValid = true;
-    pattern.entryLevel = m_close[0];
-    pattern.stopLoss = isBullish ? m_close[0] - m_atr : m_close[0] + m_atr;
-    pattern.takeProfit = isBullish ? m_close[0] + m_atr * 2 : m_close[0] - m_atr * 2;
-    pattern.startBar = 30;  // Giá trị giả định
-    pattern.endBar = 0;
-    pattern.description = "Butterfly " + (isBullish ? "Bullish" : "Bearish");
-    pattern.strength = 0.7;  // Giá trị giả định
-    
-    LogPattern("Butterfly " + (isBullish ? "Bull" : "Bear"), true, 
-             "Strength: " + DoubleToString(pattern.strength, 2));
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra Bat Pattern                                             |
-//+------------------------------------------------------------------+
-bool CPatternDetector::CheckBatPattern(bool isBullish, DetectedPattern& pattern) {
-    // Reset pattern
-    pattern = DetectedPattern();
-    pattern.type = SCENARIO_HARMONIC_PATTERN;
-    pattern.isBullish = isBullish;
-    
-    if (m_atr <= 0) {
-        LogPattern("Bat " + (isBullish ? "Bull" : "Bear"), false, "ATR không hợp lệ");
-        return false;
-    }
-    
-    // Logic tương tự như CheckGartleyPattern nhưng với các tỷ lệ của Bat
-    // Đây là phiên bản đơn giản hóa, trong thực tế cần logic phức tạp hơn
-    
-    // Giả định đã tìm thấy các điểm và kiểm tra tỷ lệ
-    bool isBat = false;  // Cần thực hiện kiểm tra thực tế
-    
-    if (!isBat) {
-        LogPattern("Bat " + (isBullish ? "Bull" : "Bear"), false, "Tỷ lệ không phù hợp");
-        return false;
-    }
-    
-    // Thiết lập thông tin cho pattern giả định
-    pattern.isValid = true;
-    pattern.entryLevel = m_close[0];
-    pattern.stopLoss = isBullish ? m_close[0] - m_atr : m_close[0] + m_atr;
-    pattern.takeProfit = isBullish ? m_close[0] + m_atr * 2 : m_close[0] - m_atr * 2;
-    pattern.startBar = 25;  // Giá trị giả định
-    pattern.endBar = 0;
-    pattern.description = "Bat " + (isBullish ? "Bullish" : "Bearish");
-    pattern.strength = 0.72;  // Giá trị giả định
-    
-    LogPattern("Bat " + (isBullish ? "Bull" : "Bear"), true, 
-             "Strength: " + DoubleToString(pattern.strength, 2));
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra Crab Pattern                                            |
-//+------------------------------------------------------------------+
-bool CPatternDetector::CheckCrabPattern(bool isBullish, DetectedPattern& pattern) {
-    // Reset pattern
-    pattern = DetectedPattern();
-    pattern.type = SCENARIO_HARMONIC_PATTERN;
-    pattern.isBullish = isBullish;
-    
-    if (m_atr <= 0) {
-        LogPattern("Crab " + (isBullish ? "Bull" : "Bear"), false, "ATR không hợp lệ");
-        return false;
-    }
-    
-    // Logic tương tự như CheckGartleyPattern nhưng với các tỷ lệ của Crab
-    // Đây là phiên bản đơn giản hóa, trong thực tế cần logic phức tạp hơn
-    
-    // Giả định đã tìm thấy các điểm và kiểm tra tỷ lệ
-    bool isCrab = false;  // Cần thực hiện kiểm tra thực tế
-    
-    if (!isCrab) {
-        LogPattern("Crab " + (isBullish ? "Bull" : "Bear"), false, "Tỷ lệ không phù hợp");
-        return false;
-    }
-    
-    // Thiết lập thông tin cho pattern giả định
-    pattern.isValid = true;
-    pattern.entryLevel = m_close[0];
-    pattern.stopLoss = isBullish ? m_close[0] - m_atr : m_close[0] + m_atr;
-    pattern.takeProfit = isBullish ? m_close[0] + m_atr * 2 : m_close[0] - m_atr * 2;
-    pattern.startBar = 35;  // Giá trị giả định
-    pattern.endBar = 0;
-    pattern.description = "Crab " + (isBullish ? "Bullish" : "Bearish");
-    pattern.strength = 0.75;  // Giá trị giả định
-    
-    LogPattern("Crab " + (isBullish ? "Bull" : "Bear"), true, 
-             "Strength: " + DoubleToString(pattern.strength, 2));
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| Hàm wrapper cho phát hiện Pullback                               |
-//+------------------------------------------------------------------+
-bool CPatternDetector::IsPullback(bool isBullish, double& strength) {
-    DetectedPattern pattern;
-    
-    if (isBullish) {
-        // Kiểm tra các loại pullback bullish
-        bool foundStrong = CheckStrongPullback(true, pattern);
-        if (!foundStrong) foundStrong = CheckBullishPullback(pattern);
-        if (!foundStrong) foundStrong = CheckFibonacciPullback(true, pattern);
-        
-        if (foundStrong) {
-            strength = pattern.strength;
-            return true;
-        }
-    } else {
-        // Kiểm tra các loại pullback bearish
-        bool foundStrong = CheckStrongPullback(false, pattern);
-        if (!foundStrong) foundStrong = CheckBearishPullback(pattern);
-        if (!foundStrong) foundStrong = CheckFibonacciPullback(false, pattern);
-        
-        if (foundStrong) {
-            strength = pattern.strength;
-            return true;
-        }
-    }
-    
-    strength = 0.0;
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| Hàm wrapper cho phát hiện Reversal                               |
-//+------------------------------------------------------------------+
-bool CPatternDetector::IsReversal(bool isBullish, double& strength) {
-    DetectedPattern pattern;
-    
-    bool found = CheckEngulfingPattern(isBullish, pattern);
-    
-    if (found) {
-        strength = pattern.strength;
-        return true;
-    }
-    
-    strength = 0.0;
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| Hàm wrapper cho phát hiện Harmonic                               |
-//+------------------------------------------------------------------+
-bool CPatternDetector::IsHarmonic(bool isBullish, double& strength) {
-    DetectedPattern pattern;
-    
-    bool found = CheckGartleyPattern(isBullish, pattern);
-    if (!found) found = CheckButterflyPattern(isBullish, pattern);
-    if (!found) found = CheckBatPattern(isBullish, pattern);
-    if (!found) found = CheckCrabPattern(isBullish, pattern);
-    
-    if (found) {
-        strength = pattern.strength;
-        return true;
-    }
-    
-    strength = 0.0;
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| Lấy thông tin chi tiết về mẫu hình đã phát hiện                  |
-//+------------------------------------------------------------------+
-bool CPatternDetector::GetPatternDetails(DetectedPattern& pattern) {
-    if (m_lastDetectedPattern.isValid) {
-        pattern = m_lastDetectedPattern;
-        return true;
-    }
-    
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra xem một độ sâu pullback có hợp lệ không                 |
-//+------------------------------------------------------------------+
-bool CPatternDetector::IsValidPullbackDepth(double highPrice, double lowPrice, double& ratio) {
-    if (highPrice <= 0 || lowPrice <= 0) return false;
-    
-    ratio = MathAbs(highPrice - lowPrice) / highPrice;
-    
-    // Kiểm tra nếu độ sâu pullback nằm trong khoảng cho phép
-    return (ratio >= m_minPullbackPct / 100.0 && ratio <= m_maxPullbackPct / 100.0);
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra xem một tỷ lệ có thỏa mãn tỷ lệ Fibonacci cho trước    |
-//+------------------------------------------------------------------+
-bool CPatternDetector::IsValidFibonacciRatio(double ratio, double targetRatio) {
-    double tolerance = m_fibTolerance;
-    return (MathAbs(ratio - targetRatio) <= tolerance);
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra xu hướng tăng trong một khoảng nến nhất định            |
-//+------------------------------------------------------------------+
-bool CPatternDetector::IsUptrend(int startBar, int endBar) {
-    if (startBar < endBar || startBar >= ArraySize(m_close) || endBar < 0) {
-        return false;
-    }
-    
-    // Tính giá trung bình cho phân đoạn đầu và cuối
-    double earlyAvg = 0.0, lateAvg = 0.0;
-    int earlyBars = MathMin(5, startBar - endBar);
-    int lateBars = MathMin(5, startBar);
-    
-    for (int i = 0; i < earlyBars; i++) {
-        earlyAvg += m_close[startBar - i];
-    }
-    
-    for (int i = 0; i < lateBars; i++) {
-        lateAvg += m_close[endBar + i];
-    }
-    
-    earlyAvg /= earlyBars;
-    lateAvg /= lateBars;
-    
-    // Kiểm tra xu hướng tăng: phần đầu phải thấp hơn phần cuối
-    return (earlyAvg < lateAvg * 0.98);
-}
-
-//+------------------------------------------------------------------+
-//| Kiểm tra xu hướng giảm trong một khoảng nến nhất định            |
-//+------------------------------------------------------------------+
-bool CPatternDetector::IsDowntrend(int startBar, int endBar) {
-    if (startBar < endBar || startBar >= ArraySize(m_close) || endBar < 0) {
-        return false;
-    }
-    
-    // Tính giá trung bình cho phân đoạn đầu và cuối
-    double earlyAvg = 0.0, lateAvg = 0.0;
-    int earlyBars = MathMin(5, startBar - endBar);
-    int lateBars = MathMin(5, startBar);
-    
-    for (int i = 0; i < earlyBars; i++) {
-        earlyAvg += m_close[startBar - i];
-    }
-    
-    for (int i = 0; i < lateBars; i++) {
-        lateAvg += m_close[endBar + i];
-    }
-    
-    earlyAvg /= earlyBars;
-    lateAvg /= lateBars;
-    
-    // Kiểm tra xu hướng giảm: phần đầu phải cao hơn phần cuối
-    return (earlyAvg > lateAvg * 1.02);
+    // Kiểm tra mẫu hình Pullback
+    if (DetectPullbackPatterns()) {
+        scenario = m_detectedPullback.type;
+        strength = m_detectedPullback.strength;
+        m_lastDetectedPattern = m_detectedPullback;
+        foundPattern = true;
+    }
+    // Kiểm tra mẫu hình Reversal nếu không tìm thấy Pullback
+    else if (DetectReversalPatterns()) {
+        scenario = m_detectedReversal.type;
+        strength = m_detectedReversal.strength;
+        m_lastDetectedPattern = m_detectedReversal;
+        foundPattern = true;
+    }
+    // Kiểm tra mẫu hình Harmonic nếu không tìm thấy cả hai
+    else if (DetectHarmonicPatterns()) {
+        scenario = m_detectedHarmonic.type;
+        strength = m_detectedHarmonic.strength;
+        m_lastDetectedPattern = m_detectedHarmonic;
+        foundPattern = true;
+    }
+    
+    return foundPattern;
 }
 
 //+------------------------------------------------------------------+
 //| Ghi Log thông tin mẫu hình                                       |
 //+------------------------------------------------------------------+
 void CPatternDetector::LogPattern(string patternName, bool isValid, string description = "") {
-    if (m_logger == NULL) return;
-    
-    if (isValid) {
-        m_logger.LogDebug("Pattern: " + patternName + " hợp lệ. " + description);
-    } else if (description != "") {
-        m_logger.LogDebug("Pattern: " + patternName + " không hợp lệ. " + description);
+    if (m_Logger != NULL) {
+        if (isValid) {
+            m_Logger.LogDebug("Phát hiện mẫu hình: " + patternName + ", " + description);
+        } else {
+            m_Logger.LogDebug("Kiểm tra mẫu hình không hợp lệ: " + patternName);
+        }
     }
 }
 
@@ -1524,3 +550,728 @@ double CPatternDetector::CalculateFibonacciRetracementLevel(double startPrice, d
         return startPrice - (startPrice - endPrice) * retracementRatio;
     }
 }
+
+//+------------------------------------------------------------------+
+//| Phát hiện các mẫu hình pullback                                  |
+//+------------------------------------------------------------------+
+bool CPatternDetector::DetectPullbackPatterns() {
+    // Khởi tạo mẫu hình với các giá trị mặc định
+    m_detectedPullback.Initialize();
+    
+    // Kiểm tra các loại mẫu hình pullback
+    if (DetectPullbackPattern(true, m_detectedPullback)) {
+        return true;
+    }
+    else if (DetectPullbackPattern(false, m_detectedPullback)) {
+        return true;
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Phát hiện các mẫu hình đảo chiều                                 |
+//+------------------------------------------------------------------+
+bool CPatternDetector::DetectReversalPatterns() {
+    // Khởi tạo mẫu hình với các giá trị mặc định
+    m_detectedReversal.Initialize();
+    
+    // Kiểm tra các mẫu hình đảo chiều
+    if (CheckEngulfingPattern(true, m_detectedReversal)) {
+        return true;
+    }
+    else if (CheckEngulfingPattern(false, m_detectedReversal)) {
+        return true;
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Phát hiện các mẫu hình harmonic                                   |
+//+------------------------------------------------------------------+
+bool CPatternDetector::DetectHarmonicPatterns() {
+    // Khởi tạo mẫu hình với các giá trị mặc định
+    m_detectedHarmonic.Initialize();
+    
+    // Kiểm tra các loại mẫu hình harmonic
+    if (CheckGartleyPattern(true, m_detectedHarmonic)) {
+        return true;
+    }
+    else if (CheckGartleyPattern(false, m_detectedHarmonic)) {
+        return true;
+    }
+    else if (CheckButterflyPattern(true, m_detectedHarmonic)) {
+        return true;
+    }
+    else if (CheckButterflyPattern(false, m_detectedHarmonic)) {
+        return true;
+    }
+    else if (CheckBatPattern(true, m_detectedHarmonic)) {
+        return true;
+    }
+    else if (CheckBatPattern(false, m_detectedHarmonic)) {
+        return true;
+    }
+    else if (CheckCrabPattern(true, m_detectedHarmonic)) {
+        return true;
+    }
+    else if (CheckCrabPattern(false, m_detectedHarmonic)) {
+        return true;
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra xem tỷ lệ pullback có hợp lệ không                        |
+//+------------------------------------------------------------------+
+bool CPatternDetector::IsValidPullbackDepth(double highPrice, double lowPrice, double& ratio) {
+    double range = MathAbs(highPrice - lowPrice);
+    if (range <= 0) {
+        return false;
+    }
+    
+    ratio = 100.0 * range / ((highPrice + lowPrice) / 2.0);
+    
+    return (ratio >= m_minPullbackPct && ratio <= m_maxPullbackPct);
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra tỷ lệ Fibonacci có nằm trong khoảng dung sai              |
+//+------------------------------------------------------------------+
+bool CPatternDetector::IsValidFibonacciRatio(double ratio, double targetRatio) {
+    return (MathAbs(ratio - targetRatio) <= m_fibTolerance);
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra xu hướng tăng                                           |
+//+------------------------------------------------------------------+
+bool CPatternDetector::IsUptrend(int startBar, int endBar) {
+    if (startBar < 0 || endBar < 0 || startBar >= ArraySize(m_close) || endBar >= ArraySize(m_close)) {
+        return false;
+    }
+    
+    // Xu hướng tăng đơn giản là giá đóng cửa cuối kỳ > giá đóng cửa đầu kỳ
+    // Có thể thêm nhiều điều kiện phức tạp hơn ở đây
+    return (m_close[endBar] > m_close[startBar]);
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra xu hướng giảm                                           |
+//+------------------------------------------------------------------+
+bool CPatternDetector::IsDowntrend(int startBar, int endBar) {
+    if (startBar < 0 || endBar < 0 || startBar >= ArraySize(m_close) || endBar >= ArraySize(m_close)) {
+        return false;
+    }
+    
+    // Xu hướng giảm đơn giản là giá đóng cửa cuối kỳ < giá đóng cửa đầu kỳ
+    // Có thể thêm nhiều điều kiện phức tạp hơn ở đây
+    return (m_close[endBar] < m_close[startBar]);
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra mẫu hình pullback mạnh (Strong Pullback)                 |
+//+------------------------------------------------------------------+
+bool CPatternDetector::CheckStrongPullback(bool isBullish, DetectedPattern& pattern) {
+    // Khởi tạo mẫu hình
+    pattern.Initialize();
+    pattern.isBullish = isBullish;
+    pattern.type = SCENARIO_STRONG_PULLBACK;
+    pattern.description = isBullish ? "Strong Bullish Pullback" : "Strong Bearish Pullback";
+    
+    // Khởi tạo các biến
+    int lookbackBars = 20;
+    
+    // Kích thước tối thiểu phù hợp với tầm nhìn giao dịch
+    if (ArraySize(m_high) < lookbackBars + 5) {
+        LogPattern(pattern.description, false, "Không đủ dữ liệu");
+        return false;
+    }
+    
+    // Định vị swing points
+    double swingPrice = 0.0;
+    int swingBar = -1;
+    
+    // Tìm swing high/low quan trọng
+    if (isBullish) {
+        // Tìm swing low trước khi tăng
+        swingBar = FindLastSwingLow(0, lookbackBars);
+        if (swingBar < 0) {
+            LogPattern(pattern.description, false, "Không tìm thấy swing low phù hợp");
+            return false;
+        }
+        swingPrice = m_low[swingBar];
+    } else {
+        // Tìm swing high trước khi giảm
+        swingBar = FindLastSwingHigh(0, lookbackBars);
+        if (swingBar < 0) {
+            LogPattern(pattern.description, false, "Không tìm thấy swing high phù hợp");
+            return false;
+        }
+        swingPrice = m_high[swingBar];
+    }
+    
+    // Kiểm tra xu hướng chính
+    bool isMainTrend = isBullish ? IsUptrend(swingBar, 0) : IsDowntrend(swingBar, 0);
+    if (!isMainTrend) {
+        LogPattern(pattern.description, false, "Không có xu hướng chính rõ ràng");
+        return false;
+    }
+    
+    // Tìm điểm bắt đầu và kết thúc pullback
+    int pullbackStartBar = -1;
+    int pullbackEndBar = -1;
+    double pullbackStartPrice = 0.0;
+    double pullbackEndPrice = 0.0;
+    
+    if (isBullish) {
+        // Sau swing low, tìm mức cao gần đây (điểm bắt đầu pullback)
+        pullbackStartBar = FindLastSwingHigh(0, swingBar);
+        if (pullbackStartBar < 0 || pullbackStartBar >= swingBar) {
+            LogPattern(pattern.description, false, "Không tìm thấy điểm bắt đầu pullback");
+            return false;
+        }
+        pullbackStartPrice = m_high[pullbackStartBar];
+        
+        // Tìm mức thấp kể từ điểm bắt đầu pullback (điểm kết thúc pullback)
+        pullbackEndBar = FindLastSwingLow(0, pullbackStartBar);
+        if (pullbackEndBar < 0 || pullbackEndBar >= pullbackStartBar) {
+            LogPattern(pattern.description, false, "Không tìm thấy điểm kết thúc pullback");
+            return false;
+        }
+        pullbackEndPrice = m_low[pullbackEndBar];
+        
+        // Kiểm tra mức pullback hợp lệ (không quá sâu, không quá nông)
+        double retracementRatio = (pullbackStartPrice - pullbackEndPrice) / (pullbackStartPrice - swingPrice);
+        if (retracementRatio < 0.3 || retracementRatio > 0.7) {
+            LogPattern(pattern.description, false, "Mức pullback không hợp lệ: " + DoubleToString(retracementRatio, 2));
+            return false;
+        }
+        
+        // Kiểm tra momentum
+        bool hasMomentumSupport = false;
+        // Lấy dữ liệu RSI để kiểm tra (giả định đã có giá trị RSI)
+        double rsiValue = 50.0; // Cần lấy giá trị thực từ indicator
+        
+        // RSI đang tăng từ vùng oversold
+        if (rsiValue > 40 && rsiValue < 60) {
+            hasMomentumSupport = true;
+        }
+        
+        if (!hasMomentumSupport) {
+            LogPattern(pattern.description, false, "Không có xác nhận momentum");
+            return false;
+        }
+        
+        // Kiểm tra khối lượng (nếu có dữ liệu)
+        bool hasVolumeConfirmation = true;
+        if (m_useVolume) {
+            // Khối lượng giảm trong pullback, tăng khi xác nhận xu hướng
+            double avgVolume = (m_volume[1] + m_volume[2] + m_volume[3]) / 3.0;
+            double pullbackVolume = (m_volume[pullbackEndBar] + m_volume[pullbackEndBar + 1]) / 2.0;
+            
+            if (pullbackVolume > avgVolume) {
+                hasVolumeConfirmation = false;
+                LogPattern(pattern.description, false, "Volume không xác nhận (quá cao trong pullback)");
+                return false;
+            }
+        }
+        
+        // Kiểm tra nến xác nhận
+        bool hasConfirmationCandle = false;
+        
+        // Nến gần nhất phải có thân dài và đóng cửa gần mức cao
+        double bodySize = MathAbs(m_close[0] - m_open[0]);
+        double candleRange = m_high[0] - m_low[0];
+        
+        if (bodySize > 0.6 * candleRange && m_close[0] > m_open[0]) {
+            hasConfirmationCandle = true;
+        }
+        
+        if (!hasConfirmationCandle) {
+            LogPattern(pattern.description, false, "Không có nến xác nhận");
+            return false;
+        }
+        
+        // Thiết lập giá trị mẫu hình
+        pattern.startBar = swingBar;
+        pattern.endBar = 0;
+        pattern.entryLevel = m_close[0];
+        pattern.stopLoss = pullbackEndPrice - m_atr * 0.5; // SL dưới mức pullback với buffer ATR
+        pattern.takeProfit = pullbackStartPrice + (pullbackStartPrice - swingPrice) * 0.5; // TP tối thiểu 1.5R
+        pattern.isValid = true;
+        
+    } else {
+        // Sau swing high, tìm mức thấp gần đây (điểm bắt đầu pullback)
+        pullbackStartBar = FindLastSwingLow(0, swingBar);
+        if (pullbackStartBar < 0 || pullbackStartBar >= swingBar) {
+            LogPattern(pattern.description, false, "Không tìm thấy điểm bắt đầu pullback");
+            return false;
+        }
+        pullbackStartPrice = m_low[pullbackStartBar];
+        
+        // Tìm mức cao kể từ điểm bắt đầu pullback (điểm kết thúc pullback)
+        pullbackEndBar = FindLastSwingHigh(0, pullbackStartBar);
+        if (pullbackEndBar < 0 || pullbackEndBar >= pullbackStartBar) {
+            LogPattern(pattern.description, false, "Không tìm thấy điểm kết thúc pullback");
+            return false;
+        }
+        pullbackEndPrice = m_high[pullbackEndBar];
+        
+        // Kiểm tra mức pullback hợp lệ (không quá sâu, không quá nông)
+        double retracementRatio = (pullbackEndPrice - pullbackStartPrice) / (swingPrice - pullbackStartPrice);
+        if (retracementRatio < 0.3 || retracementRatio > 0.7) {
+            LogPattern(pattern.description, false, "Mức pullback không hợp lệ: " + DoubleToString(retracementRatio, 2));
+            return false;
+        }
+        
+        // Kiểm tra momentum
+        bool hasMomentumSupport = false;
+        // Lấy dữ liệu RSI để kiểm tra (giả định đã có giá trị RSI)
+        double rsiValue = 50.0; // Cần lấy giá trị thực từ indicator
+        
+        // RSI đang giảm từ vùng overbought
+        if (rsiValue > 40 && rsiValue < 60) {
+            hasMomentumSupport = true;
+        }
+        
+        if (!hasMomentumSupport) {
+            LogPattern(pattern.description, false, "Không có xác nhận momentum");
+            return false;
+        }
+        
+        // Kiểm tra khối lượng (nếu có dữ liệu)
+        bool hasVolumeConfirmation = true;
+        if (m_useVolume) {
+            // Khối lượng giảm trong pullback, tăng khi xác nhận xu hướng
+            double avgVolume = (m_volume[1] + m_volume[2] + m_volume[3]) / 3.0;
+            double pullbackVolume = (m_volume[pullbackEndBar] + m_volume[pullbackEndBar + 1]) / 2.0;
+            
+            if (pullbackVolume > avgVolume) {
+                hasVolumeConfirmation = false;
+                LogPattern(pattern.description, false, "Volume không xác nhận (quá cao trong pullback)");
+                return false;
+            }
+        }
+        
+        // Kiểm tra nến xác nhận
+        bool hasConfirmationCandle = false;
+        
+        // Nến gần nhất phải có thân dài và đóng cửa gần mức thấp
+        double bodySize = MathAbs(m_close[0] - m_open[0]);
+        double candleRange = m_high[0] - m_low[0];
+        
+        if (bodySize > 0.6 * candleRange && m_close[0] < m_open[0]) {
+            hasConfirmationCandle = true;
+        }
+        
+        if (!hasConfirmationCandle) {
+            LogPattern(pattern.description, false, "Không có nến xác nhận");
+            return false;
+        }
+        
+        // Thiết lập giá trị mẫu hình
+        pattern.startBar = swingBar;
+        pattern.endBar = 0;
+        pattern.entryLevel = m_close[0];
+        pattern.stopLoss = pullbackEndPrice + m_atr * 0.5; // SL trên mức pullback với buffer ATR
+        pattern.takeProfit = pullbackStartPrice - (swingPrice - pullbackStartPrice) * 0.5; // TP tối thiểu 1.5R
+        pattern.isValid = true;
+    }
+    
+    // Tính độ mạnh mẫu hình
+    if (pattern.isValid) {
+        // Yếu tố tăng cường độ mạnh
+        pattern.strength = 0.7; // Giá trị cơ sở
+        
+        // Tăng độ mạnh nếu khối lượng xác nhận
+        if (m_useVolume) {
+            double currentVolume = m_volume[0];
+            double avgVolume = (m_volume[1] + m_volume[2] + m_volume[3]) / 3.0;
+            
+            if (currentVolume > avgVolume * 1.5) {
+                pattern.strength += 0.1;
+            }
+        }
+        
+        // Tăng độ mạnh nếu ATR hợp lý (không quá biến động)
+        if (m_atr > 0 && m_atr < m_atrBuffer[10] * 1.5) {
+            pattern.strength += 0.1;
+        }
+        
+        // Giới hạn độ mạnh trong khoảng [0, 1]
+        pattern.strength = MathMin(1.0, pattern.strength);
+        
+        LogPattern(pattern.description, true, "Độ mạnh: " + DoubleToString(pattern.strength, 2));
+    }
+    
+    return pattern.isValid;
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra mẫu hình Engulfing (nuốt chừng)                          |
+//+------------------------------------------------------------------+
+bool CPatternDetector::CheckEngulfingPattern(bool isBullish, DetectedPattern& pattern) {
+    // Triển khai mã để kiểm tra mẫu hình Engulfing
+    pattern.Initialize();
+    pattern.isBullish = isBullish;
+    pattern.type = SCENARIO_CUSTOM;
+    pattern.description = isBullish ? "Bullish Engulfing" : "Bearish Engulfing";
+    
+    // Cần triển khai logic để kiểm tra mẫu hình Engulfing
+    // Giả định mẫu hình này chưa được hỗ trợ đầy đủ
+    pattern.isValid = false;
+    
+    if (pattern.isValid) {
+        // Tính toán độ mạnh của mẫu hình
+        pattern.strength = CalculatePatternStrength(pattern);
+        
+        // Ghi log
+        LogPattern(pattern.description, true);
+    }
+    
+    return pattern.isValid;
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra mẫu hình Gartley                                         |
+//+------------------------------------------------------------------+
+bool CPatternDetector::CheckGartleyPattern(bool isBullish, DetectedPattern& pattern) {
+    // Triển khai mã để kiểm tra mẫu hình Gartley
+    pattern.Initialize();
+    pattern.isBullish = isBullish;
+    pattern.type = SCENARIO_HARMONIC_PATTERN;
+    pattern.description = isBullish ? "Bullish Gartley" : "Bearish Gartley";
+    
+    // Cần triển khai logic để kiểm tra mẫu hình Gartley
+    // Giả định mẫu hình này chưa được hỗ trợ đầy đủ
+    pattern.isValid = false;
+    
+    if (pattern.isValid) {
+        // Tính toán độ mạnh của mẫu hình
+        pattern.strength = CalculatePatternStrength(pattern);
+        
+        // Ghi log
+        LogPattern(pattern.description, true);
+    }
+    
+    return pattern.isValid;
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra mẫu hình Butterfly                                      |
+//+------------------------------------------------------------------+
+bool CPatternDetector::CheckButterflyPattern(bool isBullish, DetectedPattern& pattern) {
+    // Triển khai mã để kiểm tra mẫu hình Butterfly
+    pattern.Initialize();
+    pattern.isBullish = isBullish;
+    pattern.type = SCENARIO_HARMONIC_PATTERN;
+    pattern.description = isBullish ? "Bullish Butterfly" : "Bearish Butterfly";
+    
+    // Cần triển khai logic để kiểm tra mẫu hình Butterfly
+    // Giả định mẫu hình này chưa được hỗ trợ đầy đủ
+    pattern.isValid = false;
+    
+    if (pattern.isValid) {
+        // Tính toán độ mạnh của mẫu hình
+        pattern.strength = CalculatePatternStrength(pattern);
+        
+        // Ghi log
+        LogPattern(pattern.description, true);
+    }
+    
+    return pattern.isValid;
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra mẫu hình Bat                                            |
+//+------------------------------------------------------------------+
+bool CPatternDetector::CheckBatPattern(bool isBullish, DetectedPattern& pattern) {
+    // Triển khai mã để kiểm tra mẫu hình Bat
+    pattern.Initialize();
+    pattern.isBullish = isBullish;
+    pattern.type = SCENARIO_HARMONIC_PATTERN;
+    pattern.description = isBullish ? "Bullish Bat" : "Bearish Bat";
+    
+    // Cần triển khai logic để kiểm tra mẫu hình Bat
+    // Giả định mẫu hình này chưa được hỗ trợ đầy đủ
+    pattern.isValid = false;
+    
+    if (pattern.isValid) {
+        // Tính toán độ mạnh của mẫu hình
+        pattern.strength = CalculatePatternStrength(pattern);
+        
+        // Ghi log
+        LogPattern(pattern.description, true);
+    }
+    
+    return pattern.isValid;
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra mẫu hình Crab                                           |
+//+------------------------------------------------------------------+
+bool CPatternDetector::CheckCrabPattern(bool isBullish, DetectedPattern& pattern) {
+    // Triển khai mã để kiểm tra mẫu hình Crab
+    pattern.Initialize();
+    pattern.isBullish = isBullish;
+    pattern.type = SCENARIO_HARMONIC_PATTERN;
+    pattern.description = isBullish ? "Bullish Crab" : "Bearish Crab";
+    
+    // Cần triển khai logic để kiểm tra mẫu hình Crab
+    // Giả định mẫu hình này chưa được hỗ trợ đầy đủ
+    pattern.isValid = false;
+    
+    if (pattern.isValid) {
+        // Tính toán độ mạnh của mẫu hình
+        pattern.strength = CalculatePatternStrength(pattern);
+        
+        // Ghi log
+        LogPattern(pattern.description, true);
+    }
+    
+    return pattern.isValid;
+}
+
+//+------------------------------------------------------------------+
+//| Cài đặt bộ lọc pullback chặt chẽ                                   |
+//+------------------------------------------------------------------+
+void CPatternDetector::SetStrictPullbackFilter(bool enable, int minConfirmationBars = 2, int maxRejectionCount = 1) {
+    m_StrictPullbackFilter = enable;
+    m_MinConfirmationBars = minConfirmationBars;
+    m_MaxRejectionCount = maxRejectionCount;
+    
+    if (m_Logger != NULL) {
+        m_Logger.LogInfo("PatternDetector: " + (enable ? "Bật" : "Tắt") + " bộ lọc pullback chặt chẽ");
+    }
+}
+
+bool CPatternDetector::DetectPullbackPattern(bool isBullish, DetectedPattern& pattern) {
+    // Kiểm tra đủ dữ liệu
+    int requiredBars = m_maxBarsForPattern;
+    if (m_high.Size() < requiredBars || m_low.Size() < requiredBars || m_close.Size() < requiredBars) {
+        LogPattern("Pullback", false, "Không đủ dữ liệu");
+        return false;
+    }
+    
+    // Tìm xu hướng chính
+    bool hasMainTrend = false;
+    int trendStartBar = 0;
+    
+    if (isBullish) {
+        // Tìm xu hướng tăng
+        for (int i = 10; i < requiredBars - 10; i++) {
+            if (m_close[i] > m_close[i+10] + m_atr * 0.8) {
+                hasMainTrend = true;
+                trendStartBar = i;
+                break;
+            }
+        }
+    } else {
+        // Tìm xu hướng giảm
+        for (int i = 10; i < requiredBars - 10; i++) {
+            if (m_close[i] < m_close[i+10] - m_atr * 0.8) {
+                hasMainTrend = true;
+                trendStartBar = i;
+                break;
+            }
+        }
+    }
+    
+    if (!hasMainTrend) {
+        LogPattern("Pullback", false, "Không tìm thấy xu hướng chính");
+        return false;
+    }
+    
+    // Tìm điểm pullback gần đây
+    int pullbackStart = 0;
+    int pullbackEnd = 0;
+    bool hasPullback = false;
+    double pullbackPercent = 0.0;
+    
+    if (isBullish) {
+        // Tìm pullback trong xu hướng tăng (giảm giá sau khi tăng)
+        double highest = m_high[1];
+        int highestBar = 1;
+        
+        // Tìm giá cao nhất
+        for (int i = 1; i < 20; i++) {
+            if (m_high[i] > highest) {
+                highest = m_high[i];
+                highestBar = i;
+            }
+        }
+        
+        // Tìm pullback sau giá cao nhất
+        double lowest = m_low[1];
+        int lowestBar = 1;
+        
+        for (int i = 1; i < highestBar + 5 && i < 20; i++) {
+            if (m_low[i] < lowest) {
+                lowest = m_low[i];
+                lowestBar = i;
+            }
+        }
+        
+        // Kiểm tra pullback hợp lệ
+        if (highestBar < lowestBar && highest > lowest) {
+            double priceRange = highest - m_close[trendStartBar];
+            if (priceRange <= 0) return false;
+            
+            pullbackPercent = ((highest - lowest) / priceRange) * 100.0;
+            
+            if (pullbackPercent >= m_minPullbackPct && pullbackPercent <= m_maxPullbackPct) {
+                hasPullback = true;
+                pullbackStart = highestBar;
+                pullbackEnd = lowestBar;
+            }
+        }
+    } else {
+        // Tìm pullback trong xu hướng giảm (tăng giá sau khi giảm)
+        double lowest = m_low[1];
+        int lowestBar = 1;
+        
+        // Tìm giá thấp nhất
+        for (int i = 1; i < 20; i++) {
+            if (m_low[i] < lowest) {
+                lowest = m_low[i];
+                lowestBar = i;
+            }
+        }
+        
+        // Tìm pullback sau giá thấp nhất
+        double highest = m_high[1];
+        int highestBar = 1;
+        
+        for (int i = 1; i < lowestBar + 5 && i < 20; i++) {
+            if (m_high[i] > highest) {
+                highest = m_high[i];
+                highestBar = i;
+            }
+        }
+        
+        // Kiểm tra pullback hợp lệ
+        if (lowestBar < highestBar && lowest < highest) {
+            double priceRange = m_close[trendStartBar] - lowest;
+            if (priceRange <= 0) return false;
+            
+            pullbackPercent = ((highest - lowest) / priceRange) * 100.0;
+            
+            if (pullbackPercent >= m_minPullbackPct && pullbackPercent <= m_maxPullbackPct) {
+                hasPullback = true;
+                pullbackStart = lowestBar;
+                pullbackEnd = highestBar;
+            }
+        }
+    }
+    
+    if (!hasPullback) {
+        LogPattern("Pullback", false, "Không tìm thấy pullback hợp lệ");
+        return false;
+    }
+    
+    // Bộ lọc chặt chẽ nếu được bật
+    if (m_StrictPullbackFilter) {
+        // Đếm số nến xác nhận sau pullback
+        int confirmationBars = 0;
+        int rejectionCount = 0;
+        
+        if (isBullish) {
+            // Đếm nến xác nhận cho xu hướng tăng
+            for (int i = 0; i < pullbackEnd && i < 5; i++) {
+                if (m_close[i] > m_close[i+1] && m_low[i] > m_low[pullbackEnd] * 0.9995) {
+                    confirmationBars++;
+                } else if (m_low[i] < m_low[pullbackEnd]) {
+                    rejectionCount++;
+                }
+            }
+        } else {
+            // Đếm nến xác nhận cho xu hướng giảm
+            for (int i = 0; i < pullbackEnd && i < 5; i++) {
+                if (m_close[i] < m_close[i+1] && m_high[i] < m_high[pullbackEnd] * 1.0005) {
+                    confirmationBars++;
+                } else if (m_high[i] > m_high[pullbackEnd]) {
+                    rejectionCount++;
+                }
+            }
+        }
+        
+        // Kiểm tra số nến xác nhận và từ chối
+        if (confirmationBars < m_MinConfirmationBars || rejectionCount > m_MaxRejectionCount) {
+            LogPattern("Pullback", false, "Không đủ xác nhận: " + IntegerToString(confirmationBars) + 
+                       " nến, " + IntegerToString(rejectionCount) + " từ chối");
+            return false;
+        }
+    }
+    
+    // Tính toán chất lượng mẫu hình
+    double quality = 0.60; // Giá trị cơ sở
+    
+    // Cộng thêm dựa trên độ sâu pullback
+    if (pullbackPercent >= 30.0 && pullbackPercent <= 60.0) quality += 0.15;
+    
+    // Kiểm tra xác nhận Price Action
+    bool hasPriceActionConfirmation = false;
+    
+    if (isBullish) {
+        // Kiểm tra nến bullish sau pullback
+        if (m_close[0] > m_open[0] && m_close[0] > m_close[1] && 
+            m_low[0] > m_low[1] * 0.9995) {
+            hasPriceActionConfirmation = true;
+            quality += 0.10;
+        }
+    } else {
+        // Kiểm tra nến bearish sau pullback
+        if (m_close[0] < m_open[0] && m_close[0] < m_close[1] && 
+            m_high[0] < m_high[1] * 1.0005) {
+            hasPriceActionConfirmation = true;
+            quality += 0.10;
+        }
+    }
+    
+    // Kiểm tra xác nhận volume nếu được kích hoạt
+    bool hasVolumeConfirmation = false;
+    if (m_useVolume && m_RequireVolumeConfirmation) {
+        double avgVolume = 0;
+        for (int i = 1; i < 10; i++) {
+            avgVolume += m_volume[i];
+        }
+        avgVolume /= 9.0;
+        
+        if (m_volume[0] > avgVolume * m_VolumeThreshold) {
+            hasVolumeConfirmation = true;
+            quality += 0.05;
+        }
+    }
+    
+    // Lưu kết quả
+    pattern.patternType = isBullish ? SCENARIO_BULLISH_PULLBACK : SCENARIO_BEARISH_PULLBACK;
+    pattern.isValid = true;
+    pattern.strength = quality;
+    pattern.startBar = pullbackStart;
+    pattern.endBar = pullbackEnd;
+    pattern.description = StringFormat(
+        "Pullback %s %.1f%%, Quality: %.2f", 
+        isBullish ? "Bullish" : "Bearish", 
+        pullbackPercent, 
+        quality
+    );
+    
+    // Lưu thông tin bổ sung
+    pattern.extraData.hasPriceActionConfirmation = hasPriceActionConfirmation;
+    pattern.extraData.hasVolumeConfirmation = hasVolumeConfirmation;
+    pattern.extraData.pullbackPercent = pullbackPercent;
+    
+    // Cập nhật biến cho lần phát hiện cuối cùng
+    m_LastPatternQuality = quality;
+    m_LastPatternType = pattern.patternType;
+    m_LastDetectionTime = TimeCurrent();
+    
+    LogPattern(isBullish ? "Bullish Pullback" : "Bearish Pullback", true, pattern.description);
+    return true;
+}
+
+} // end namespace ApexPullback
+
+#endif // PATTERN_DETECTOR_MQH_

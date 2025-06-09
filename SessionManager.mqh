@@ -3,34 +3,17 @@
 //|                                             APEX Pullback EA v14.0|
 //|                                       Copyright 2023-2024, APEX   |
 //+------------------------------------------------------------------+
-#property copyright "APEX Pullback EA"
-#property link      "https://www.apexpullback.com"
-#property version   "14.0"
-#property strict
+
+#ifndef _SESSION_MANAGER_MQH_
+#define _SESSION_MANAGER_MQH_
 
 #include "Logger.mqh"
+#include "Enums.mqh"      // Thêm include Enums.mqh để sử dụng enum ENUM_SESSION đã định nghĩa
 
 namespace ApexPullback {
 
-// Định nghĩa các phiên giao dịch
-enum ENUM_SESSION_FILTER {
-   SESSION_ALL,        // Tất cả phiên
-   SESSION_ASIAN,      // Chỉ phiên Á
-   SESSION_LONDON,     // Chỉ phiên London
-   SESSION_NEWYORK,    // Chỉ phiên New York
-   SESSION_OVERLAP,    // Chỉ phiên giao nhau London-NY
-   SESSION_CUSTOM      // Phiên tùy chỉnh
-};
-
-// Định nghĩa các phiên giao dịch chi tiết hơn
-enum ENUM_SESSION {
-   SESSION_ASIAN,         // Phiên Á (Tokyo)
-   SESSION_LONDON,        // Phiên London
-   SESSION_NEWYORK,       // Phiên New York
-   SESSION_OVERLAP_EU_US, // Phiên giao nhau London-NY
-   SESSION_CLOSING,       // Phiên đóng cửa
-   SESSION_WEEKEND        // Cuối tuần
-};
+// Định nghĩa các phiên giao dịch cho Filter đã được đưa vào Enums.mqh
+// Sử dụng các giá trị: FILTER_ALL_SESSIONS, FILTER_ASIAN_ONLY, v.v.
 
 // Forward declarations
 class CLogger;
@@ -175,7 +158,7 @@ CSessionManager::CSessionManager() {
    // Khởi tạo giá trị mặc định
    m_FilterBySession = false;
    m_GmtOffset = 0;
-   m_SessionFilter = SESSION_ALL;
+   m_SessionFilter = FILTER_ALL_SESSIONS;
    m_TradeLondonOpen = true;
    m_TradeNewYorkOpen = true;
    
@@ -319,7 +302,7 @@ void CSessionManager::Update() {
    
    // Nếu cuối tuần, phiên là WEEKEND
    if (m_IsWeekend) {
-      m_CurrentSession = SESSION_WEEKEND;
+      m_CurrentSession = SESSION_OVERNIGHT;
       return;
    }
    
@@ -327,16 +310,16 @@ void CSessionManager::Update() {
    
    // Xác định phiên hiện tại
    if (IsInSession(m_OverlapStart, m_OverlapEnd)) {
-      m_CurrentSession = SESSION_OVERLAP_EU_US;
+      m_CurrentSession = SESSION_EUROPEAN_AMERICAN;
    }
    else if (IsInSession(m_AsianStart, m_AsianEnd)) {
       m_CurrentSession = SESSION_ASIAN;
    }
    else if (IsInSession(m_LondonStart, m_LondonEnd)) {
-      m_CurrentSession = SESSION_LONDON;
+      m_CurrentSession = SESSION_EUROPEAN;
    }
    else if (IsInSession(m_NewYorkStart, m_NewYorkEnd)) {
-      m_CurrentSession = SESSION_NEWYORK;
+      m_CurrentSession = SESSION_AMERICAN;
    }
    else {
       m_CurrentSession = SESSION_CLOSING;
@@ -445,12 +428,12 @@ datetime CSessionManager::GetAdjustedGMT() {
 string CSessionManager::GetCurrentSessionName() {
    switch (m_CurrentSession) {
       case SESSION_ASIAN:         return "Phiên Á";
-      case SESSION_LONDON:        return "Phiên London";
-      case SESSION_NEWYORK:       return "Phiên New York";
-      case SESSION_OVERLAP_EU_US: return "Phiên Giao nhau London-NY";
+      case SESSION_EUROPEAN:        return "Phiên London";
+      case SESSION_AMERICAN:       return "Phiên New York";
+      case SESSION_EUROPEAN_AMERICAN: return "Phiên Giao nhau London-NY";
       case SESSION_CLOSING:       return "Phiên Đóng cửa";
-      case SESSION_WEEKEND:       return "Cuối tuần";
-      default:                    return "Không xác định";
+      case SESSION_OVERNIGHT:       return "Cuối tuần";
+      default:                         return "Không xác định";
    }
 }
 
@@ -459,25 +442,25 @@ string CSessionManager::GetCurrentSessionName() {
 //+------------------------------------------------------------------+
 bool CSessionManager::IsSessionActiveNow(ENUM_SESSION_FILTER session) {
    // Nếu chọn tất cả các phiên, luôn trả về true
-   if (session == SESSION_ALL) return true;
+   if (session == FILTER_ALL_SESSIONS) return true;
    
    // Tương ứng giữa SESSION_FILTER và phiên hiện tại
    switch (session) {
-      case SESSION_ASIAN:
+      case FILTER_ASIAN_ONLY:
          return (m_CurrentSession == SESSION_ASIAN);
          
-      case SESSION_LONDON:
-         return (m_CurrentSession == SESSION_LONDON || 
-               m_CurrentSession == SESSION_OVERLAP_EU_US);
+      case FILTER_LONDON_ONLY:
+         return (m_CurrentSession == SESSION_EUROPEAN || 
+               m_CurrentSession == SESSION_EUROPEAN_AMERICAN);
                
-      case SESSION_NEWYORK:
-         return (m_CurrentSession == SESSION_NEWYORK || 
-               m_CurrentSession == SESSION_OVERLAP_EU_US);
+      case FILTER_NEWYORK_ONLY:
+         return (m_CurrentSession == SESSION_AMERICAN || 
+               m_CurrentSession == SESSION_EUROPEAN_AMERICAN);
                
-      case SESSION_OVERLAP:
-         return (m_CurrentSession == SESSION_OVERLAP_EU_US);
+      case FILTER_OVERLAP_ONLY:
+         return (m_CurrentSession == SESSION_EUROPEAN_AMERICAN);
          
-      case SESSION_CUSTOM:
+      case FILTER_CUSTOM_SESSION:
          // Custom - có thể cấu hình theo logic phức tạp hơn
          return true;
          
@@ -535,13 +518,13 @@ datetime CSessionManager::GetNextSessionStart(ENUM_SESSION session) {
       case SESSION_ASIAN:
          nextHour = m_AsianStart;
          break;
-      case SESSION_LONDON:
+      case SESSION_EUROPEAN:
          nextHour = m_LondonStart;
          break;
-      case SESSION_NEWYORK:
+      case SESSION_AMERICAN:
          nextHour = m_NewYorkStart;
          break;
-      case SESSION_OVERLAP_EU_US:
+      case SESSION_EUROPEAN_AMERICAN:
          nextHour = m_OverlapStart;
          break;
       default:
@@ -700,3 +683,5 @@ void CSessionManager::LogMessage(string message, bool important = false) {
 }
 
 } // đóng namespace ApexPullback
+
+#endif // _SESSION_MANAGER_MQH_

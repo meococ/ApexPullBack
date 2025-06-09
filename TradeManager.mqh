@@ -3,36 +3,59 @@
 //|                                  Copyright 2023-2024, ApexPullback EA |
 //|                                      https://www.apexpullback.com |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2023-2024, ApexPullback EA"
-#property link      "https://www.apexpullback.com"
-#property version   "14.0"
-#property strict
+// Copyright 2023-2024, ApexPullback EA
+// Website: https://www.apexpullback.com
+// Version: 14.0
+// Mode: strict
 
-// Khai báo thư viện chuẩn
-#include <Trade\Trade.mqh>
-#include <Arrays\ArrayObj.mqh>
+// Đảm bảo chỉ include file này một lần
+#ifndef TRADEMANAGER_MQH_INCLUDED
+#define TRADEMANAGER_MQH_INCLUDED
 
-// Nạp các file cấu trúc và module liên quan
-#include "CommonStructs.mqh"
-#include "Logger.mqh"
-#include "MarketProfile.mqh"
-#include "RiskOptimizer.mqh"
-#include "RiskManager.mqh"
-#include "AssetProfiler.mqh"  // Module mới cho v14.0
-#include "NewsFilter.mqh"     // Module mới cấu trúc lại
-#include "SwingPointDetector.mqh"  // Module cải tiến cho v14.0
+// --- Standard MQL5 Libraries ---
+#include <Trade/Trade.mqh>          // For CTrade object
+#include <Trade/PositionInfo.mqh>   // For position information functions
+#include <Trade/SymbolInfo.mqh>     // For symbol properties
+#include <Trade/AccountInfo.mqh>    // For account related information
+#include <Arrays/ArrayObj.mqh>      // For CArrayObj (used for m_PositionsMetadata)
+// #include <Object.mqh>            // Uncomment if chart objects are directly manipulated
+// #include <Charts/Chart.mqh>      // Uncomment if chart functions are directly used
+// #include <Math/Stat/Math.mqh>    // Uncomment if advanced math/stat functions are used
 
-// --- ENUM CHẾ ĐỘ TRAILING STOP NÂNG CAO ---
-enum ENUM_TRAILING_MODE {
-    TRAILING_NONE,            // Không trailing
-    TRAILING_ATR,             // Trailing Stop dựa trên ATR
-    TRAILING_CHANDELIER,      // Chandelier Exit
-    TRAILING_SWING_POINTS,    // Dựa trên các điểm swing
-    TRAILING_ADAPTIVE,        // Thích ứng theo Regime
-    TRAILING_FIBONACCI,       // Sử dụng mức Fibonacci
-    TRAILING_EMA,             // Sử dụng đường EMA
-    TRAILING_PSAR             // Sử dụng Parabolic SAR
-};
+// --- Custom EA Core Includes ---
+// QUAN TRỌNG: Các tệp này định nghĩa các thành phần cốt lõi và nên được include trước các module cụ thể.
+// Namespace.mqh nên được include trước khi khai báo namespace.
+#include "Namespace.mqh"          // Defines namespaces (e.g., ApexPullback) and related macros
+#include "CommonDefinitions.mqh"  // General definitions, possibly macros like TREND_NONE, SIGNAL_NONE
+#include "Constants.mqh"          // EA-specific constants
+#include "Enums.mqh"              // Enumerations (e.g., ENUM_EA_STATE, ENUM_TRAILING_MODE)
+#include "CommonStructs.mqh"      // Common data structures (e.g., MarketProfileData, PositionMetadata)
+#include "FunctionDefinitions.mqh"// Global utility functions (if any are used by this module)
+#include "MathHelper.mqh"         // Math utility functions (if any are used by this module)
+
+// --- Custom EA Module Includes ---
+// These are specific modules of the EA. Include them after core files.
+// They are included outside any namespace block if they define classes that might be forward-declared
+// or used by CTradeManager within its own namespace.
+#include "Logger.mqh"             // Logging facility
+#include "MarketProfile.mqh"      // Market analysis module
+#include "RiskManager.mqh"        // Risk management module
+#include "RiskOptimizer.mqh"      // Risk optimization module (direct dependency for CRiskOptimizer*)
+#include "AssetProfiler.mqh"      // Asset profiling module
+#include "NewsFilter.mqh"         // News filtering module
+#include "SwingPointDetector.mqh" // Swing point detection module
+
+// Mở namespace ApexPullback
+namespace ApexPullback {
+
+// Forward declarations để tránh circular dependency
+class CLogger;
+class CMarketProfile;
+class CRiskOptimizer;
+class CRiskManager;
+class CAssetProfiler;
+class CNewsFilter;
+class CSwingDetector;
 
 // --- CẤU TRÚC MULTI LEVEL TAKE PROFIT ---
 struct MultiTakeProfitLevel {
@@ -41,7 +64,8 @@ struct MultiTakeProfitLevel {
     bool   triggered;              // Đã kích hoạt chưa
     double rMultiple;              // Tương ứng với bao nhiêu R
     
-    MultiTakeProfitLevel() {
+    // Phương thức khởi tạo giá trị mặc định
+    void Initialize() {
         price = 0;
         volumePercent = 0;
         triggered = false;
@@ -69,13 +93,14 @@ struct PositionMetadata {
     datetime lastTrailingTime;     // Thời gian trailing gần nhất
     double   lastTrailingSL;       // Giá trị SL trailing gần nhất
     
-    PositionMetadata() {
+    // Phương thức khởi tạo giá trị mặc định
+    void Initialize() {
         ticket = 0;
         initialSL = 0;
         initialTP = 0;
         initialVolume = 0;
         entryPrice = 0;
-        isLong = false;
+        isLong = true;
         entryTime = 0;
         scenario = SCENARIO_NONE;
         
@@ -92,18 +117,38 @@ struct PositionMetadata {
 //+------------------------------------------------------------------+
 //| CTradeManager - Quản lý giao dịch và vòng đời lệnh              |
 //+------------------------------------------------------------------+
+public:
+    // Functions for Dashboard interaction
+    void SetTradingPaused(bool paused);
+    bool IsTradingPaused() const;
+    void CloseAllPositionsByMagic(int magicNumber = 0); // Default magic 0 means all EA positions
+
+// Original public methods (if any) would follow, or this is the start of public section
+// We are assuming this is a reasonable place to add public declarations.
+// If there's an existing public: section, these should be merged.
+
+// --- HÀM KHỞI TẠO & HỦY --- 
+// (Assuming constructor and destructor are public, which is typical)
+// CTradeManager(CLogger* logger, ...); // Example existing constructor
+// ~CTradeManager();
+
+// --- CÁC HÀM PUBLIC KHÁC --- 
+// (Other existing public methods would be here)
+
+// The original content of the class continues below:
 class CTradeManager {
 private:
     // Các đối tượng chính
     CTrade           m_trade;            // Đối tượng giao dịch chuẩn
-    CLogger         *m_logger;           // Logger để ghi log
+    CLogger *m_logger;        // Logger để ghi log
     CMarketProfile  *m_marketProfile;    // Thông tin thị trường
     CRiskOptimizer  *m_riskOptimizer;    // Tối ưu hóa rủi ro
     CRiskManager    *m_riskManager;      // Quản lý rủi ro
     CAssetProfiler  *m_assetProfiler;    // Module mới: Asset Profiler
     CNewsFilter     *m_newsFilter;       // Cải tiến: Bộ lọc tin tức
     CSwingDetector  *m_swingDetector;    // Phát hiện Swing Points
-    
+    ApexPullback::MarketProfileData m_currentMarketProfileData; // Thêm biến thành viên để lưu trữ MarketProfileData
+
     // --- THÔNG SỐ CƠ BẢN ---
     string           m_Symbol;           // Symbol hiện tại
     int              m_MagicNumber;      // Mã số nhận diện EA
@@ -114,6 +159,7 @@ private:
     
     // --- QUẢN LÝ TRẠNG THÁI EA ---
     ENUM_EA_STATE    m_EAState;          // Trạng thái EA hiện tại
+    bool             m_isTradingPaused;  // Cờ báo giao dịch đang tạm dừng
     bool             m_IsActive;         // EA có đang hoạt động?
     datetime         m_PauseUntil;       // Thời gian tạm dừng đến
     int              m_ConsecutiveLosses; // Số lần thua liên tiếp
@@ -163,12 +209,18 @@ private:
     
     // Quản lý metadata của vị thế
     void SavePositionMetadata(ulong ticket, double entryPrice, double stopLoss, 
-                            double takeProfit, double volume, bool isLong, 
-                            ENUM_ENTRY_SCENARIO scenario);
+                             double takeProfit, double volume, bool isLong, 
+                             ENUM_ENTRY_SCENARIO scenario);
     bool UpdatePositionMetadata(ulong ticket, double newSL = 0, double newTP = 0);
-    PositionMetadata* GetPositionMetadata(ulong ticket);
+    ApexPullback::PositionMetadata GetPositionMetadata(ulong ticket);
     void RemovePositionMetadata(ulong ticket);
     void ClearAllMetadata();
+    
+    // Helper functions để cập nhật metadata
+    void UpdatePositionMetadataPartialClose1(ulong ticket);
+    void UpdatePositionMetadataPartialClose2(ulong ticket);
+    void UpdatePositionMetadataBreakeven(ulong ticket);
+    void UpdatePositionMetadataScaling(ulong ticket);
     
     // Quản lý trailing stop
     double CalculateDynamicTrailingStop(ulong ticket, double currentPrice, bool isLong, ENUM_MARKET_REGIME regime);
@@ -200,6 +252,24 @@ private:
     
     // Thực hiện thay đổi SL an toàn
     bool SafeModifyStopLoss(ulong ticket, double newSL);
+    
+    // Quản lý vị thế hiện tại
+    bool ModifyPosition(ulong ticket, double newSL = 0, double newTP = 0);
+    bool ClosePosition(ulong ticket, string comment = "");
+    bool CloseAllPositions(string comment = "");
+    bool CancelAllPendingOrders(string comment = "");
+    int CountOpenPositions(ENUM_POSITION_TYPE type = POSITION_TYPE_BUY);
+    bool HasOpenPosition(ENUM_POSITION_TYPE type = POSITION_TYPE_BUY);
+    bool GetOpenTickets(ulong &tickets[]);
+    
+    // Truy vấn thông tin
+    double GetInitialStopLoss(ulong ticket);
+    double GetInitialVolume(ulong ticket);
+    double GetPositionRRatio(ulong ticket);
+    int GetScalingCount(ulong ticket);
+    void ProcessTradeTransaction(const MqlTradeTransaction &trans);
+    void UpdateEAState(ENUM_EA_STATE newState, datetime pauseUntil = 0);
+    bool ShouldAdjustForHighVolatility(const MarketProfileData &profile);
     
     // Cập nhật thông tin trailing stop mới nhất
     void UpdateLastTrailingInfo(ulong ticket, double newSL);
@@ -246,12 +316,18 @@ private:
     // Xử lý yêu cầu ModifyPosition
     bool ProcessModifyRequest(ulong ticket, double newSL, double newTP);
     
+    // Xử lý sự kiện khi deal được đóng
+    void HandleCloseDeal(ulong positionTicket, double closePrice, double profit);
+    
 public:
     // Constructor và Destructor
     CTradeManager();
     ~CTradeManager();
     
-    // --- KHỞI TẠO VÀ THIẾT LẬP ---
+    // Thiết lập log chi tiết
+    void SetDetailedLogging(bool enable) { m_EnableDetailedLogs = enable; }
+    
+    // --- KHỜI TẠO VÀ THIẾT LẬP ---
     bool Initialize(string symbol, int magic, CLogger* logger, 
                    CMarketProfile* marketProfile, CRiskManager* riskMgr, 
                    CRiskOptimizer* riskOpt, CAssetProfiler* assetProfiler = NULL,
@@ -259,7 +335,7 @@ public:
     
     // Thiết lập tham số trailing stop
     void SetTrailingParameters(bool useAdaptiveTrail, ENUM_TRAILING_MODE trailingMode, 
-                             double atrMultiplier, int minStepPoints = 5);
+                             double atrMultiplier, int minStepPoints);
     
     // Thiết lập tham số breakeven
     void SetBreakevenParameters(double breakEvenR, double buffer = 5);
@@ -276,7 +352,7 @@ public:
     void EnableChandelierExit(bool enable, int lookback, double multiplier);
     
     // Thiết lập đa mức Take Profit
-    void ConfigureMultipleTargets(double tpRatios[], double volumePercents[], int count);
+    void ConfigureMultipleTargets(double &tpRatios[], double &volumePercents[], int count);
     
     // Thiết lập comment cho lệnh
     void SetOrderComment(string comment) { m_OrderComment = comment; }
@@ -304,76 +380,14 @@ public:
                       ENUM_ENTRY_SCENARIO scenario = SCENARIO_NONE, string comment = "");
     
     // Đặt lệnh Sell Stop
-    ulong PlaceSellStop(double lotSize, double stopPrice, double stopLoss, double takeProfit, 
-                       ENUM_ENTRY_SCENARIO scenario = SCENARIO_NONE, string comment = "");
+    ulong PlaceSellStop(double lotSize, double stopPrice, double stopLoss, double takeProfit,
+                        ENUM_ENTRY_SCENARIO scenario = SCENARIO_NONE, string comment = "");
     
-    // --- QUẢN LÝ VỊ THẾ ---
-    
-    // Quản lý tất cả vị thế đang mở
-    void ManageOpenPositions(const MarketProfileData &profile);
-    
-    // Thay đổi SL/TP của vị thế
-    bool ModifyPosition(ulong ticket, double newSL, double newTP = 0);
-    
-    // Đóng vị thế với comment
-    bool ClosePosition(ulong ticket, string comment = "");
-    
-    // Đóng tất cả vị thế
-    void CloseAllPositions(string reason = "");
-    
-    // Đóng tất cả lệnh chờ
-    void CancelAllPendingOrders();
-    
-    // --- TRUY VẤN THÔNG TIN ---
-    
-    // Đếm số lệnh đang mở
-    int CountOpenPositions();
-    
-    // Kiểm tra nếu có vị thế đang mở
-    bool HasOpenPosition(string symbol = "");
-    
-    // Lấy danh sách ticket của các vị thế đang mở
-    bool GetOpenTickets(ulong &tickets[]);
-    
-    // Lấy SL ban đầu của một vị thế
-    double GetInitialStopLoss(ulong ticket);
-    
-    // Lấy khối lượng ban đầu của một vị thế
-    double GetInitialVolume(ulong ticket);
-    
-    // Lấy R hiện tại
-    double GetPositionRRatio(ulong ticket);
-    
-    // Lấy số lần nhồi lệnh đã thực hiện
-    int GetScalingCount(ulong ticket);
-    
-    // Lấy magic number
-    int GetMagicNumber() const { return m_MagicNumber; }
-    
-    // --- XỬ LÝ SỰ KIỆN ---
-    
-    // Xử lý sự kiện giao dịch
-    void ProcessTradeTransaction(const MqlTradeTransaction& trans, 
-                               const MqlTradeRequest& request, 
-                               const MqlTradeResult& result);
-    
-    // --- TIỆN ÍCH ---
-    
-    // Cập nhật trạng thái EA
-    void UpdateEAState(ENUM_EA_STATE state, datetime pauseUntil = 0);
-    
-    // Lấy trạng thái EA hiện tại
-    ENUM_EA_STATE GetEAState() const { return m_EAState; }
-    
-    // Lấy thời gian tạm dừng
-    datetime GetPauseUntil() const { return m_PauseUntil; }
-    
-    // Thiết lập chế độ log chi tiết
-    void SetDetailedLogging(bool enable) { m_EnableDetailedLogs = enable; }
-    
-    // Kiểm tra sự cần thiết của thoát khẩn cấp
-    bool ShouldEmergencyExit(const MarketProfileData &profile);
+    // --- HÀM PUBLIC: QUẢN LÝ VỊ THẾ ---
+    void ManageExistingPositions(EAContext* context);
 };
+
+// ===== BẮT ĐẦU IMPLEMENTATION =====
 
 //+------------------------------------------------------------------+
 //| Constructor                                                      |
@@ -507,14 +521,15 @@ CTradeManager::~CTradeManager()
 //| Initialize - Khởi tạo TradeManager                              |
 //+------------------------------------------------------------------+
 bool CTradeManager::Initialize(string symbol, int magic, CLogger* logger, 
-                             CMarketProfile* marketProfile, CRiskManager* riskMgr, 
-                             CRiskOptimizer* riskOpt, CAssetProfiler* assetProfiler,
-                             CNewsFilter* newsFilter, CSwingDetector* swingDetector)
+                              CMarketProfile* marketProfile, CRiskManager* riskMgr, 
+                              CRiskOptimizer* riskOpt, CAssetProfiler* assetProfiler,
+                              CNewsFilter* newsFilter, CSwingDetector* swingDetector)
 {
     // Kiểm tra tham số bắt buộc
     if (symbol == "" || magic <= 0 || logger == NULL || 
         marketProfile == NULL || riskMgr == NULL) {
-        if (logger) logger.LogError("TradeManager::Initialize - Tham số thiếu hoặc không hợp lệ");
+        // Logger là đối tượng trực tiếp, không cần kiểm tra
+logger->LogError("TradeManager::Initialize - Tham số thiếu hoặc không hợp lệ");
         return false;
     }
     
@@ -542,7 +557,7 @@ bool CTradeManager::Initialize(string symbol, int magic, CLogger* logger,
     // Khởi tạo handle indicators
     m_handleATR = iATR(m_Symbol, PERIOD_CURRENT, 14);
     if (m_handleATR == INVALID_HANDLE) {
-        m_logger.LogWarning("TradeManager - Không thể tạo ATR handle");
+        m_logger->LogWarning("TradeManager - Không thể tạo ATR handle");
     }
     
     // Khởi tạo các indicator khác nếu cần
@@ -553,7 +568,7 @@ bool CTradeManager::Initialize(string symbol, int magic, CLogger* logger,
     if (m_TrailingMode == TRAILING_PSAR) {
         m_handlePSAR = iSAR(m_Symbol, PERIOD_CURRENT, 0.02, 0.2);
         if (m_handlePSAR == INVALID_HANDLE) {
-            m_logger.LogWarning("TradeManager - Không thể tạo PSAR handle");
+            m_logger->LogWarning("TradeManager - Không thể tạo PSAR handle");
         }
     }
     
@@ -564,7 +579,7 @@ bool CTradeManager::Initialize(string symbol, int magic, CLogger* logger,
     m_EAState = STATE_RUNNING;
     m_IsActive = true;
     
-    m_logger.LogInfo("TradeManager khởi tạo thành công cho " + symbol + 
+    m_logger->LogInfo("TradeManager khởi tạo thành công cho " + symbol + 
                    " với magic " + IntegerToString(magic));
     
     return true;
@@ -581,8 +596,8 @@ void CTradeManager::SetTrailingParameters(bool useAdaptiveTrail, ENUM_TRAILING_M
     m_TrailingATRMultiplier = MathMax(0.5, atrMultiplier);
     m_MinTrailingStepPoints = MathMax(1, minStepPoints);
     
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Trailing parameters set - Adaptive: %s, Mode: %s, ATR Mult: %.2f, Step: %d",
             useAdaptiveTrail ? "Yes" : "No",
             EnumToString(trailingMode),
@@ -600,8 +615,8 @@ void CTradeManager::SetBreakevenParameters(double breakEvenR, double buffer)
     m_BreakEvenR = MathMax(0.1, breakEvenR);
     m_BreakEvenBuffer = MathMax(0.0, buffer);
     
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Breakeven parameters set - R: %.2f, Buffer: %.2f points",
             m_BreakEvenR, m_BreakEvenBuffer
         ));
@@ -635,8 +650,8 @@ void CTradeManager::SetPartialCloseParameters(bool usePartialClose, double r1, d
     m_TakeProfitLevels[2].rMultiple = m_PartialCloseR2 * 1.5;
     m_TakeProfitLevels[2].volumePercent = 100.0 - m_PartialClosePercent1 - m_PartialClosePercent2;
     
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Partial close set - Enabled: %s, TP1: %.2fR (%.1f%%), TP2: %.2fR (%.1f%%), TP3: %.2fR (%.1f%%)",
             usePartialClose ? "Yes" : "No",
             m_TakeProfitLevels[0].rMultiple, m_TakeProfitLevels[0].volumePercent,
@@ -657,8 +672,8 @@ void CTradeManager::SetScalingParameters(bool enableScaling, int maxCount, doubl
     m_ScalingRiskPercent = MathMax(0.1, MathMin(1.0, riskPercent));
     m_RequireBEForScaling = requireBreakeven;
     
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Scaling parameters set - Enabled: %s, Max Count: %d, Risk: %.2f, Require BE: %s",
             enableScaling ? "Yes" : "No",
             m_MaxScalingCount,
@@ -677,8 +692,8 @@ void CTradeManager::EnableChandelierExit(bool enable, int lookback, double multi
     m_ChandelierLookback = MathMax(5, lookback);
     m_ChandelierATRMultiplier = MathMax(0.5, multiplier);
     
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Chandelier Exit set - Enabled: %s, Lookback: %d, ATR Mult: %.2f",
             enable ? "Yes" : "No",
             m_ChandelierLookback,
@@ -688,9 +703,9 @@ void CTradeManager::EnableChandelierExit(bool enable, int lookback, double multi
 }
 
 //+------------------------------------------------------------------+
-//| ConfigureMultipleTargets - Thiết lập đa mức Take Profit          |
+//| ConfigureMultipleTargets - Thiết lập đa mức Take Profit         |
 //+------------------------------------------------------------------+
-void CTradeManager::ConfigureMultipleTargets(double tpRatios[], double volumePercents[], int count)
+void CTradeManager::ConfigureMultipleTargets(double &tpRatios[], double &volumePercents[], int count)
 {
     m_TakeProfitLevelCount = MathMin(count, 5);
     
@@ -714,7 +729,7 @@ void CTradeManager::ConfigureMultipleTargets(double tpRatios[], double volumePer
         }
     }
     
-    if (m_logger && m_EnableDetailedLogs) {
+    if (m_EnableDetailedLogs) {
         string tpInfo = "TradeManager: MultiTP set - Levels: " + IntegerToString(m_TakeProfitLevelCount);
         for (int i = 0; i < m_TakeProfitLevelCount; i++) {
             tpInfo += StringFormat(", TP%d: %.2fR (%.1f%%)", 
@@ -722,7 +737,7 @@ void CTradeManager::ConfigureMultipleTargets(double tpRatios[], double volumePer
                                 m_TakeProfitLevels[i].rMultiple, 
                                 m_TakeProfitLevels[i].volumePercent);
         }
-        m_logger.LogInfo(tpInfo);
+        m_logger->LogInfo(tpInfo);
     }
 }
 
@@ -734,18 +749,72 @@ ulong CTradeManager::OpenBuy(double lotSize, double stopLoss, double takeProfit,
 {
     // Kiểm tra điều kiện
     if (m_EAState != STATE_RUNNING || m_EmergencyMode) {
-        if (m_logger) {
-            m_logger.LogWarning("TradeManager: Không thể mở lệnh Buy - EA đang " + 
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning("TradeManager: Không thể mở lệnh Buy - EA đang " + 
                                  EnumToString(m_EAState));
         }
         return 0;
     }
     
     // Lấy giá hiện tại
-    double price = SymbolInfoDouble(m_Symbol, SYMBOL_ASK);
+    double entryPrice = SymbolInfoDouble(m_Symbol, SYMBOL_ASK);
+
+    // Logic MỚI cho Stop Loss lệnh MUA (Ưu tiên #1)
+    double sl_price_buy;
+    if (m_swingDetector != NULL) {
+        double pullbackLow = m_swingDetector->GetLastSwingLow();
+        if (pullbackLow > 0) {
+            double sl_buffer = GetCurrentATR() * StopLossBufferATR_Ratio; // Sử dụng input mới
+            sl_price_buy = pullbackLow - sl_buffer;
+        } else {
+            // Fallback: Nếu không tìm thấy swing, quay lại dùng logic ATR cũ
+            sl_price_buy = entryPrice - (GetCurrentATR() * StopLossATR_Multiplier); // Sử dụng input ATR SL
+        }
+    } else {
+        // Fallback nếu m_swingDetector không được khởi tạo
+        sl_price_buy = entryPrice - (GetCurrentATR() * StopLossATR_Multiplier);
+    }
+    stopLoss = sl_price_buy; // Gán SL đã tính toán
+
+    // Logic MỚI cho Take Profit lệnh MUA (Ưu tiên #2)
+    double tp_price_buy = 0;
+    switch(TakeProfitMode) { // TakeProfitMode từ Inputs.mqh
+        case TP_MODE_RR_FIXED:
+            if (entryPrice - stopLoss > 0) { // Đảm bảo SL hợp lệ
+                tp_price_buy = entryPrice + (entryPrice - stopLoss) * TakeProfit_RR; // TakeProfit_RR từ Inputs.mqh
+            }
+            break;
+
+        case TP_MODE_STRUCTURE:
+            if (m_swingDetector != NULL) {
+                double targetHigh = m_swingDetector->GetLastSwingHigh();
+                if (targetHigh > entryPrice) {
+                    tp_price_buy = targetHigh - (GetCurrentATR() * TakeProfitStructureBufferATR_Ratio); // Sử dụng input mới
+                }
+            }
+            // Fallback nếu không tìm thấy cấu trúc hoặc tp_price_buy không hợp lệ
+            if (tp_price_buy <= entryPrice && (entryPrice - stopLoss > 0)) { 
+                tp_price_buy = entryPrice + (entryPrice - stopLoss) * TakeProfit_RR;
+            }
+            break;
+
+        case TP_MODE_VOLATILITY:
+            if (m_marketProfile != NULL) {
+                double adx_value = m_marketProfile->GetADX();
+                double atr_multiplier_tp = (adx_value > ADXThresholdForVolatilityTP) ? VolatilityTP_ATR_Multiplier_High : VolatilityTP_ATR_Multiplier_Low; // Sử dụng input mới
+                tp_price_buy = entryPrice + (GetCurrentATR() * atr_multiplier_tp);
+            }
+            break;
+    }
+    // Fallback cuối cùng nếu tp_price_buy vẫn chưa được đặt hoặc không hợp lệ
+    if (tp_price_buy <= entryPrice && (entryPrice - stopLoss > 0)) {
+        tp_price_buy = entryPrice + (entryPrice - stopLoss) * TakeProfit_RR; 
+    }
+    takeProfit = tp_price_buy; // Gán TP đã tính toán
     
     // Kiểm tra và điều chỉnh SL/TP nếu cần
-    if (!ValidateOrderParameters(price, stopLoss, takeProfit, true)) {
+    if (!ValidateOrderParameters(entryPrice, stopLoss, takeProfit, true)) {
         return 0;
     }
     
@@ -755,8 +824,8 @@ ulong CTradeManager::OpenBuy(double lotSize, double stopLoss, double takeProfit,
     }
     
     // Thực hiện đặt lệnh
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Đặt lệnh BUY - Lot: %.2f, Entry: %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
             lotSize, price, stopLoss, takeProfit, EnumToString(scenario)
         ));
@@ -765,8 +834,9 @@ ulong CTradeManager::OpenBuy(double lotSize, double stopLoss, double takeProfit,
     // Thực hiện lệnh
     if (!m_trade.Buy(lotSize, m_Symbol, price, stopLoss, takeProfit, comment)) {
         // Lỗi khi đặt lệnh
-        if (m_logger) {
-            m_logger.LogError(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogError(StringFormat(
                 "TradeManager: Lỗi đặt lệnh BUY - Lỗi: %d, Mô tả: %s",
                 m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription()
             ));
@@ -781,8 +851,9 @@ ulong CTradeManager::OpenBuy(double lotSize, double stopLoss, double takeProfit,
     if (ticket > 0) {
         SavePositionMetadata(ticket, price, stopLoss, takeProfit, lotSize, true, scenario);
         
-        if (m_logger) {
-            m_logger.LogInfo(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogInfo(StringFormat(
                 "TradeManager: Đặt lệnh BUY thành công - Ticket: %d, Lot: %.2f",
                 ticket, lotSize
             ));
@@ -800,18 +871,72 @@ ulong CTradeManager::OpenSell(double lotSize, double stopLoss, double takeProfit
 {
     // Kiểm tra điều kiện
     if (m_EAState != STATE_RUNNING || m_EmergencyMode) {
-        if (m_logger) {
-            m_logger.LogWarning("TradeManager: Không thể mở lệnh Sell - EA đang " + 
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning("TradeManager: Không thể mở lệnh Sell - EA đang " + 
                                  EnumToString(m_EAState));
         }
         return 0;
     }
     
     // Lấy giá hiện tại
-    double price = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
+    double entryPrice = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
+
+    // Logic MỚI cho Stop Loss lệnh BÁN (Ưu tiên #1)
+    double sl_price_sell;
+    if (m_swingDetector != NULL) {
+        double pullbackHigh = m_swingDetector->GetLastSwingHigh();
+        if (pullbackHigh > 0) {
+            double sl_buffer = GetCurrentATR() * StopLossBufferATR_Ratio; // Sử dụng input mới
+            sl_price_sell = pullbackHigh + sl_buffer;
+        } else {
+            // Fallback: Nếu không tìm thấy swing, quay lại dùng logic ATR cũ
+            sl_price_sell = entryPrice + (GetCurrentATR() * StopLossATR_Multiplier); // Sử dụng input ATR SL
+        }
+    } else {
+         // Fallback nếu m_swingDetector không được khởi tạo
+        sl_price_sell = entryPrice + (GetCurrentATR() * StopLossATR_Multiplier);
+    }
+    stopLoss = sl_price_sell; // Gán SL đã tính toán
+
+    // Logic MỚI cho Take Profit lệnh BÁN (Ưu tiên #2)
+    double tp_price_sell = 0;
+    switch(TakeProfitMode) { // TakeProfitMode từ Inputs.mqh
+        case TP_MODE_RR_FIXED:
+            if (stopLoss - entryPrice > 0) { // Đảm bảo SL hợp lệ
+                tp_price_sell = entryPrice - (stopLoss - entryPrice) * TakeProfit_RR; // TakeProfit_RR từ Inputs.mqh
+            }
+            break;
+
+        case TP_MODE_STRUCTURE:
+            if (m_swingDetector != NULL) {
+                double targetLow = m_swingDetector->GetLastSwingLow();
+                if (targetLow < entryPrice && targetLow > 0) {
+                    tp_price_sell = targetLow + (GetCurrentATR() * TakeProfitStructureBufferATR_Ratio); // Sử dụng input mới
+                }
+            }
+            // Fallback nếu không tìm thấy cấu trúc hoặc tp_price_sell không hợp lệ
+            if ((tp_price_sell >= entryPrice || tp_price_sell == 0) && (stopLoss - entryPrice > 0)) {
+                tp_price_sell = entryPrice - (stopLoss - entryPrice) * TakeProfit_RR;
+            }
+            break;
+
+        case TP_MODE_VOLATILITY:
+            if (m_marketProfile != NULL) {
+                double adx_value = m_marketProfile->GetADX();
+                double atr_multiplier_tp = (adx_value > ADXThresholdForVolatilityTP) ? VolatilityTP_ATR_Multiplier_High : VolatilityTP_ATR_Multiplier_Low; // Sử dụng input mới
+                tp_price_sell = entryPrice - (GetCurrentATR() * atr_multiplier_tp);
+            }
+            break;
+    }
+    // Fallback cuối cùng nếu tp_price_sell vẫn chưa được đặt hoặc không hợp lệ
+    if ((tp_price_sell >= entryPrice || tp_price_sell == 0) && (stopLoss - entryPrice > 0)) {
+        tp_price_sell = entryPrice - (stopLoss - entryPrice) * TakeProfit_RR;
+    }
+    takeProfit = tp_price_sell; // Gán TP đã tính toán
     
     // Kiểm tra và điều chỉnh SL/TP nếu cần
-    if (!ValidateOrderParameters(price, stopLoss, takeProfit, false)) {
+    if (!ValidateOrderParameters(entryPrice, stopLoss, takeProfit, false)) {
         return 0;
     }
     
@@ -821,8 +946,8 @@ ulong CTradeManager::OpenSell(double lotSize, double stopLoss, double takeProfit
     }
     
     // Thực hiện đặt lệnh
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Đặt lệnh SELL - Lot: %.2f, Entry: %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
             lotSize, price, stopLoss, takeProfit, EnumToString(scenario)
         ));
@@ -831,8 +956,9 @@ ulong CTradeManager::OpenSell(double lotSize, double stopLoss, double takeProfit
     // Thực hiện lệnh
     if (!m_trade.Sell(lotSize, m_Symbol, price, stopLoss, takeProfit, comment)) {
         // Lỗi khi đặt lệnh
-        if (m_logger) {
-            m_logger.LogError(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogError(StringFormat(
                 "TradeManager: Lỗi đặt lệnh SELL - Lỗi: %d, Mô tả: %s",
                 m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription()
             ));
@@ -847,8 +973,9 @@ ulong CTradeManager::OpenSell(double lotSize, double stopLoss, double takeProfit
     if (ticket > 0) {
         SavePositionMetadata(ticket, price, stopLoss, takeProfit, lotSize, false, scenario);
         
-        if (m_logger) {
-            m_logger.LogInfo(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogInfo(StringFormat(
                 "TradeManager: Đặt lệnh SELL thành công - Ticket: %d, Lot: %.2f",
                 ticket, lotSize
             ));
@@ -861,13 +988,14 @@ ulong CTradeManager::OpenSell(double lotSize, double stopLoss, double takeProfit
 //+------------------------------------------------------------------+
 //| PlaceBuyLimit - Đặt lệnh Buy Limit                              |
 //+------------------------------------------------------------------+
-ulong CTradeManager::PlaceBuyLimit(double lotSize, double limitPrice, double stopLoss, 
-                                double takeProfit, ENUM_ENTRY_SCENARIO scenario, string comment)
+ulong CTradeManager::PlaceBuyLimit(double lotSize, double limitPrice, double stopLoss, double takeProfit, 
+                                ENUM_ENTRY_SCENARIO scenario, string comment)
 {
     // Kiểm tra điều kiện
     if (m_EAState != STATE_RUNNING || m_EmergencyMode) {
-        if (m_logger) {
-            m_logger.LogWarning("TradeManager: Không thể đặt lệnh Buy Limit - EA đang " + 
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning("TradeManager: Không thể đặt lệnh Buy Limit - EA đang " + 
                                  EnumToString(m_EAState));
         }
         return 0;
@@ -876,8 +1004,9 @@ ulong CTradeManager::PlaceBuyLimit(double lotSize, double limitPrice, double sto
     // Kiểm tra giá limit hợp lệ (phải thấp hơn giá hiện tại)
     double currentPrice = SymbolInfoDouble(m_Symbol, SYMBOL_ASK);
     if (limitPrice >= currentPrice) {
-        if (m_logger) {
-            m_logger.LogWarning(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning(StringFormat(
                 "TradeManager: Giá Buy Limit không hợp lệ - Limit: %.5f, Ask: %.5f",
                 limitPrice, currentPrice
             ));
@@ -896,8 +1025,8 @@ ulong CTradeManager::PlaceBuyLimit(double lotSize, double limitPrice, double sto
     }
     
     // Thực hiện đặt lệnh
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Đặt lệnh BUY LIMIT - Lot: %.2f, Limit: %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
             lotSize, limitPrice, stopLoss, takeProfit, EnumToString(scenario)
         ));
@@ -906,8 +1035,9 @@ ulong CTradeManager::PlaceBuyLimit(double lotSize, double limitPrice, double sto
     // Thực hiện lệnh
     if (!m_trade.BuyLimit(lotSize, limitPrice, m_Symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, comment)) {
         // Lỗi khi đặt lệnh
-        if (m_logger) {
-            m_logger.LogError(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogError(StringFormat(
                 "TradeManager: Lỗi đặt lệnh BUY LIMIT - Lỗi: %d, Mô tả: %s",
                 m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription()
             ));
@@ -919,8 +1049,9 @@ ulong CTradeManager::PlaceBuyLimit(double lotSize, double limitPrice, double sto
     ulong ticket = m_trade.ResultOrder();
     
     if (ticket > 0) {
-        if (m_logger) {
-            m_logger.LogInfo(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogInfo(StringFormat(
                 "TradeManager: Đặt lệnh BUY LIMIT thành công - Ticket: %d, Lot: %.2f",
                 ticket, lotSize
             ));
@@ -933,13 +1064,14 @@ ulong CTradeManager::PlaceBuyLimit(double lotSize, double limitPrice, double sto
 //+------------------------------------------------------------------+
 //| PlaceSellLimit - Đặt lệnh Sell Limit                            |
 //+------------------------------------------------------------------+
-ulong CTradeManager::PlaceSellLimit(double lotSize, double limitPrice, double stopLoss, 
-                                 double takeProfit, ENUM_ENTRY_SCENARIO scenario, string comment)
+ulong CTradeManager::PlaceSellLimit(double lotSize, double limitPrice, double stopLoss, double takeProfit, 
+                                 ENUM_ENTRY_SCENARIO scenario, string comment)
 {
     // Kiểm tra điều kiện
     if (m_EAState != STATE_RUNNING || m_EmergencyMode) {
-        if (m_logger) {
-            m_logger.LogWarning("TradeManager: Không thể đặt lệnh Sell Limit - EA đang " + 
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning("TradeManager: Không thể đặt lệnh Sell Limit - EA đang " + 
                                  EnumToString(m_EAState));
         }
         return 0;
@@ -948,8 +1080,9 @@ ulong CTradeManager::PlaceSellLimit(double lotSize, double limitPrice, double st
     // Kiểm tra giá limit hợp lệ (phải cao hơn giá hiện tại)
     double currentPrice = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
     if (limitPrice <= currentPrice) {
-        if (m_logger) {
-            m_logger.LogWarning(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning(StringFormat(
                 "TradeManager: Giá Sell Limit không hợp lệ - Limit: %.5f, Bid: %.5f",
                 limitPrice, currentPrice
             ));
@@ -968,8 +1101,8 @@ ulong CTradeManager::PlaceSellLimit(double lotSize, double limitPrice, double st
     }
     
     // Thực hiện đặt lệnh
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Đặt lệnh SELL LIMIT - Lot: %.2f, Limit: %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
             lotSize, limitPrice, stopLoss, takeProfit, EnumToString(scenario)
         ));
@@ -978,8 +1111,9 @@ ulong CTradeManager::PlaceSellLimit(double lotSize, double limitPrice, double st
     // Thực hiện lệnh
     if (!m_trade.SellLimit(lotSize, limitPrice, m_Symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, comment)) {
         // Lỗi khi đặt lệnh
-        if (m_logger) {
-            m_logger.LogError(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogError(StringFormat(
                 "TradeManager: Lỗi đặt lệnh SELL LIMIT - Lỗi: %d, Mô tả: %s",
                 m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription()
             ));
@@ -991,8 +1125,9 @@ ulong CTradeManager::PlaceSellLimit(double lotSize, double limitPrice, double st
     ulong ticket = m_trade.ResultOrder();
     
     if (ticket > 0) {
-        if (m_logger) {
-            m_logger.LogInfo(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogInfo(StringFormat(
                 "TradeManager: Đặt lệnh SELL LIMIT thành công - Ticket: %d, Lot: %.2f",
                 ticket, lotSize
             ));
@@ -1005,13 +1140,14 @@ ulong CTradeManager::PlaceSellLimit(double lotSize, double limitPrice, double st
 //+------------------------------------------------------------------+
 //| PlaceBuyStop - Đặt lệnh Buy Stop                                |
 //+------------------------------------------------------------------+
-ulong CTradeManager::PlaceBuyStop(double lotSize, double stopPrice, double stopLoss, 
-                               double takeProfit, ENUM_ENTRY_SCENARIO scenario, string comment)
+ulong CTradeManager::PlaceBuyStop(double lotSize, double stopPrice, double stopLoss, double takeProfit, 
+                               ENUM_ENTRY_SCENARIO scenario, string comment)
 {
     // Kiểm tra điều kiện
     if (m_EAState != STATE_RUNNING || m_EmergencyMode) {
-        if (m_logger) {
-            m_logger.LogWarning("TradeManager: Không thể đặt lệnh Buy Stop - EA đang " + 
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning("TradeManager: Không thể đặt lệnh Buy Stop - EA đang " + 
                                  EnumToString(m_EAState));
         }
         return 0;
@@ -1020,8 +1156,9 @@ ulong CTradeManager::PlaceBuyStop(double lotSize, double stopPrice, double stopL
     // Kiểm tra giá stop hợp lệ (phải cao hơn giá hiện tại)
     double currentPrice = SymbolInfoDouble(m_Symbol, SYMBOL_ASK);
     if (stopPrice <= currentPrice) {
-        if (m_logger) {
-            m_logger.LogWarning(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning(StringFormat(
                 "TradeManager: Giá Buy Stop không hợp lệ - Stop: %.5f, Ask: %.5f",
                 stopPrice, currentPrice
             ));
@@ -1040,8 +1177,8 @@ ulong CTradeManager::PlaceBuyStop(double lotSize, double stopPrice, double stopL
     }
     
     // Thực hiện đặt lệnh
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Đặt lệnh BUY STOP - Lot: %.2f, Stop: %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
             lotSize, stopPrice, stopLoss, takeProfit, EnumToString(scenario)
         ));
@@ -1050,8 +1187,9 @@ ulong CTradeManager::PlaceBuyStop(double lotSize, double stopPrice, double stopL
     // Thực hiện lệnh
     if (!m_trade.BuyStop(lotSize, stopPrice, m_Symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, comment)) {
         // Lỗi khi đặt lệnh
-        if (m_logger) {
-            m_logger.LogError(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogError(StringFormat(
                 "TradeManager: Lỗi đặt lệnh BUY STOP - Lỗi: %d, Mô tả: %s",
                 m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription()
             ));
@@ -1063,8 +1201,9 @@ ulong CTradeManager::PlaceBuyStop(double lotSize, double stopPrice, double stopL
     ulong ticket = m_trade.ResultOrder();
     
     if (ticket > 0) {
-        if (m_logger) {
-            m_logger.LogInfo(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogInfo(StringFormat(
                 "TradeManager: Đặt lệnh BUY STOP thành công - Ticket: %d, Lot: %.2f",
                 ticket, lotSize
             ));
@@ -1077,13 +1216,14 @@ ulong CTradeManager::PlaceBuyStop(double lotSize, double stopPrice, double stopL
 //+------------------------------------------------------------------+
 //| PlaceSellStop - Đặt lệnh Sell Stop                              |
 //+------------------------------------------------------------------+
-ulong CTradeManager::PlaceSellStop(double lotSize, double stopPrice, double stopLoss, 
-                                double takeProfit, ENUM_ENTRY_SCENARIO scenario, string comment)
+ulong CTradeManager::PlaceSellStop(double lotSize, double stopPrice, double stopLoss, double takeProfit, 
+                                ENUM_ENTRY_SCENARIO scenario, string comment)
 {
     // Kiểm tra điều kiện
     if (m_EAState != STATE_RUNNING || m_EmergencyMode) {
-        if (m_logger) {
-            m_logger.LogWarning("TradeManager: Không thể đặt lệnh Sell Stop - EA đang " + 
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning("TradeManager: Không thể đặt lệnh Sell Stop - EA đang " + 
                                  EnumToString(m_EAState));
         }
         return 0;
@@ -1092,8 +1232,9 @@ ulong CTradeManager::PlaceSellStop(double lotSize, double stopPrice, double stop
     // Kiểm tra giá stop hợp lệ (phải thấp hơn giá hiện tại)
     double currentPrice = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
     if (stopPrice >= currentPrice) {
-        if (m_logger) {
-            m_logger.LogWarning(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning(StringFormat(
                 "TradeManager: Giá Sell Stop không hợp lệ - Stop: %.5f, Bid: %.5f",
                 stopPrice, currentPrice
             ));
@@ -1112,8 +1253,8 @@ ulong CTradeManager::PlaceSellStop(double lotSize, double stopPrice, double stop
     }
     
     // Thực hiện đặt lệnh
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Đặt lệnh SELL STOP - Lot: %.2f, Stop: %.5f, SL: %.5f, TP: %.5f, Scenario: %s",
             lotSize, stopPrice, stopLoss, takeProfit, EnumToString(scenario)
         ));
@@ -1122,8 +1263,9 @@ ulong CTradeManager::PlaceSellStop(double lotSize, double stopPrice, double stop
     // Thực hiện lệnh
     if (!m_trade.SellStop(lotSize, stopPrice, m_Symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, comment)) {
         // Lỗi khi đặt lệnh
-        if (m_logger) {
-            m_logger.LogError(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogError(StringFormat(
                 "TradeManager: Lỗi đặt lệnh SELL STOP - Lỗi: %d, Mô tả: %s",
                 m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription()
             ));
@@ -1135,8 +1277,9 @@ ulong CTradeManager::PlaceSellStop(double lotSize, double stopPrice, double stop
     ulong ticket = m_trade.ResultOrder();
     
     if (ticket > 0) {
-        if (m_logger) {
-            m_logger.LogInfo(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogInfo(StringFormat(
                 "TradeManager: Đặt lệnh SELL STOP thành công - Ticket: %d, Lot: %.2f",
                 ticket, lotSize
             ));
@@ -1147,24 +1290,24 @@ ulong CTradeManager::PlaceSellStop(double lotSize, double stopPrice, double stop
 }
 
 //+------------------------------------------------------------------+
-//| ManageOpenPositions - Quản lý tất cả vị thế đang mở              |
+//| ManageExistingPositions - Quản lý tất cả vị thế đang mở         |
 //+------------------------------------------------------------------+
-void CTradeManager::ManageOpenPositions(const MarketProfileData &profile)
+void CTradeManager::ManageExistingPositions(EAContext* context)
 {
     // Kiểm tra trạng thái EA
-    if (m_EAState != STATE_RUNNING && m_EAState != STATE_REDUCED_RISK) {
+    if (context.EAState != STATE_RUNNING && context.EAState != STATE_REDUCED_RISK) { // Assuming EAState is part of EAContext or accessible via it
         return;
     }
     
     // Kiểm tra chế độ khẩn cấp
-    if (m_EmergencyMode || ShouldEmergencyExit(profile)) {
-        EmergencyCloseAllPositions("Emergency Exit - Market condition");
+    if (context.EmergencyMode || ShouldAdjustForHighVolatility(context.CurrentProfileData)) { // Assuming EmergencyMode and CurrentProfileData are in EAContext
+        EmergencyCloseAllPositions("Emergency Exit - Market condition"); // Assuming EmergencyCloseAllPositions is accessible or part of context.TradeManager
         return;
     }
     
     // Lấy danh sách vị thế đang mở
     ulong tickets[];
-    if (!GetOpenTickets(tickets)) {
+    if (!m_PositionManager.GetOpenTickets(tickets)) { // Assuming GetOpenTickets is part of PositionManager in context
         return;
     }
     
@@ -1188,20 +1331,48 @@ void CTradeManager::ManageOpenPositions(const MarketProfileData &profile)
         double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
         
         // Kiểm tra và di chuyển đến breakeven nếu cần
-        CheckAndMoveToBreakeven(ticket);
+        CheckAndMoveToBreakeven(ticket); // Assuming this method is part of CTradeManager or accessible
         
         // Quản lý đóng một phần nếu được bật
-        if (m_UsePartialClose) {
-            ManagePartialClose(ticket);
+        if (context.UsePartialClose) { // Assuming UsePartialClose is in EAContext
+            ManagePartialClose(ticket); // Assuming this method is part of CTradeManager or accessible
         }
         
-        // Quản lý trailing stop
-        if (m_UseAdaptiveTrailing) {
-            // Lấy regime hiện tại từ profile
-            ENUM_MARKET_REGIME regime = profile.regime;
-            
+        // Quản lý trailing stop và Market Profile Integration
+        if (context.UseAdaptiveTrailing) { // Assuming UseAdaptiveTrailing is in EAContext
+            MarketProfileData currentMarketProfile = m_marketProfile->GetLastProfile(); // Lấy thông tin MarketProfile hiện tại, sử dụng -> vì m_marketProfile là con trỏ
+            ENUM_MARKET_REGIME regime = currentMarketProfile.regime;
+            bool isMarketTransitioning = currentMarketProfile.isTransitioning; // Sử dụng isTransitioning
+
+            // Logic điều chỉnh dựa trên MarketProfile
+            if (isMarketTransitioning && PositionGetDouble(POSITION_PROFIT) > 0) {
+                // Nếu xu hướng thay đổi và lệnh đang có lời, đóng 30% vị thế
+                double volumeToClose = PositionGetDouble(POSITION_VOLUME) * 0.3;
+                if (volumeToClose > 0) {
+                    ClosePartialPosition(ticket, volumeToClose, "Trend changing - partial close");
+                    // Ghi log hoặc thông báo nếu cần
+                    if(m_logger != NULL) m_logger->LogInfo(StringFormat("TradeManager: Partial close 30%% for ticket #%d due to market transitioning.", ticket));
+                }
+            }
+
+
             // Áp dụng trailing stop dựa trên regime
             double newSL = CalculateDynamicTrailingStop(ticket, currentPrice, isLong, regime);
+
+            // Thắt chặt Trailing Stop nếu thị trường là REGIME_RANGING_VOLATILE và lệnh có lời
+            if (regime == REGIME_RANGING_VOLATILE && PositionGetDouble(POSITION_PROFIT) > 0) {
+                double tighterSL = 0;
+                if (isLong) {
+                    tighterSL = currentPrice - (currentPrice - newSL) * 0.5; // Thắt chặt 50%
+                } else {
+                    tighterSL = currentPrice + (newSL - currentPrice) * 0.5; // Thắt chặt 50%
+                }
+                // Đảm bảo SL mới không tệ hơn SL cũ
+                if ((isLong && tighterSL > newSL) || (!isLong && tighterSL < newSL)) {
+                    newSL = tighterSL;
+                    if(m_logger != NULL) m_logger->LogInfo(StringFormat("TradeManager: Trailing stop tightened for ticket #%d due to REGIME_RANGING_VOLATILE.", ticket));
+                }
+            }
             
             // Kiểm tra SL mới có hợp lệ không
             if (newSL > 0) {
@@ -1232,14 +1403,15 @@ void CTradeManager::ManageOpenPositions(const MarketProfileData &profile)
 }
 
 //+------------------------------------------------------------------+
-//| ModifyPosition - Thay đổi SL/TP của vị thế                       |
+//| ModifyPosition - Thay đổi SL/TP của vị thế                      |
 //+------------------------------------------------------------------+
 bool CTradeManager::ModifyPosition(ulong ticket, double newSL, double newTP)
 {
     // Kiểm tra nếu vị thế tồn tại
     if (!PositionSelectByTicket(ticket)) {
-        if (m_logger) {
-            m_logger.LogWarning("TradeManager: Không thể sửa vị thế - Ticket không tồn tại: " + 
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning("TradeManager: Không thể sửa vị thế - Ticket không tồn tại: " + 
                                  IntegerToString(ticket));
         }
         return false;
@@ -1260,8 +1432,9 @@ bool CTradeManager::ProcessModifyRequest(ulong ticket, double newSL, double newT
 {
     // Thực hiện sửa vị thế
     if (!m_trade.PositionModify(ticket, newSL, newTP)) {
-        if (m_logger) {
-            m_logger.LogWarning(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning(StringFormat(
                 "TradeManager: Lỗi sửa vị thế #%d - Lỗi: %d, Mô tả: %s",
                 ticket, m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription()
             ));
@@ -1272,8 +1445,8 @@ bool CTradeManager::ProcessModifyRequest(ulong ticket, double newSL, double newT
     // Cập nhật metadata
     UpdatePositionMetadata(ticket, newSL, newTP);
     
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Sửa vị thế #%d thành công - SL: %.5f, TP: %.5f",
             ticket, newSL, newTP
         ));
@@ -1289,8 +1462,9 @@ bool CTradeManager::ClosePosition(ulong ticket, string comment)
 {
     // Kiểm tra nếu vị thế tồn tại
     if (!PositionSelectByTicket(ticket)) {
-        if (m_logger) {
-            m_logger.LogWarning("TradeManager: Không thể đóng vị thế - Ticket không tồn tại: " + 
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning("TradeManager: Không thể đóng vị thế - Ticket không tồn tại: " + 
                                  IntegerToString(ticket));
         }
         return false;
@@ -1298,8 +1472,9 @@ bool CTradeManager::ClosePosition(ulong ticket, string comment)
     
     // Đóng vị thế
     if (!m_trade.PositionClose(ticket)) {
-        if (m_logger) {
-            m_logger.LogWarning(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning(StringFormat(
                 "TradeManager: Lỗi đóng vị thế #%d - Lỗi: %d, Mô tả: %s",
                 ticket, m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription()
             ));
@@ -1310,55 +1485,60 @@ bool CTradeManager::ClosePosition(ulong ticket, string comment)
     // Xóa metadata
     RemovePositionMetadata(ticket);
     
-    if (m_logger) {
+    // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
         string logMessage = StringFormat("TradeManager: Đóng vị thế #%d thành công", ticket);
         if (comment != "") {
             logMessage += " - " + comment;
         }
-        m_logger.LogInfo(logMessage);
+        m_logger->LogInfo(logMessage);
     }
     
     return true;
 }
 
 //+------------------------------------------------------------------+
-//| CloseAllPositions - Đóng tất cả vị thế                           |
+//| CloseAllPositions - Đóng tất cả vị thế                          |
 //+------------------------------------------------------------------+
-void CTradeManager::CloseAllPositions(string reason)
+bool CTradeManager::CloseAllPositions(string reason)
 {
     ulong tickets[];
     if (!GetOpenTickets(tickets)) {
-        return;
+        return true;  // Không có vị thế nào để đóng
     }
     
     int count = ArraySize(tickets);
     if (count == 0) {
-        return;
+        return true; 
     }
     
-    if (m_logger) {
-        m_logger.LogInfo("TradeManager: Đóng tất cả vị thế - " + reason);
+    // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+        m_logger->LogInfo("TradeManager: Đóng tất cả vị thế - " + reason);
     }
     
     // Đóng từng vị thế
     for (int i = 0; i < count; i++) {
         ClosePosition(tickets[i], reason);
     }
+    
+    return true;
 }
 
 //+------------------------------------------------------------------+
-//| CancelAllPendingOrders - Đóng tất cả lệnh chờ                    |
+//| CancelAllPendingOrders - Đóng tất cả lệnh chờ                   |
 //+------------------------------------------------------------------+
-void CTradeManager::CancelAllPendingOrders()
+bool CTradeManager::CancelAllPendingOrders(string comment)
 {
     // Đếm số lệnh chờ
     int totalOrders = OrdersTotal();
     if (totalOrders <= 0) {
-        return;
+        return true; 
     }
     
-    if (m_logger) {
-        m_logger.LogInfo("TradeManager: Hủy tất cả lệnh chờ");
+    // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+        m_logger->LogInfo("TradeManager: Hủy tất cả lệnh chờ");
     }
     
     // Lặp qua từng lệnh chờ
@@ -1370,18 +1550,20 @@ void CTradeManager::CancelAllPendingOrders()
                 // Hủy lệnh
                 m_trade.OrderDelete(ticket);
                 
-                if (m_logger && m_EnableDetailedLogs) {
-                    m_logger.LogInfo("TradeManager: Hủy lệnh chờ #" + IntegerToString(ticket));
+                if (m_EnableDetailedLogs) {
+                    m_logger->LogInfo("TradeManager: Hủy lệnh chờ #" + IntegerToString(ticket));
                 }
             }
         }
     }
+    
+    return true;
 }
 
 //+------------------------------------------------------------------+
-//| CountOpenPositions - Đếm số lệnh đang mở                         |
+//| CountOpenPositions - Đếm số lệnh đang mở                        |
 //+------------------------------------------------------------------+
-int CTradeManager::CountOpenPositions()
+int CTradeManager::CountOpenPositions(ENUM_POSITION_TYPE type)
 {
     int count = 0;
     int total = PositionsTotal();
@@ -1393,7 +1575,13 @@ int CTradeManager::CountOpenPositions()
         // Kiểm tra symbol và magic number
         if (PositionGetString(POSITION_SYMBOL) == m_Symbol && 
             PositionGetInteger(POSITION_MAGIC) == m_MagicNumber) {
-            count++;
+            // Kiểm tra loại vị thế
+            ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+            
+            // Nếu type == -1 (mặc định), đếm tất cả
+            if (type == -1 || type == posType) {
+                count++;
+            }
         }
     }
     
@@ -1401,15 +1589,10 @@ int CTradeManager::CountOpenPositions()
 }
 
 //+------------------------------------------------------------------+
-//| HasOpenPosition - Kiểm tra nếu có vị thế đang mở                 |
+//| HasOpenPosition - Kiểm tra nếu có vị thế đang mở                |
 //+------------------------------------------------------------------+
-bool CTradeManager::HasOpenPosition(string symbol)
+bool CTradeManager::HasOpenPosition(ENUM_POSITION_TYPE type)
 {
-    // Sử dụng symbol hiện tại nếu không chỉ định
-    if (symbol == "") {
-        symbol = m_Symbol;
-    }
-    
     int total = PositionsTotal();
     
     for (int i = 0; i < total; i++) {
@@ -1417,9 +1600,15 @@ bool CTradeManager::HasOpenPosition(string symbol)
         if (ticket <= 0) continue;
         
         // Kiểm tra symbol và magic number
-        if (PositionGetString(POSITION_SYMBOL) == symbol && 
+        if (PositionGetString(POSITION_SYMBOL) == m_Symbol && 
             PositionGetInteger(POSITION_MAGIC) == m_MagicNumber) {
-            return true;
+            // Kiểm tra loại vị thế
+            ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+            
+            // Nếu type == -1 (mặc định) hoặc khớp loại
+            if (type == -1 || type == posType) {
+                return true;
+            }
         }
     }
     
@@ -1427,7 +1616,7 @@ bool CTradeManager::HasOpenPosition(string symbol)
 }
 
 //+------------------------------------------------------------------+
-//| GetOpenTickets - Lấy danh sách ticket của các vị thế đang mở      |
+//| GetOpenTickets - Lấy danh sách ticket của các vị thế đang mở    |
 //+------------------------------------------------------------------+
 bool CTradeManager::GetOpenTickets(ulong &tickets[])
 {
@@ -1481,8 +1670,8 @@ bool CTradeManager::GetOpenTickets(ulong &tickets[])
 //+------------------------------------------------------------------+
 double CTradeManager::GetInitialStopLoss(ulong ticket)
 {
-    PositionMetadata* metadata = GetPositionMetadata(ticket);
-    if (metadata != NULL) {
+    PositionMetadata metadata = GetPositionMetadata(ticket);
+    if (metadata.ticket != 0) {
         return metadata.initialSL;
     }
     
@@ -1499,8 +1688,8 @@ double CTradeManager::GetInitialStopLoss(ulong ticket)
 //+------------------------------------------------------------------+
 double CTradeManager::GetInitialVolume(ulong ticket)
 {
-    PositionMetadata* metadata = GetPositionMetadata(ticket);
-    if (metadata != NULL) {
+    PositionMetadata metadata = GetPositionMetadata(ticket);
+    if (metadata.ticket != 0) {
         return metadata.initialVolume;
     }
     
@@ -1525,8 +1714,8 @@ double CTradeManager::GetPositionRRatio(ulong ticket)
 //+------------------------------------------------------------------+
 int CTradeManager::GetScalingCount(ulong ticket)
 {
-    PositionMetadata* metadata = GetPositionMetadata(ticket);
-    if (metadata != NULL) {
+    PositionMetadata metadata = GetPositionMetadata(ticket);
+    if (metadata.ticket != 0) {
         return metadata.scalingCount;
     }
     
@@ -1536,9 +1725,7 @@ int CTradeManager::GetScalingCount(ulong ticket)
 //+------------------------------------------------------------------+
 //| ProcessTradeTransaction - Xử lý sự kiện giao dịch                |
 //+------------------------------------------------------------------+
-void CTradeManager::ProcessTradeTransaction(const MqlTradeTransaction& trans, 
-                                         const MqlTradeRequest& request, 
-                                         const MqlTradeResult& result)
+void CTradeManager::ProcessTradeTransaction(const MqlTradeTransaction &trans)
 {
     // Chỉ xử lý các giao dịch của EA (cùng magic number)
     if (trans.magic != m_MagicNumber) {
@@ -1549,8 +1736,8 @@ void CTradeManager::ProcessTradeTransaction(const MqlTradeTransaction& trans,
     switch (trans.type) {
         // Khi có lệnh mới được thêm vào
         case TRADE_TRANSACTION_ORDER_ADD:
-            if (m_logger && m_EnableDetailedLogs) {
-                m_logger.LogInfo(StringFormat(
+            if (m_EnableDetailedLogs) {
+                m_logger->LogInfo(StringFormat(
                     "TradeManager: Lệnh mới #%d được thêm vào - Loại: %s",
                     trans.order, EnumToString((ENUM_ORDER_TYPE)trans.order_type)
                 ));
@@ -1558,48 +1745,12 @@ void CTradeManager::ProcessTradeTransaction(const MqlTradeTransaction& trans,
             break;
         
         // Khi có lệnh chờ được kích hoạt
-        case TRADE_TRANSACTION_ORDER_TRIGGER:
-            if (m_logger && m_EnableDetailedLogs) {
-                m_logger.LogInfo(StringFormat(
-                    "TradeManager: Lệnh chờ #%d được kích hoạt",
-                    trans.order
-                ));
-            }
-            break;
-        
-        // Khi có vị thế mới được mở
-        case TRADE_TRANSACTION_POSITION_OPEN:
-            // Hỗ trợ thêm nếu có
-            break;
-        
-        // Khi có vị thế bị đóng
-        case TRADE_TRANSACTION_POSITION_CLOSE:
-            // Xóa metadata của vị thế
-            RemovePositionMetadata(trans.position);
-            break;
-        
-        // Khi vị thế bị thay đổi
-        case TRADE_TRANSACTION_POSITION_MODIFY:
-            // Có thể cập nhật metadata nếu cần
-            break;
-        
-        // Khi một lệnh bị xóa
-        case TRADE_TRANSACTION_ORDER_DELETE:
-            // Hỗ trợ thêm nếu cần
-            break;
-        
-        // Khi một lệnh bị sửa đổi
-        case TRADE_TRANSACTION_ORDER_MODIFY:
-            // Hỗ trợ thêm nếu cần
-            break;
-        
-        // Khi có một giao dịch mới
         case TRADE_TRANSACTION_DEAL_ADD:
             // Xử lý giao dịch đóng
-            if (trans.deal_type == DEAL_TYPE_SELL && trans.order_type == ORDER_TYPE_CLOSE_BUY) {
+            if (trans.deal_type == DEAL_TYPE_SELL && trans.order_type == ORDER_TYPE_CLOSE_BY) {
                 HandleCloseDeal(trans.position, trans.price, trans.profit);
             }
-            else if (trans.deal_type == DEAL_TYPE_BUY && trans.order_type == ORDER_TYPE_CLOSE_SELL) {
+            else if (trans.deal_type == DEAL_TYPE_BUY && trans.order_type == ORDER_TYPE_CLOSE_BY) {
                 HandleCloseDeal(trans.position, trans.price, trans.profit);
             }
             break;
@@ -1610,38 +1761,39 @@ void CTradeManager::ProcessTradeTransaction(const MqlTradeTransaction& trans,
 }
 
 //+------------------------------------------------------------------+
-//| UpdateEAState - Cập nhật trạng thái EA                           |
+//| UpdateEAState - Cập nhật trạng thái EA                          |
 //+------------------------------------------------------------------+
-void CTradeManager::UpdateEAState(ENUM_EA_STATE state, datetime pauseUntil)
+void CTradeManager::UpdateEAState(ENUM_EA_STATE newState, datetime pauseUntil)
 {
     // Cập nhật trạng thái
-    m_EAState = state;
+    m_EAState = newState;
+    
+    // Cập nhật cờ hoạt động
+    m_IsActive = (newState == STATE_RUNNING || newState == STATE_REDUCED_RISK);
     
     // Cập nhật thời gian tạm dừng nếu cần
-    if (state == STATE_PAUSED && pauseUntil > 0) {
+    if (newState == STATE_PAUSED && pauseUntil > 0) {
         m_PauseUntil = pauseUntil;
     }
     
-    // Cập nhật cờ hoạt động
-    m_IsActive = (state == STATE_RUNNING || state == STATE_REDUCED_RISK);
-    
     // Log thông tin
-    if (m_logger) {
-        string stateStr = EnumToString(state);
+    // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+        string stateStr = EnumToString(newState);
         
         // Thêm thông tin thời gian tạm dừng nếu có
-        if (state == STATE_PAUSED && pauseUntil > 0) {
+        if (newState == STATE_PAUSED && pauseUntil > 0) {
             stateStr += " - đến " + TimeToString(pauseUntil, TIME_DATE|TIME_MINUTES);
         }
         
-        m_logger.LogInfo("TradeManager: Trạng thái EA đã được cập nhật - " + stateStr);
+        m_logger->LogInfo("TradeManager: Trạng thái EA đã được cập nhật - " + stateStr);
     }
 }
 
 //+------------------------------------------------------------------+
-//| ShouldEmergencyExit - Kiểm tra sự cần thiết của thoát khẩn cấp   |
+//| ShouldAdjustForHighVolatility - Kiểm tra cần thoát khẩn cấp     |
 //+------------------------------------------------------------------+
-bool CTradeManager::ShouldEmergencyExit(const MarketProfileData &profile)
+bool CTradeManager::ShouldAdjustForHighVolatility(const MarketProfileData &profile)
 {
     // Đã ở chế độ khẩn cấp
     if (m_EmergencyMode) {
@@ -1650,8 +1802,9 @@ bool CTradeManager::ShouldEmergencyExit(const MarketProfileData &profile)
     
     // Kiểm tra volatility cực cao
     if (profile.atrRatio > 3.0) {
-        if (m_logger) {
-            m_logger.LogWarning(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning(StringFormat(
                 "TradeManager: Phát hiện volatility cực cao - ATR Ratio: %.2f",
                 profile.atrRatio
             ));
@@ -1660,13 +1813,11 @@ bool CTradeManager::ShouldEmergencyExit(const MarketProfileData &profile)
         return true;
     }
     
-    // Có thể thêm các điều kiện khác
-    
     return false;
 }
 
 //+------------------------------------------------------------------+
-//| EmergencyCloseAllPositions - Đóng tất cả vị thế khẩn cấp         |
+//| EmergencyCloseAllPositions - Đóng tất cả vị thế khẩn cấp        |
 //+------------------------------------------------------------------+
 void CTradeManager::EmergencyCloseAllPositions(string reason)
 {
@@ -1677,54 +1828,58 @@ void CTradeManager::EmergencyCloseAllPositions(string reason)
     CloseAllPositions("EMERGENCY: " + reason);
     
     // Hủy tất cả lệnh chờ
-    CancelAllPendingOrders();
+    CancelAllPendingOrders("EMERGENCY: " + reason);
     
     // Log cảnh báo
-    if (m_logger) {
-        m_logger.LogWarning("TradeManager: Kích hoạt EMERGENCY EXIT - " + reason);
+    // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+        m_logger->LogWarning("TradeManager: Kích hoạt EMERGENCY EXIT - " + reason);
     }
 }
 
 //+------------------------------------------------------------------+
-//| SavePositionMetadata - Lưu metadata của vị thế                   |
+//| SavePositionMetadata - Lưu metadata của vị thế                  |
 //+------------------------------------------------------------------+
 void CTradeManager::SavePositionMetadata(ulong ticket, double entryPrice, double stopLoss, 
                                       double takeProfit, double volume, bool isLong, 
                                       ENUM_ENTRY_SCENARIO scenario)
 {
-    // Tạo đối tượng metadata mới
-    PositionMetadata* metadata = new PositionMetadata();
+    // Tạo đối tượng metadata mới 
+    ApexPullback::PositionMetadata* metadata = new ApexPullback::PositionMetadata();
     if (metadata == NULL) {
-        if (m_logger) {
-            m_logger.LogError("TradeManager: Không thể tạo metadata cho vị thế #" + 
-                            IntegerToString(ticket));
+        if (m_EnableDetailedLogs) {
+            m_logger->LogError("TradeManager: Không thể tạo metadata cho vị thế #" + 
+                           IntegerToString(ticket));
         }
         return;
     }
     
+    // Khởi tạo giá trị mặc định
+    metadata->Initialize();
+    
     // Điền thông tin
-    metadata.ticket = ticket;
-    metadata.initialSL = stopLoss;
-    metadata.initialTP = takeProfit;
-    metadata.initialVolume = volume;
-    metadata.entryPrice = entryPrice;
-    metadata.isLong = isLong;
-    metadata.entryTime = TimeCurrent();
-    metadata.scenario = scenario;
+    metadata->ticket = ticket;
+    metadata->initialSL = stopLoss;
+    metadata->initialTP = takeProfit;
+    metadata->initialVolume = volume;
+    metadata->entryPrice = entryPrice;
+    metadata->isLong = isLong;
+    metadata->entryTime = TimeCurrent();
+    metadata->scenario = scenario;
     
-    metadata.isBreakeven = false;
-    metadata.isPartialClosed1 = false;
-    metadata.isPartialClosed2 = false;
-    metadata.scalingCount = 0;
+    metadata->isBreakeven = false;
+    metadata->isPartialClosed1 = false;
+    metadata->isPartialClosed2 = false;
+    metadata->scalingCount = 0;
     
-    metadata.lastTrailingTime = 0;
-    metadata.lastTrailingSL = stopLoss;
+    metadata->lastTrailingTime = 0;
+    metadata->lastTrailingSL = stopLoss;
     
     // Thêm vào mảng
     m_PositionsMetadata.Add(metadata);
     
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo(StringFormat(
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Đã lưu metadata cho vị thế #%d - Entry: %.5f, SL: %.5f, TP: %.5f",
             ticket, entryPrice, stopLoss, takeProfit
         ));
@@ -1732,63 +1887,74 @@ void CTradeManager::SavePositionMetadata(ulong ticket, double entryPrice, double
 }
 
 //+------------------------------------------------------------------+
-//| UpdatePositionMetadata - Cập nhật metadata của vị thế            |
+//| UpdatePositionMetadata - Cập nhật metadata của vị thế           |
 //+------------------------------------------------------------------+
 bool CTradeManager::UpdatePositionMetadata(ulong ticket, double newSL, double newTP)
-{
-    PositionMetadata* metadata = GetPositionMetadata(ticket);
-    if (metadata == NULL) {
-        return false;
-    }
-    
-    // Cập nhật SL/TP nếu cần
-    if (newSL > 0) {
-        metadata.lastTrailingSL = newSL;
-        metadata.lastTrailingTime = TimeCurrent();
-    }
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| GetPositionMetadata - Lấy metadata của vị thế                    |
-//+------------------------------------------------------------------+
-PositionMetadata* CTradeManager::GetPositionMetadata(ulong ticket)
 {
     int total = m_PositionsMetadata.Total();
     
     for (int i = 0; i < total; i++) {
-        PositionMetadata* metadata = m_PositionsMetadata.At(i);
-        if (metadata != NULL && metadata.ticket == ticket) {
-            return metadata;
+        ApexPullback::PositionMetadata* metadata = (ApexPullback::PositionMetadata*)m_PositionsMetadata.At(i);
+        if (metadata != NULL) {
+            if (metadata->ticket == ticket) {
+                // Cập nhật SL/TP nếu cần
+                if (newSL > 0) {
+                    metadata->lastTrailingSL = newSL;
+                    metadata->lastTrailingTime = TimeCurrent();
+                }
+                return true;
+            }
         }
     }
     
-    return NULL;
+    return false;
 }
 
 //+------------------------------------------------------------------+
-//| RemovePositionMetadata - Xóa metadata của vị thế                 |
+//| GetPositionMetadata - Lấy metadata của vị thế                   |
+//+------------------------------------------------------------------+
+ApexPullback::PositionMetadata CTradeManager::GetPositionMetadata(ulong ticket)
+{
+    int total = m_PositionsMetadata.Total();
+    
+    for (int i = 0; i < total; i++) {
+        ApexPullback::PositionMetadata* metadata = (ApexPullback::PositionMetadata*)m_PositionsMetadata.At(i);
+        if (metadata != NULL) {
+            if (metadata->ticket == ticket) {
+                return *metadata;
+            }
+        }
+    }
+    
+    // Trả về struct rỗng nếu không tìm thấy
+    ApexPullback::PositionMetadata emptyMetadata;
+    return emptyMetadata;
+}
+
+//+------------------------------------------------------------------+
+//| RemovePositionMetadata - Xóa metadata của vị thế                |
 //+------------------------------------------------------------------+
 void CTradeManager::RemovePositionMetadata(ulong ticket)
 {
     int total = m_PositionsMetadata.Total();
     
     for (int i = 0; i < total; i++) {
-        PositionMetadata* metadata = m_PositionsMetadata.At(i);
-        if (metadata != NULL && metadata.ticket == ticket) {
-            m_PositionsMetadata.Delete(i);
-            if (m_logger && m_EnableDetailedLogs) {
-                m_logger.LogInfo("TradeManager: Đã xóa metadata cho vị thế #" + 
-                               IntegerToString(ticket));
+        ApexPullback::PositionMetadata* metadata = (ApexPullback::PositionMetadata*)m_PositionsMetadata.At(i);
+        if (metadata != NULL) {
+            if (metadata->ticket == ticket) {
+                m_PositionsMetadata.Delete(i);
+                if (m_EnableDetailedLogs) {
+                    m_logger->LogInfo("TradeManager: Đã xóa metadata cho vị thế #" + 
+                                  IntegerToString(ticket));
+                }
+                return;
             }
-            return;
         }
     }
 }
 
 //+------------------------------------------------------------------+
-//| ClearAllMetadata - Xóa tất cả metadata                           |
+//| ClearAllMetadata - Xóa tất cả metadata                          |
 //+------------------------------------------------------------------+
 void CTradeManager::ClearAllMetadata()
 {
@@ -1800,16 +1966,87 @@ void CTradeManager::ClearAllMetadata()
     
     m_PositionsMetadata.Clear();
     
-    if (m_logger && m_EnableDetailedLogs) {
-        m_logger.LogInfo("TradeManager: Đã xóa tất cả metadata");
+    if (m_EnableDetailedLogs) {
+        m_logger->LogInfo("TradeManager: Đã xóa tất cả metadata");
     }
 }
 
 //+------------------------------------------------------------------+
-//| CalculateDynamicTrailingStop - Tính trailing stop thích ứng      |
+//| UpdatePositionMetadataPartialClose1 - Cập nhật partial close 1  |
 //+------------------------------------------------------------------+
-double CTradeManager::CalculateDynamicTrailingStop(ulong ticket, double currentPrice, bool isLong, 
-                                               ENUM_MARKET_REGIME regime)
+void CTradeManager::UpdatePositionMetadataPartialClose1(ulong ticket)
+{
+    int total = m_PositionsMetadata.Total();
+    
+    for (int i = 0; i < total; i++) {
+        ApexPullback::PositionMetadata* metadata = (ApexPullback::PositionMetadata*)m_PositionsMetadata.At(i);
+        if (metadata != NULL) {
+            if (metadata->ticket == ticket) {
+                metadata->isPartialClosed1 = true;
+                return;
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| UpdatePositionMetadataPartialClose2 - Cập nhật partial close 2  |
+//+------------------------------------------------------------------+
+void CTradeManager::UpdatePositionMetadataPartialClose2(ulong ticket)
+{
+    int total = m_PositionsMetadata.Total();
+    
+    for (int i = 0; i < total; i++) {
+        ApexPullback::PositionMetadata* metadata = (ApexPullback::PositionMetadata*)m_PositionsMetadata.At(i);
+        if (metadata != NULL) {
+            if (metadata->ticket == ticket) {
+                metadata->isPartialClosed2 = true;
+                return;
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| UpdatePositionMetadataBreakeven - Cập nhật breakeven            |
+//+------------------------------------------------------------------+
+void CTradeManager::UpdatePositionMetadataBreakeven(ulong ticket)
+{
+    int total = m_PositionsMetadata.Total();
+    
+    for (int i = 0; i < total; i++) {
+        ApexPullback::PositionMetadata* metadata = (ApexPullback::PositionMetadata*)m_PositionsMetadata.At(i);
+        if (metadata != NULL) {
+            if (metadata->ticket == ticket) {
+                metadata->isBreakeven = true;
+                return;
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| UpdatePositionMetadataScaling - Cập nhật scaling count          |
+//+------------------------------------------------------------------+
+void CTradeManager::UpdatePositionMetadataScaling(ulong ticket)
+{
+    int total = m_PositionsMetadata.Total();
+    
+    for (int i = 0; i < total; i++) {
+        ApexPullback::PositionMetadata* metadata = (ApexPullback::PositionMetadata*)m_PositionsMetadata.At(i);
+        if (metadata != NULL) {
+            if (metadata.ticket == ticket) {
+                metadata.scalingCount++;
+                return;
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| CalculateDynamicTrailingStop - Tính trailing stop thích ứng     |
+//+------------------------------------------------------------------+
+double CTradeManager::CalculateDynamicTrailingStop(ulong ticket, double currentPrice, bool isLong, ENUM_MARKET_REGIME regime)
 {
     // Kiểm tra tham số
     if (currentPrice <= 0) {
@@ -1817,8 +2054,8 @@ double CTradeManager::CalculateDynamicTrailingStop(ulong ticket, double currentP
     }
     
     // Lấy metadata vị thế
-    PositionMetadata* metadata = GetPositionMetadata(ticket);
-    if (metadata == NULL) {
+    PositionMetadata metadata = GetPositionMetadata(ticket);
+    if (metadata.ticket == 0) {
         return 0;
     }
     
@@ -1941,7 +2178,7 @@ double CTradeManager::CalculateDynamicTrailingStop(ulong ticket, double currentP
 }
 
 //+------------------------------------------------------------------+
-//| CalculateTrailingStopATR - Tính trailing stop dựa trên ATR       |
+//| CalculateTrailingStopATR - Tính trailing stop dựa trên ATR      |
 //+------------------------------------------------------------------+
 double CTradeManager::CalculateTrailingStopATR(double currentPrice, bool isLong, double atr)
 {
@@ -1961,7 +2198,7 @@ double CTradeManager::CalculateTrailingStopATR(double currentPrice, bool isLong,
 }
 
 //+------------------------------------------------------------------+
-//| CalculateTrailingStopSwing - Tính trailing stop dựa trên Swing   |
+//| CalculateTrailingStopSwing - Tính trailing stop dựa trên Swing  |
 //+------------------------------------------------------------------+
 double CTradeManager::CalculateTrailingStopSwing(bool isLong)
 {
@@ -1973,7 +2210,7 @@ double CTradeManager::CalculateTrailingStopSwing(bool isLong)
     
     if (isLong) {
         // Lấy swing low gần nhất
-        double swingLow = m_swingDetector.GetLastSwingLow();
+        double swingLow = m_swingDetector->GetLastSwingLow();
         if (swingLow <= 0) {
             return 0;
         }
@@ -1983,7 +2220,7 @@ double CTradeManager::CalculateTrailingStopSwing(bool isLong)
         trailingStop = swingLow - buffer;
     } else {
         // Lấy swing high gần nhất
-        double swingHigh = m_swingDetector.GetLastSwingHigh();
+        double swingHigh = m_swingDetector->GetLastSwingHigh();
         if (swingHigh <= 0) {
             return 0;
         }
@@ -1997,7 +2234,7 @@ double CTradeManager::CalculateTrailingStopSwing(bool isLong)
 }
 
 //+------------------------------------------------------------------+
-//| CalculateTrailingStopEMA - Tính trailing stop dựa trên EMA       |
+//| CalculateTrailingStopEMA - Tính trailing stop dựa trên EMA      |
 //+------------------------------------------------------------------+
 double CTradeManager::CalculateTrailingStopEMA(bool isLong)
 {
@@ -2014,7 +2251,7 @@ double CTradeManager::CalculateTrailingStopEMA(bool isLong)
 }
 
 //+------------------------------------------------------------------+
-//| CalculateTrailingStopPSAR - Tính trailing stop dựa trên PSAR     |
+//| CalculateTrailingStopPSAR - Tính trailing stop dựa trên PSAR    |
 //+------------------------------------------------------------------+
 double CTradeManager::CalculateTrailingStopPSAR(bool isLong)
 {
@@ -2110,8 +2347,8 @@ bool CTradeManager::ManagePartialClose(ulong ticket)
     }
     
     // Lấy metadata
-    PositionMetadata* metadata = GetPositionMetadata(ticket);
-    if (metadata == NULL) {
+    PositionMetadata metadata = GetPositionMetadata(ticket);
+    if (metadata.ticket == 0) {
         return false;
     }
     
@@ -2139,8 +2376,8 @@ bool CTradeManager::ManagePartialClose(ulong ticket)
         if (closeVolume > 0 && closeVolume < currentVolume) {
             // Đóng một phần
             if (SafeClosePartial(ticket, closeVolume, "TP1")) {
-                // Cập nhật metadata
-                metadata.isPartialClosed1 = true;
+                // Cập nhật metadata trực tiếp trong array
+                UpdatePositionMetadataPartialClose1(ticket);
                 
                 // Kiểm tra và đưa SL về breakeven
                 if (!metadata.isBreakeven) {
@@ -2154,7 +2391,7 @@ bool CTradeManager::ManagePartialClose(ulong ticket)
                     }
                     
                     if (SafeModifyStopLoss(ticket, beLevel)) {
-                        metadata.isBreakeven = true;
+                        UpdatePositionMetadataBreakeven(ticket);
                     }
                 }
                 
@@ -2173,7 +2410,7 @@ bool CTradeManager::ManagePartialClose(ulong ticket)
             // Đóng một phần
             if (SafeClosePartial(ticket, closeVolume, "TP2")) {
                 // Cập nhật metadata
-                metadata.isPartialClosed2 = true;
+                UpdatePositionMetadataPartialClose2(ticket);
                 
                 // Siết chặt trailing stop
                 double currentSL = PositionGetDouble(POSITION_SL);
@@ -2207,7 +2444,7 @@ bool CTradeManager::ManagePartialClose(ulong ticket)
 }
 
 //+------------------------------------------------------------------+
-//| SafeClosePartial - Đóng một phần vị thế an toàn                  |
+//| SafeClosePartial - Đóng một phần vị thế an toàn                 |
 //+------------------------------------------------------------------+
 bool CTradeManager::SafeClosePartial(ulong ticket, double partialLots, string partialComment)
 {
@@ -2222,8 +2459,9 @@ bool CTradeManager::SafeClosePartial(ulong ticket, double partialLots, string pa
     
     // Kiểm tra khối lượng hợp lệ
     if (partialLots <= 0 || partialLots >= currentVolume) {
-        if (m_logger) {
-            m_logger.LogWarning(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning(StringFormat(
                 "TradeManager: Khối lượng đóng một phần không hợp lệ - Lệnh: #%d, Khối lượng: %.2f, Hiện tại: %.2f",
                 ticket, partialLots, currentVolume
             ));
@@ -2233,8 +2471,9 @@ bool CTradeManager::SafeClosePartial(ulong ticket, double partialLots, string pa
     
     // Đóng một phần vị thế
     if (!m_trade.PositionClosePartial(ticket, partialLots)) {
-        if (m_logger) {
-            m_logger.LogWarning(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning(StringFormat(
                 "TradeManager: Lỗi đóng một phần vị thế #%d - Lỗi: %d, Mô tả: %s",
                 ticket, m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription()
             ));
@@ -2242,8 +2481,9 @@ bool CTradeManager::SafeClosePartial(ulong ticket, double partialLots, string pa
         return false;
     }
     
-    if (m_logger) {
-        m_logger.LogInfo(StringFormat(
+    // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Đóng một phần vị thế #%d thành công - Khối lượng: %.2f, Lý do: %s",
             ticket, partialLots, partialComment
         ));
@@ -2253,7 +2493,7 @@ bool CTradeManager::SafeClosePartial(ulong ticket, double partialLots, string pa
 }
 
 //+------------------------------------------------------------------+
-//| CheckAndExecuteScaling - Kiểm tra và thực hiện nhồi lệnh         |
+//| CheckAndExecuteScaling - Kiểm tra và thực hiện nhồi lệnh        |
 //+------------------------------------------------------------------+
 bool CTradeManager::CheckAndExecuteScaling(ulong ticket)
 {
@@ -2268,8 +2508,8 @@ bool CTradeManager::CheckAndExecuteScaling(ulong ticket)
     }
     
     // Lấy metadata
-    PositionMetadata* metadata = GetPositionMetadata(ticket);
-    if (metadata == NULL) {
+    PositionMetadata metadata = GetPositionMetadata(ticket);
+    if (metadata.ticket == 0) {
         return false;
     }
     
@@ -2291,7 +2531,7 @@ bool CTradeManager::CheckAndExecuteScaling(ulong ticket)
     // Lấy profile thị trường
     MarketProfileData profile;
     if (m_marketProfile != NULL) {
-        profile = m_marketProfile.GetCurrentProfile();
+        profile = m_marketProfile.GetLastProfile();
     }
     
     // Kiểm tra điều kiện nhồi lệnh
@@ -2299,7 +2539,7 @@ bool CTradeManager::CheckAndExecuteScaling(ulong ticket)
         // Thực hiện nhồi lệnh
         if (ExecuteScalingOrder(ticket, currentPrice, isLong)) {
             // Cập nhật số lần nhồi lệnh
-            metadata.scalingCount++;
+            UpdatePositionMetadataScaling(ticket);
             return true;
         }
     }
@@ -2310,8 +2550,7 @@ bool CTradeManager::CheckAndExecuteScaling(ulong ticket)
 //+------------------------------------------------------------------+
 //| ShouldScaleInPosition - Kiểm tra nếu nên nhồi lệnh              |
 //+------------------------------------------------------------------+
-bool CTradeManager::ShouldScaleInPosition(ulong ticket, double currentPrice, double entryPrice, 
-                                      bool isLong, const MarketProfileData &profile)
+bool CTradeManager::ShouldScaleInPosition(ulong ticket, double currentPrice, double entryPrice, bool isLong, const MarketProfileData &profile)
 {
     // NGUYÊN TẮC: Chỉ scaling khi có lý do cực kỳ thuyết phục
     
@@ -2321,15 +2560,15 @@ bool CTradeManager::ShouldScaleInPosition(ulong ticket, double currentPrice, dou
     }
     
     // Lấy metadata
-    PositionMetadata* metadata = GetPositionMetadata(ticket);
-    if (metadata == NULL) {
+    PositionMetadata metadata = GetPositionMetadata(ticket);
+    if (metadata.ticket == 0) {
         return false;
     }
     
     // Kiểm tra số lần nhồi lệnh đã thực hiện
     if (metadata.scalingCount >= m_MaxScalingCount) {
-        if (m_logger && m_EnableDetailedLogs) {
-            m_logger.LogDebug(StringFormat(
+        if (m_EnableDetailedLogs) {
+            m_logger->LogDebug(StringFormat(
                 "TradeManager: Scaling bị từ chối - Đã đạt giới hạn nhồi lệnh: %d",
                 m_MaxScalingCount
             ));
@@ -2339,8 +2578,8 @@ bool CTradeManager::ShouldScaleInPosition(ulong ticket, double currentPrice, dou
     
     // Kiểm tra nếu SL đã ở breakeven (nếu yêu cầu)
     if (m_RequireBEForScaling && !metadata.isBreakeven) {
-        if (m_logger && m_EnableDetailedLogs) {
-            m_logger.LogDebug("TradeManager: Scaling bị từ chối - Vị thế chưa đạt breakeven");
+        if (m_EnableDetailedLogs) {
+            m_logger->LogDebug("TradeManager: Scaling bị từ chối - Vị thế chưa đạt breakeven");
         }
         return false;
     }
@@ -2359,8 +2598,8 @@ bool CTradeManager::ShouldScaleInPosition(ulong ticket, double currentPrice, dou
     
     // Kiểm tra vị thế đang lời ít nhất 1R
     if (rMultiple < 1.0) {
-        if (m_logger && m_EnableDetailedLogs) {
-            m_logger.LogDebug(StringFormat(
+        if (m_EnableDetailedLogs) {
+            m_logger->LogDebug(StringFormat(
                 "TradeManager: Scaling bị từ chối - Vị thế chưa đạt 1R (hiện tại: %.2fR)",
                 rMultiple
             ));
@@ -2370,8 +2609,8 @@ bool CTradeManager::ShouldScaleInPosition(ulong ticket, double currentPrice, dou
     
     // Kiểm tra chế độ thị trường thích hợp
     if (profile.regime != REGIME_TRENDING) {
-        if (m_logger && m_EnableDetailedLogs) {
-            m_logger.LogDebug("TradeManager: Scaling bị từ chối - Thị trường không trong xu hướng mạnh");
+        if (m_EnableDetailedLogs) {
+            m_logger->LogDebug("TradeManager: Scaling bị từ chối - Thị trường không trong xu hướng");
         }
         return false;
     }
@@ -2430,23 +2669,24 @@ bool CTradeManager::ShouldScaleInPosition(ulong ticket, double currentPrice, dou
     }
     
     if (!validPullback) {
-        if (m_logger && m_EnableDetailedLogs) {
-            m_logger.LogDebug("TradeManager: Scaling bị từ chối - Không có pullback hợp lệ");
+        if (m_EnableDetailedLogs) {
+            m_logger->LogDebug("TradeManager: Scaling bị từ chối - Không có pullback hợp lệ");
         }
         return false;
     }
     
     // Kiểm tra không có tin tức sắp diễn ra
     if (m_newsFilter != NULL && m_newsFilter.HasUpcomingNews()) {
-        if (m_logger && m_EnableDetailedLogs) {
-            m_logger.LogDebug("TradeManager: Scaling bị từ chối - Có tin tức sắp diễn ra");
+        if (m_EnableDetailedLogs) {
+            m_logger->LogDebug("TradeManager: Scaling bị từ chối - Có tin tức sắp diễn ra");
         }
         return false;
     }
     
-    // Tất cả điều kiện thỏa mãn -> cho phép nhồi lệnh
-    if (m_logger) {
-        m_logger.LogInfo(StringFormat(
+    // Tất cả điều kiện thỏa mãn . cho phép nhồi lệnh
+    // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+        m_logger->LogInfo(StringFormat(
             "TradeManager: Điều kiện nhồi lệnh thỏa mãn cho vị thế #%d - R: %.2f, Pullback hợp lệ: %s",
             ticket, rMultiple, validPullback ? "Có" : "Không"
         ));
@@ -2456,7 +2696,7 @@ bool CTradeManager::ShouldScaleInPosition(ulong ticket, double currentPrice, dou
 }
 
 //+------------------------------------------------------------------+
-//| ExecuteScalingOrder - Thực hiện nhồi lệnh                        |
+//| ExecuteScalingOrder - Thực hiện nhồi lệnh                       |
 //+------------------------------------------------------------------+
 bool CTradeManager::ExecuteScalingOrder(ulong ticket, double scalingPrice, bool isLong)
 {
@@ -2471,8 +2711,9 @@ bool CTradeManager::ExecuteScalingOrder(ulong ticket, double scalingPrice, bool 
     
     // Kiểm tra SL/TP hợp lệ
     if (currentSL <= 0) {
-        if (m_logger) {
-            m_logger.LogWarning("TradeManager: Không thể nhồi lệnh - SL không hợp lệ");
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning("TradeManager: Không thể nhồi lệnh - SL không hợp lệ");
         }
         return false;
     }
@@ -2482,8 +2723,9 @@ bool CTradeManager::ExecuteScalingOrder(ulong ticket, double scalingPrice, bool 
     
     // Kiểm tra khoảng cách SL
     if (slPoints < 10) {
-        if (m_logger) {
-            m_logger.LogWarning(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning(StringFormat(
                 "TradeManager: Không thể nhồi lệnh - Khoảng cách SL quá nhỏ: %.1f điểm",
                 slPoints
             ));
@@ -2503,7 +2745,7 @@ bool CTradeManager::ExecuteScalingOrder(ulong ticket, double scalingPrice, bool 
     // Tính lot size cho lệnh nhồi
     double lotSize = 0;
     if (m_riskOptimizer != NULL) {
-        lotSize = m_riskOptimizer.CalculateLotSize(scalingRisk, slPoints);
+        lotSize = m_riskOptimizer->CalculateLotSizeByRisk(m_symbol, slPoints, scalingRisk);
     } else {
         // Fallback: sử dụng 50% lot size của lệnh gốc
         lotSize = PositionGetDouble(POSITION_VOLUME) * 0.5;
@@ -2511,8 +2753,8 @@ bool CTradeManager::ExecuteScalingOrder(ulong ticket, double scalingPrice, bool 
     
     // Kiểm tra lot size hợp lệ
     if (lotSize <= 0) {
-        if (m_logger) {
-            m_logger.LogWarning("TradeManager: Không thể nhồi lệnh - Lot size không hợp lệ");
+        if (m_EnableDetailedLogs) {
+            m_logger->LogWarning("TradeManager: Không thể nhồi lệnh - Lot size không hợp lệ");
         }
         return false;
     }
@@ -2530,8 +2772,9 @@ bool CTradeManager::ExecuteScalingOrder(ulong ticket, double scalingPrice, bool 
     }
     
     if (scalingTicket > 0) {
-        if (m_logger) {
-            m_logger.LogInfo(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogInfo(StringFormat(
                 "TradeManager: Nhồi lệnh thành công - Ticket: #%d cho vị thế #%d, Lot: %.2f",
                 scalingTicket, ticket, lotSize
             ));
@@ -2553,8 +2796,8 @@ bool CTradeManager::CheckAndMoveToBreakeven(ulong ticket)
     }
     
     // Lấy metadata
-    PositionMetadata* metadata = GetPositionMetadata(ticket);
-    if (metadata == NULL) {
+    PositionMetadata metadata = GetPositionMetadata(ticket);
+    if (metadata.ticket == 0) {
         return false;
     }
     
@@ -2600,21 +2843,20 @@ bool CTradeManager::CheckAndMoveToBreakeven(ulong ticket)
         bool needUpdate = false;
         
         if (isLong) {
-            // Chỉ cập nhật nếu SL mới tốt hơn SL hiện tại
-            needUpdate = (beLevel > currentSL);
+            needUpdate = (beLevel > currentSL + m_MinTrailingStepPoints * m_Point);
         } else {
-            // Chỉ cập nhật nếu SL mới tốt hơn SL hiện tại
-            needUpdate = (beLevel < currentSL);
+            needUpdate = (beLevel < currentSL - m_MinTrailingStepPoints * m_Point);
         }
         
         if (needUpdate) {
             // Đưa SL về breakeven
             if (SafeModifyStopLoss(ticket, beLevel)) {
                 // Cập nhật metadata
-                metadata.isBreakeven = true;
+                UpdatePositionMetadataBreakeven(ticket);
                 
-                if (m_logger) {
-                    m_logger.LogInfo(StringFormat(
+                // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+                    m_logger->LogInfo(StringFormat(
                         "TradeManager: Đã đưa SL về breakeven cho vị thế #%d - Entry: %.5f, BE: %.5f, R: %.2f",
                         ticket, entryPrice, beLevel, currentR
                     ));
@@ -2624,7 +2866,7 @@ bool CTradeManager::CheckAndMoveToBreakeven(ulong ticket)
             }
         } else {
             // SL đã ở mức tốt hơn breakeven
-            metadata.isBreakeven = true;
+            UpdatePositionMetadataBreakeven(ticket);
         }
     }
     
@@ -2642,8 +2884,8 @@ double CTradeManager::GetCurrentRR(ulong ticket)
     }
     
     // Lấy metadata
-    PositionMetadata* metadata = GetPositionMetadata(ticket);
-    if (metadata == NULL) {
+    PositionMetadata metadata = GetPositionMetadata(ticket);
+    if (metadata.ticket == 0) {
         return 0;
     }
     
@@ -2671,6 +2913,7 @@ double CTradeManager::GetCurrentRR(ulong ticket)
     
     return currentR;
 }
+
 //+------------------------------------------------------------------+
 //| HasReachedRTarget - Kiểm tra nếu vị thế đã đạt mục tiêu R       |
 //+------------------------------------------------------------------+
@@ -2722,23 +2965,16 @@ bool CTradeManager::SafeModifyStopLoss(ulong ticket, double newSL)
 }
 
 //+------------------------------------------------------------------+
-//| UpdateLastTrailingInfo - Cập nhật thông tin trailing mới nhất    |
+//| UpdateLastTrailingInfo - Cập nhật thông tin trailing mới nhất   |
 //+------------------------------------------------------------------+
 void CTradeManager::UpdateLastTrailingInfo(ulong ticket, double newSL)
 {
-    // Lấy metadata
-    PositionMetadata* metadata = GetPositionMetadata(ticket);
-    if (metadata == NULL) {
-        return;
-    }
-    
-    // Cập nhật thông tin trailing
-    metadata.lastTrailingSL = newSL;
-    metadata.lastTrailingTime = TimeCurrent();
+    // Cập nhật thông tin trailing sử dụng function có sẵn
+    UpdatePositionMetadata(ticket, newSL);
 }
 
 //+------------------------------------------------------------------+
-//| CalculateAdaptiveStopLoss - Tính SL thích ứng với AssetProfiler  |
+//| CalculateAdaptiveStopLoss - Tính SL thích ứng với AssetProfiler |
 //+------------------------------------------------------------------+
 double CTradeManager::CalculateAdaptiveStopLoss(bool isLong, double entryPrice)
 {
@@ -2748,7 +2984,7 @@ double CTradeManager::CalculateAdaptiveStopLoss(bool isLong, double entryPrice)
         double volatilityFactor = m_assetProfiler.GetVolatilityFactor();
         
         // Điều chỉnh SL dựa trên volatility của asset
-        double slDistance = atr * SL_ATR * volatilityFactor;
+        double slDistance = atr * StopLoss_ATR * volatilityFactor;
         
         if (isLong) {
             return NormalizeDouble(entryPrice - slDistance, m_Digits);
@@ -2777,7 +3013,7 @@ double CTradeManager::CalculateAdaptiveStopLoss(bool isLong, double entryPrice)
 }
 
 //+------------------------------------------------------------------+
-//| CalculateAdaptiveTakeProfit - Tính TP thích ứng với Regime       |
+//| CalculateAdaptiveTakeProfit - Tính TP thích ứng với Regime      |
 //+------------------------------------------------------------------+
 double CTradeManager::CalculateAdaptiveTakeProfit(bool isLong, double entryPrice, double stopLoss, ENUM_MARKET_REGIME regime)
 {
@@ -2796,38 +3032,38 @@ double CTradeManager::CalculateAdaptiveTakeProfit(bool isLong, double entryPrice
 }
 
 //+------------------------------------------------------------------+
-//| IsMarketSuitableForScaling - Kiểm tra thị trường phù hợp scaling |
+//| IsMarketSuitableForScaling - Kiểm tra thị trường phù hợp scaling|
 //+------------------------------------------------------------------+
 bool CTradeManager::IsMarketSuitableForScaling(const MarketProfileData &profile)
 {
     // Kiểm tra chế độ thị trường
     if (profile.regime != REGIME_TRENDING) {
-        if (m_logger && m_EnableDetailedLogs) {
-            m_logger.LogDebug("TradeManager: Không nhồi lệnh - Thị trường không trong xu hướng");
+        if (m_EnableDetailedLogs) {
+            m_logger->LogDebug("TradeManager: Không nhồi lệnh - Thị trường không trong xu hướng");
         }
         return false;
     }
     
     // Kiểm tra volatility
     if (profile.isVolatile) {
-        if (m_logger && m_EnableDetailedLogs) {
-            m_logger.LogDebug("TradeManager: Không nhồi lệnh - Thị trường biến động cao");
+        if (m_EnableDetailedLogs) {
+            m_logger->LogDebug("TradeManager: Không nhồi lệnh - Thị trường biến động cao");
         }
         return false;
     }
     
     // Kiểm tra phiên giao dịch
     if (!IsCurrentSessionSuitableForScaling()) {
-        if (m_logger && m_EnableDetailedLogs) {
-            m_logger.LogDebug("TradeManager: Không nhồi lệnh - Phiên giao dịch không phù hợp");
+        if (m_EnableDetailedLogs) {
+            m_logger->LogDebug("TradeManager: Không nhồi lệnh - Phiên giao dịch không phù hợp");
         }
         return false;
     }
     
     // Kiểm tra tin tức
     if (m_newsFilter != NULL && m_newsFilter.HasUpcomingNews()) {
-        if (m_logger && m_EnableDetailedLogs) {
-            m_logger.LogDebug("TradeManager: Không nhồi lệnh - Có tin tức sắp diễn ra");
+        if (m_EnableDetailedLogs) {
+            m_logger->LogDebug("TradeManager: Không nhồi lệnh - Có tin tức sắp diễn ra");
         }
         return false;
     }
@@ -2835,8 +3071,8 @@ bool CTradeManager::IsMarketSuitableForScaling(const MarketProfileData &profile)
     // Kiểm tra thêm dữ liệu từ AssetProfiler nếu có
     if (m_assetProfiler != NULL) {
         if (!m_assetProfiler.IsMarketSuitableForTrading()) {
-            if (m_logger && m_EnableDetailedLogs) {
-                m_logger.LogDebug("TradeManager: Không nhồi lệnh - Asset không phù hợp theo AssetProfiler");
+            if (m_EnableDetailedLogs) {
+                m_logger->LogDebug("TradeManager: Không nhồi lệnh - Asset không phù hợp theo AssetProfiler");
             }
             return false;
         }
@@ -2846,7 +3082,7 @@ bool CTradeManager::IsMarketSuitableForScaling(const MarketProfileData &profile)
 }
 
 //+------------------------------------------------------------------+
-//| GenerateOrderComment - Tạo comment chi tiết cho lệnh             |
+//| GenerateOrderComment - Tạo comment chi tiết cho lệnh            |
 //+------------------------------------------------------------------+
 string CTradeManager::GenerateOrderComment(bool isLong, ENUM_ENTRY_SCENARIO scenario, string additionalInfo)
 {
@@ -2885,7 +3121,7 @@ string CTradeManager::GenerateOrderComment(bool isLong, ENUM_ENTRY_SCENARIO scen
 }
 
 //+------------------------------------------------------------------+
-//| HandleCloseDeal - Xử lý khi một giao dịch đóng                   |
+//| HandleCloseDeal - Xử lý khi một giao dịch đóng                  |
 //+------------------------------------------------------------------+
 void CTradeManager::HandleCloseDeal(ulong positionTicket, double closePrice, double profit)
 {
@@ -2902,8 +3138,9 @@ void CTradeManager::HandleCloseDeal(ulong positionTicket, double closePrice, dou
     if (profit > 0) {
         m_ConsecutiveLosses = 0;
         
-        if (m_logger) {
-            m_logger.LogInfo(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogInfo(StringFormat(
                 "TradeManager: Vị thế #%d đóng lời: %.2f",
                 positionTicket, profit
             ));
@@ -2911,8 +3148,9 @@ void CTradeManager::HandleCloseDeal(ulong positionTicket, double closePrice, dou
     } else if (profit < 0) {
         m_ConsecutiveLosses++;
         
-        if (m_logger) {
-            m_logger.LogInfo(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogInfo(StringFormat(
                 "TradeManager: Vị thế #%d đóng lỗ: %.2f, Thua liên tiếp: %d",
                 positionTicket, profit, m_ConsecutiveLosses
             ));
@@ -2920,8 +3158,9 @@ void CTradeManager::HandleCloseDeal(ulong positionTicket, double closePrice, dou
         
         // Kiểm tra số lần thua liên tiếp
         if (m_ConsecutiveLosses >= 3) {
-            if (m_logger) {
-                m_logger.LogWarning(StringFormat(
+            // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+                m_logger->LogWarning(StringFormat(
                     "TradeManager: Cảnh báo thua liên tiếp %d lần",
                     m_ConsecutiveLosses
                 ));
@@ -2970,7 +3209,7 @@ double CTradeManager::GetCurrentATR()
 }
 
 //+------------------------------------------------------------------+
-//| GetProfilerATR - Lấy ATR từ AssetProfiler                        |
+//| GetProfilerATR - Lấy ATR từ AssetProfiler                       |
 //+------------------------------------------------------------------+
 double CTradeManager::GetProfilerATR()
 {
@@ -3001,7 +3240,7 @@ double CTradeManager::GetEMAValue(int emaHandle, int shift)
 }
 
 //+------------------------------------------------------------------+
-//| GetMinStopLevel - Lấy khoảng cách tối thiểu cho SL/TP           |
+//| GetMinStopLevel - Lấy khoảng cách tối thiểu cho SL/TP          |
 //+------------------------------------------------------------------+
 double CTradeManager::GetMinStopLevel()
 {
@@ -3009,14 +3248,15 @@ double CTradeManager::GetMinStopLevel()
 }
 
 //+------------------------------------------------------------------+
-//| ValidateOrderParameters - Kiểm tra điều kiện lệnh hợp lệ         |
+//| ValidateOrderParameters - Kiểm tra điều kiện lệnh hợp lệ        |
 //+------------------------------------------------------------------+
 bool CTradeManager::ValidateOrderParameters(double &price, double &sl, double &tp, bool isLong)
 {
     // Kiểm tra nếu giá hợp lệ
     if (price <= 0) {
-        if (m_logger) {
-            m_logger.LogWarning("TradeManager: Giá không hợp lệ");
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning("TradeManager: Giá không hợp lệ");
         }
         return false;
     }
@@ -3027,8 +3267,9 @@ bool CTradeManager::ValidateOrderParameters(double &price, double &sl, double &t
         sl = CalculateAdaptiveStopLoss(isLong, price);
         
         if (sl <= 0) {
-            if (m_logger) {
-                m_logger.LogWarning("TradeManager: Không thể tính SL tự động");
+            // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+                m_logger->LogWarning("TradeManager: Không thể tính SL tự động");
             }
             return false;
         }
@@ -3053,8 +3294,9 @@ bool CTradeManager::ValidateOrderParameters(double &price, double &sl, double &t
     double currentTPDistance = MathAbs(price - tp);
     
     if (currentSLDistance < minStopLevel) {
-        if (m_logger) {
-            m_logger.LogWarning(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning(StringFormat(
                 "TradeManager: Khoảng cách SL quá nhỏ (%.5f < %.5f). Điều chỉnh SL.",
                 currentSLDistance, minStopLevel
             ));
@@ -3069,8 +3311,9 @@ bool CTradeManager::ValidateOrderParameters(double &price, double &sl, double &t
     }
     
     if (currentTPDistance < minStopLevel) {
-        if (m_logger) {
-            m_logger.LogWarning(StringFormat(
+        // Kiểm tra logger không cần điều kiện vì logger là biến đối tượng trực tiếp
+    {
+            m_logger->LogWarning(StringFormat(
                 "TradeManager: Khoảng cách TP quá nhỏ (%.5f < %.5f). Điều chỉnh TP.",
                 currentTPDistance, minStopLevel
             ));
@@ -3181,6 +3424,80 @@ int CTradeManager::EncodeMagicNumber(int baseNumber, ENUM_TIMEFRAMES timeframe, 
     // Kết hợp theo công thức: baseNumber * 100 + tfCode * 10 + scCode
     return baseNumber * 100 + tfCode * 10 + scCode;
 }
+
+} // Kết thúc namespace ApexPullback
+
+//+------------------------------------------------------------------+
+//| Đặt trạng thái tạm dừng giao dịch                                |
+//+------------------------------------------------------------------+
+void CTradeManager::SetTradingPaused(bool paused)
+{
+    m_isTradingPaused = paused;
+    if(m_logger != NULL)
+    {
+        m_logger.LogInfoFormat("CTradeManager: Trading paused state set to: %s", paused ? "PAUSED" : "ACTIVE");
+    }
+    // TODO: Có thể cần thêm logic khác ở đây, ví dụ hủy các lệnh chờ nếu tạm dừng
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra trạng thái tạm dừng giao dịch                           |
+//+------------------------------------------------------------------+
+bool CTradeManager::IsTradingPaused() const
+{
+    return m_isTradingPaused;
+}
+
+//+------------------------------------------------------------------+
+//| Đóng tất cả các vị thế theo Magic Number                         |
+//+------------------------------------------------------------------+
+void CTradeManager::CloseAllPositionsByMagic(int magicNumber)
+{
+    if(m_logger != NULL)
+    {
+        m_logger.LogInfoFormat("CTradeManager: Attempting to close all positions with magic number: %d (0 means all EA positions)", magicNumber);
+    }
+
+    int totalPositions = PositionsTotal();
+    int closedCount = 0;
+
+    for(int i = totalPositions - 1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket == 0) continue;
+
+        CPositionInfo posInfo;
+        if(!posInfo.SelectByTicket(ticket))
+        {
+            if(m_logger != NULL) m_logger.LogWarningFormat("CTradeManager::CloseAllPositionsByMagic - Failed to select position #%d by ticket %d", i, ticket);
+            continue;
+        }
+
+        // Kiểm tra symbol và magic number
+        if(posInfo.Symbol() == m_Symbol && (magicNumber == 0 || posInfo.Magic() == (ulong)magicNumber) )
+        {
+            if(m_logger != NULL) m_logger.LogDebugFormat("CTradeManager: Closing position #%d, Ticket: %d, Symbol: %s, Type: %s, Volume: %.2f", 
+                                                        i, ticket, posInfo.Symbol(), EnumToString(posInfo.PositionType()), posInfo.Volume());
+            
+            // Logic đóng lệnh thực tế
+            bool closeResult = m_trade.PositionClose(ticket);
+            if(closeResult)
+            {
+                closedCount++;
+                if(m_logger != NULL) m_logger.LogInfoFormat("CTradeManager: Successfully closed position ticket %d.", ticket);
+            }
+            else
+            {
+                if(m_logger != NULL) m_logger.LogErrorFormat("CTradeManager: Failed to close position ticket %d. Error: %d - %s", ticket, m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
+            }
+        }
+    }
+
+    if(m_logger != NULL) m_logger.LogInfoFormat("CTradeManager: Closed %d positions for magic %d.", closedCount, magicNumber);
+    // TODO: Có thể cần ChartRedraw() hoặc thông báo cho người dùng
+}
+
+#endif // TRADEMANAGER_MQH_INCLUDED
 //+------------------------------------------------------------------+
 //| End of TradeManager.mqh                                          |
 //+------------------------------------------------------------------+

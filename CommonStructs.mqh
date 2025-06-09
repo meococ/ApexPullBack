@@ -7,17 +7,75 @@
 #ifndef _COMMON_STRUCTS_MQH_
 #define _COMMON_STRUCTS_MQH_
 
-#include "Enums.mqh"                        // Định nghĩa enums
+// #include "IncludeManager.mqh"       // Đã loại bỏ, các kiểu cơ bản có sẵn trong MQL5 hoặc từ Enums
+#include "Enums.mqh"                   // Định nghĩa enums
 //+------------------------------------------------------------------+
 //| Định nghĩa cấu trúc dữ liệu Market Profile                       |
 //+------------------------------------------------------------------+
 
+namespace ApexPullback {
+
 /// @brief Cấu trúc lưu trữ thông tin thị trường toàn diện
 struct MarketProfileData {
+    // Phương thức copy để thay thế cho operator= mặc định
+    void CopyFrom(const MarketProfileData& src) {
+        trend = src.trend;
+        regime = src.regime;
+        currentSession = src.currentSession;
+        mtfAlignment = src.mtfAlignment;
+        
+        isVolatile = src.isVolatile;
+        isTrending = src.isTrending;
+        isSidewaysOrChoppy = src.isSidewaysOrChoppy;
+        isTransitioning = src.isTransitioning;
+        isPriceRangebound = src.isPriceRangebound;
+        isLowMomentum = src.isLowMomentum;
+        
+        atrCurrent = src.atrCurrent;
+        atrRatio = src.atrRatio;
+        atrValue = src.atrValue;
+        adxValue = src.adxValue;
+        adxSlope = src.adxSlope;
+        rsiValue = src.rsiValue;
+        rsiSlope = src.rsiSlope;
+        macdValue = src.macdValue;
+        macdSignal = src.macdSignal;
+        macdHistogram = src.macdHistogram;
+        macdHistogramSlope = src.macdHistogramSlope;
+        bbWidth = src.bbWidth;
+        bbWidthRatio = src.bbWidthRatio;
+        
+        valueAreaHigh = src.valueAreaHigh;
+        valueAreaLow = src.valueAreaLow;
+        pointOfControl = src.pointOfControl;
+        profileHigh = src.profileHigh;
+        profileLow = src.profileLow;
+        volatilityRatio = src.volatilityRatio;
+        
+        ema34 = src.ema34;
+        ema89 = src.ema89;
+        ema200 = src.ema200;
+        
+        ema34H4 = src.ema34H4;
+        ema89H4 = src.ema89H4;
+        ema200H4 = src.ema200H4;
+        
+        recentSwingHigh = src.recentSwingHigh;
+        recentSwingLow = src.recentSwingLow;
+        recentSwingHighTime = src.recentSwingHighTime;
+        recentSwingLowTime = src.recentSwingLowTime;
+        
+        regimeConfidence = src.regimeConfidence;
+        volumeRatio = src.volumeRatio;
+        currentSpread = src.currentSpread;
+        averageSpread = src.averageSpread;
+        heatmapScore = src.heatmapScore;
+        trendScore = src.trendScore;
+    }
     // Thông tin cơ bản về thị trường
     ENUM_MARKET_TREND trend;            // Xu hướng thị trường hiện tại
     ENUM_MARKET_REGIME regime;          // Chế độ thị trường (Trending, Ranging, Volatile...)
-    ENUM_SESSION currentSession;        // Phiên giao dịch hiện tại
+    ENUM_SESSION currentSession; // Phiên giao dịch hiện tại
     ENUM_MTF_ALIGNMENT mtfAlignment;    // Sự đồng thuận giữa các khung thời gian
 
     // Trạng thái thị trường
@@ -79,7 +137,7 @@ struct MarketProfileData {
     void Clear() {
         trend = TREND_SIDEWAY;
         regime = REGIME_RANGING_STABLE;
-        currentSession = SESSION_UNKNOWN; // Đã thêm SESSION_UNKNOWN
+        currentSession = SESSION_UNKNOWN; // Phù hợp với ENUM_SESSION
         mtfAlignment = MTF_ALIGNMENT_NEUTRAL;
         
         isVolatile = false;
@@ -305,7 +363,7 @@ struct RiskSettings {
         minLotAllowed = 0.0;
         maxLotAllowed = 0.0;
         
-        trailingMode = TRAILING_NONE;
+        trailingMode = ENUM_TRAILING_MODE::TRAILING_NONE;
         trailingFactor = 0.0;
         usePartialClose = false;
         partialCloseLevel1 = 0.0;
@@ -373,11 +431,44 @@ struct PositionInfo {
 //+------------------------------------------------------------------+
 
 /// @brief Cấu trúc lưu trữ profile của tài sản giao dịch
+/// @brief Cấu trúc đặc tính biến động của tài sản
+struct VolatilityCharacteristics {
+    double baseVolatility;              // Độ biến động cơ bản
+    double volatilityMultiplier;        // Hệ số biến động
+    double trendStrengthMultiplier;     // Hệ số mạnh xu hướng
+    double rangeMultiplier;             // Hệ số dao động trong biên
+    double noiseRatio;                  // Tỷ lệ nhiễu
+    
+    // Các trường cần cho SwingPointDetector
+    double swingDetectionAtrFactor;     // Hệ số ATR cho phát hiện swing point
+    double majorSwingMultiplier;        // Hệ số cho swing point quan trọng
+    double trailingStopAtrMultiplier;   // Hệ số ATR cho trailing stop
+    double volatilityThreshold;         // Ngưỡng biến động để thay đổi chiến lược
+    double volumeFactor;                // Hệ số khối lượng điều chỉnh
+    
+    void Clear() {
+        baseVolatility = 1.0;
+        volatilityMultiplier = 1.0;
+        trendStrengthMultiplier = 1.0;
+        rangeMultiplier = 1.0;
+        noiseRatio = 0.5;
+        
+        // Khởi tạo các giá trị mặc định mới
+        swingDetectionAtrFactor = 1.0;
+        majorSwingMultiplier = 1.5;
+        trailingStopAtrMultiplier = 2.0;
+        volatilityThreshold = 1.2;
+        volumeFactor = 1.0;
+    }
+};
+
+/// @brief Cấu trúc lưu trữ profile của tài sản giao dịch
 struct AssetProfile {
     string symbol;                     // Symbol giao dịch
     string assetType;                  // Loại tài sản (forex, gold, indices, crypto)
     double averageDailyRange;          // Biên độ dao động trung bình ngày (pips)
     double averageATR;                 // ATR trung bình 14 ngày
+    VolatilityCharacteristics volatilityCharacteristics; // Đặc tính biến động
     double typicalSpread;              // Spread điển hình cho tài sản
     double spreadThreshold;            // Ngưỡng spread chấp nhận được
     double minStopLevel;               // Khoảng cách SL tối thiểu (broker)
@@ -450,6 +541,7 @@ struct NewsEvent {
     string name;                       // Tên tin tức
     int impact;                        // Mức độ tác động (1-3)
     bool affecting;                    // Có ảnh hưởng đến cặp hiện tại không
+    bool isProcessed;                  // Đã được xử lý chưa
     
     // Phương thức làm sạch dữ liệu
     void Clear() {
@@ -458,6 +550,7 @@ struct NewsEvent {
         name = "";
         impact = 0;
         affecting = false;
+        isProcessed = false;
     }
 };
 
@@ -551,6 +644,48 @@ struct PerformanceMetrics {
         ArrayInitialize(performanceByScenario, 0.0);
         ArrayInitialize(performanceBySession, 0.0);
         ArrayInitialize(performanceByDay, 0.0);
+    }
+};
+
+//+------------------------------------------------------------------+
+//| Định nghĩa cấu trúc dữ liệu Scenario Stats                       |
+//+------------------------------------------------------------------+
+/// @brief Cấu trúc lưu trữ thống kê theo kịch bản giao dịch
+struct ScenarioStats {
+    // Thống kê theo kịch bản
+    int totalTradesByScenario[10];      // Tổng số lệnh theo kịch bản
+    int winningTradesByScenario[10];    // Số lệnh thắng theo kịch bản
+    double profitByScenario[10];        // Lợi nhuận theo kịch bản
+    double winRateByScenario[10];       // Tỷ lệ thắng theo kịch bản
+    
+    // Thống kê theo phiên giao dịch
+    int totalTradesBySession[10];       // Tổng số lệnh theo phiên
+    int winningTradesBySession[10];     // Số lệnh thắng theo phiên
+    double profitBySession[10];         // Lợi nhuận theo phiên
+    double winRateBySession[10];        // Tỷ lệ thắng theo phiên
+    
+    // Thống kê theo điều kiện thị trường
+    int totalTradesByRegime[10];        // Tổng số lệnh theo chế độ thị trường
+    int winningTradesByRegime[10];      // Số lệnh thắng theo chế độ
+    double profitByRegime[10];          // Lợi nhuận theo chế độ
+    double winRateByRegime[10];         // Tỷ lệ thắng theo chế độ
+    
+    // Phương thức làm sạch dữ liệu
+    void Clear() {
+        ArrayInitialize(totalTradesByScenario, 0);
+        ArrayInitialize(winningTradesByScenario, 0);
+        ArrayInitialize(profitByScenario, 0.0);
+        ArrayInitialize(winRateByScenario, 0.0);
+        
+        ArrayInitialize(totalTradesBySession, 0);
+        ArrayInitialize(winningTradesBySession, 0);
+        ArrayInitialize(profitBySession, 0.0);
+        ArrayInitialize(winRateBySession, 0.0);
+        
+        ArrayInitialize(totalTradesByRegime, 0);
+        ArrayInitialize(winningTradesByRegime, 0);
+        ArrayInitialize(profitByRegime, 0.0);
+        ArrayInitialize(winRateByRegime, 0.0);
     }
 };
 
@@ -651,4 +786,182 @@ struct DashboardPanel {
         visible = true;
     }
 };
+
+} // Kết thúc namespace ApexPullback
+
+//+------------------------------------------------------------------+
+//| Định nghĩa cấu trúc dữ liệu Asset Profile Data                     |
+//+------------------------------------------------------------------+
+struct AssetProfileData {
+    string symbol;                 // Biểu tượng tài sản
+    ENUM_ASSET_CLASS assetClass;   // Phân loại tài sản (Forex, Gold, Indices, ...)
+    ENUM_SYMBOL_GROUP symbolGroup; // Nhóm cặp tiền (Major, Minor, Exotic, ...)
+    ENUM_ASSET_VOLATILITY volatilityLevel; // Mức độ biến động (Low, Medium, High, ...)
+    
+    // Các thông số thống kê
+    double averageATR;            // ATR trung bình 14 ngày
+    double averageATRPoints;      // ATR trung bình tính theo điểm
+    double yearlyVolatility;      // Biến động hàng năm (%)
+    double minSpread;             // Spread tối thiểu
+    double maxSpread;             // Spread tối đa
+    double averageSpread;         // Spread trung bình
+    double acceptableSpread;      // Ngưỡng spread chấp nhận được
+    double swingMagnitude;        // Biên độ swing trung bình
+    double dailyRange;            // Phạm vi giá trung bình hàng ngày
+    
+    // Thông số tối ưu cho giao dịch
+    double optimalSLATRMulti;     // Hệ số ATR tối ưu cho SL
+    double optimalTRAtrMulti;     // Hệ số ATR tối ưu cho Trailing
+    double optimalRRRatio;        // Tỷ lệ R:R tối ưu
+    double recommendedRiskPercent; // % Risk khuyến nghị
+    
+    // Thông tin sessison
+    int bestTradingSession;       // Phiên giao dịch tốt nhất (mask: 1=Asian, 2=London, 4=NewYork)
+    int worstTradingSession;      // Phiên giao dịch kém nhất (mask: 1=Asian, 2=London, 4=NewYork)
+    
+    // Thông tin hiệu suất giao dịch
+    int totalTrades;              // Tổng số giao dịch
+    double winRate;               // Tỷ lệ thắng (%)
+    double profitFactor;          // Profit factor
+    double expectancy;            // Kỳ vọng (R)
+    
+    // Lịch sử dữ liệu gần đây
+    double atrHistory[MAX_HISTORY_DAYS];  // Lịch sử ATR
+    double spreadHistory[MAX_HISTORY_DAYS]; // Lịch sử spread
+    datetime historyDates[MAX_HISTORY_DAYS]; // Ngày tương ứng
+    int historyCount;             // Số lượng mẫu lịch sử
+    datetime lastUpdated;         // Thời gian cập nhật cuối
+    
+    // Phương thức khởi tạo giá trị mặc định
+    void Initialize() {
+        symbol = "";
+        assetClass = ASSET_CLASS_FOREX;
+        symbolGroup = GROUP_UNDEFINED;
+        volatilityLevel = VOLATILITY_MEDIUM;
+        
+        // Khởi tạo các giá trị khác về 0
+        averageATR = 0;
+        averageATRPoints = 0;
+        yearlyVolatility = 0;
+        minSpread = 0;
+        maxSpread = 0;
+        averageSpread = 0;
+        acceptableSpread = 0;
+        swingMagnitude = 0;
+        dailyRange = 0;
+        
+        optimalSLATRMulti = 1.5;
+        optimalTRAtrMulti = 2.0;
+        optimalRRRatio = 2.0;
+        recommendedRiskPercent = 1.0;
+        
+        bestTradingSession = 6;  // Mặc định London+NY (2+4)
+        worstTradingSession = 1;  // Mặc định Asian (1)
+        
+        totalTrades = 0;
+        winRate = 0;
+        profitFactor = 0;
+        expectancy = 0;
+        
+        historyCount = 0;
+        lastUpdated = 0;
+        
+        // Khởi tạo mảng lịch sử
+        ArrayInitialize(atrHistory, 0);
+        ArrayInitialize(spreadHistory, 0);
+        ArrayInitialize(historyDates, 0);
+    }
+};
+
+//+------------------------------------------------------------------+
+//| Định nghĩa cấu trúc dữ liệu Indicator Handles                       |
+//+------------------------------------------------------------------+
+
+/// @brief Cấu trúc lưu trữ các indicator handle sử dụng trong EA
+namespace ApexPullback {
+
+struct IndicatorHandles {
+    // Các handle cơ bản
+    int atrHandle;                     // ATR indicator
+    int maHandle;                      // Moving Average
+    int rsiHandle;                     // RSI
+    int stochHandle;                   // Stochastic
+    int bollingerHandle;               // Bollinger Bands
+    int zigzagHandle;                  // ZigZag
+    int fractalsHandle;                // Fractals
+    int volumeHandle;                  // Volume
+    int adxHandle;                     // ADX
+    int ichimokuHandle;                // Ichimoku
+    int macdHandle;                    // MACD
+    
+    // Khởi tạo tất cả handle với giá trị mặc định là INVALID_HANDLE
+    IndicatorHandles() {
+        atrHandle = INVALID_HANDLE;
+        maHandle = INVALID_HANDLE;
+        rsiHandle = INVALID_HANDLE;
+        stochHandle = INVALID_HANDLE;
+        bollingerHandle = INVALID_HANDLE;
+        zigzagHandle = INVALID_HANDLE;
+        fractalsHandle = INVALID_HANDLE;
+        volumeHandle = INVALID_HANDLE;
+        adxHandle = INVALID_HANDLE;
+        ichimokuHandle = INVALID_HANDLE;
+        macdHandle = INVALID_HANDLE;
+    }
+    
+    // Giải phóng bộ nhớ tất cả các handle
+    void ReleaseAll() {
+        if(atrHandle != INVALID_HANDLE) IndicatorRelease(atrHandle);
+        if(maHandle != INVALID_HANDLE) IndicatorRelease(maHandle);
+        if(rsiHandle != INVALID_HANDLE) IndicatorRelease(rsiHandle);
+        if(stochHandle != INVALID_HANDLE) IndicatorRelease(stochHandle);
+        if(bollingerHandle != INVALID_HANDLE) IndicatorRelease(bollingerHandle);
+        if(zigzagHandle != INVALID_HANDLE) IndicatorRelease(zigzagHandle);
+        if(fractalsHandle != INVALID_HANDLE) IndicatorRelease(fractalsHandle);
+        if(volumeHandle != INVALID_HANDLE) IndicatorRelease(volumeHandle);
+        if(adxHandle != INVALID_HANDLE) IndicatorRelease(adxHandle);
+        if(ichimokuHandle != INVALID_HANDLE) IndicatorRelease(ichimokuHandle);
+        if(macdHandle != INVALID_HANDLE) IndicatorRelease(macdHandle);
+    }
+};
+
+} // Kết thúc namespace ApexPullback
+
+// Enum cho quyết định của PortfolioManager
+enum ENUM_PORTFOLIO_DECISION
+{
+    DECISION_APPROVE,       // Phê duyệt lệnh
+    DECISION_REJECT,        // Từ chối lệnh
+    DECISION_ADJUST_LOT,    // Điều chỉnh khối lượng
+    DECISION_POSTPONE,      // Trì hoãn lệnh
+    DECISION_NONE           // Chưa có quyết định / Lỗi
+};
+
+// Cấu trúc để lưu trữ một đề xuất giao dịch từ một EA instance
+struct TradeProposal : public CObject // Kế thừa từ CObject để dùng với CArrayObj
+{
+    double StopLossPrice;
+    double TakeProfitPrice;
+    long MagicNumber;
+    string Comment;
+    datetime ExpirationTime; // Thời gian hết hạn của đề xuất (nếu có)
+    double SignalQuality;    // Điểm chất lượng từ 0.0-1.0 (thêm mới)
+    double RiskPercent;      // Mức rủi ro đề xuất cho lệnh này (thêm mới)
+
+    // Constructor mặc định
+    TradeProposal() :
+        Symbol(""),
+        OrderType(ORDER_TYPE_BUY), // Giá trị mặc định
+        LotSize(0.01),
+        EntryPrice(0.0),
+        StopLossPrice(0.0),
+        TakeProfitPrice(0.0),
+        MagicNumber(0),
+        Comment(""),
+        ExpirationTime(0),
+        SignalQuality(0.0),    // Khởi tạo giá trị mặc định
+        RiskPercent(0.0)       // Khởi tạo giá trị mặc định
+    {}
+};
+
 #endif // _COMMON_STRUCTS_MQH_ // _STRUCTS_MQH_
