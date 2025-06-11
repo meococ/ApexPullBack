@@ -40,8 +40,12 @@ private:
 
     // Phương thức nội bộ
     void LoadProposals(); // Tải các đề xuất giao dịch (từ Global Variables hoặc file)
-    void AnalyzeProposals(); // Phân tích các đề xuất
+    void AnalyzeProposals(); // Phân tích chung (nếu có)
     ENUM_PORTFOLIO_DECISION DecideOnProposal(const TradeProposal &proposal); // Ra quyết định cho một đề xuất
+    void WriteDecisionToGVs(const TradeProposal &proposal, ENUM_PORTFOLIO_DECISION decision, double adjustedLotFactor = 1.0); // Ghi quyết định vào Global Variables
+    double CalculateTotalRisk(); // Tính tổng rủi ro hiện tại
+    bool IsRiskConcentrated(const TradeProposal &proposal, double maxConcentration); // Kiểm tra tập trung rủi ro
+    double GetCurrencyRiskExposure(const string currency); // Tính rủi ro cho một đồng tiền cụ thể
 
 public:
     CPortfolioManager(CLogger* logger, CNewsFilter* newsFilter, CPositionManager* posManager, CRiskManager* riskManager);
@@ -126,125 +130,222 @@ void CPortfolioManager::Deinitialize()
 //+------------------------------------------------------------------+
 //| LoadProposals                                                    |
 //+------------------------------------------------------------------+
+// Method to load trade proposals from Global Variables
 void CPortfolioManager::LoadProposals()
 {
-    if(m_Logger != NULL) m_Logger.LogInfo("CPortfolioManager: Attempting to load proposals via Global Variables."); // Added log
-    if(m_Logger != NULL) m_Logger.LogDebug("CPortfolioManager: Loading trade proposals...");
-    m_TradeProposals.Clear(); // Xóa các proposal cũ trước khi tải mới
+    if(m_Logger == NULL) {
+        printf("CPortfolioManager Error: Logger is NULL in LoadProposals.");
+        return;
+    }
+    m_Logger.LogInfo("CPortfolioManager: Loading trade proposals from GVs...");
+    m_TradeProposals.Clear(); // Clear previous proposals
 
-    // Danh sách các cặp tiền cần theo dõi (có thể được cấu hình sau này)
-    string monitoredSymbols[] = {"EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD"};
-    // TODO: Lấy danh sách này từ một nguồn cấu hình linh hoạt hơn
+    // Iterate through GVs looking for proposals. 
+    // Proposal GVs are expected to be named like: EAContext.GVProposalPrefix + Symbol + EAContext.GVProposalSuffix
+    // e.g., "PM_Proposal_EURUSD_12345" where 12345 is the chart ID or magic number for uniqueness.
+    // For simplicity, we'll scan for GVs starting with a known prefix.
+    // A more robust system might involve slaves registering their proposal GV names.
 
-    for(int i = 0; i < ArraySize(monitoredSymbols); i++)
+    long chart_id = ChartID(); // Or some other unique identifier for this EA instance if needed.
+    string base_gv_prefix = m_EAContext.Input.PortfolioManagement.GVProposalPrefix; // e.g., "PM_Proposal_"
+
+    int total = GlobalVariablesTotal();
+    int checked = 0;
+    datetime last_cleanup_time = 0;
+    string gv_name;
+
+    for(int i = total - 1; i >= 0; i--) // Iterate backwards for safe deletion
     {
-        string symbolName = monitoredSymbols[i];
-        string gvName = "GV_Proposal_" + symbolName;
-
-        if(GlobalVariableCheck(gvName))
+        gv_name = GlobalVariableName(i);
+        if(StringFind(gv_name, base_gv_prefix, 0) == 0) // Check if GV name starts with our prefix
         {
-            string gvValue = GlobalVariableGet(gvName);
-            if(m_Logger != NULL) m_Logger.LogDebugFormat("CPortfolioManager: Found GV '%s' with value '%s'", gvName, gvValue);
-
-            // Phân tách chuỗi: "BUY;0.75;1.0" (Direction;SignalQuality;RiskPercent)
-            string parts[];
-            int count = StringSplit(gvValue, ';', parts);
-
-            if(count == 3)
+            // Further check if it's a proposal GV and not a decision GV
+            // Assuming proposal GVs don't contain the decision suffix, or have a specific format
+            if(StringFind(gv_name, m_EAContext.Input.PortfolioManagement.GVDecisionSuffix, 0) == -1)
             {
-                TradeProposal* proposal = new TradeProposal();
-                proposal.Symbol = symbolName;
-                
-                // Parse Direction
-                if(StringCompare(parts[0], "BUY", false) == 0) proposal.OrderType = ORDER_TYPE_BUY;
-                else if(StringCompare(parts[0], "SELL", false) == 0) proposal.OrderType = ORDER_TYPE_SELL;
-                else 
+                string gv_value_str = GlobalVariableGet(gv_name);
+                datetime gv_set_time = GlobalVariableTime(gv_name);
+
+                // Basic check for stale GVs (e.g., older than 5 minutes)
+                if(gv_set_time > 0 && (TimeCurrent() - gv_set_time) > m_EAContext.Input.PortfolioManagement.GVProposalTimeoutSeconds) 
                 {
-                    if(m_Logger != NULL) m_Logger.LogWarningFormat("CPortfolioManager: Invalid direction '%s' in GV '%s'. Skipping.", parts[0], gvName);
-                    delete proposal;
-                    GlobalVariableDel(gvName); // Xóa GV để tránh xử lý lại
+                    m_Logger.LogWarningFormat("CPortfolioManager: Stale proposal GV '%s' found (age %d sec). Deleting.", 
+                                            gv_name, TimeCurrent() - gv_set_time);
+                    GlobalVariableDel(gv_name);
                     continue;
                 }
 
-                // Parse SignalQuality
-                proposal.SignalQuality = StringToDouble(parts[1]);
-                // Parse RiskPercent
-                proposal.RiskPercent = StringToDouble(parts[2]);
-                
-                // TODO: Thêm các thông tin khác nếu cần (Entry, SL, TP) từ GV hoặc cấu trúc phức tạp hơn
-                proposal.ProposalTime = TimeCurrent();
+                if(gv_value_str != "" && gv_value_str != "PROCESSING" && gv_value_str != "DELETING")
+                {
+                    // Mark as being processed to prevent other instances (if any) or quick re-reads
+                    if(!GlobalVariableSet(gv_name, "PROCESSING"))
+                    {
+                        m_Logger.LogWarningFormat("CPortfolioManager: Failed to set GV '%s' to PROCESSING. Skipping.", gv_name);
+                        continue;
+                    }
 
-                if(m_TradeProposals.Add(proposal))
-                {
-                    if(m_Logger != NULL) m_Logger.LogInfoFormat("CPortfolioManager: Added proposal for %s: %s, Quality %.2f, Risk %.2f%%", 
-                        proposal.Symbol, EnumToString(proposal.OrderType), proposal.SignalQuality, proposal.RiskPercent * 100);
+                    TradeProposal* proposal = new TradeProposal(); // Create on heap for CArrayObj
+                    if(proposal.FromString(gv_value_str))
+                    {
+                        // proposal.GVProposalName should be set by FromString if it's part of the string
+                        // or we can set it here if it's not.
+                        if(proposal.GVProposalName == "") proposal.GVProposalName = gv_name; 
+                        // Construct decision GV name based on proposal's details
+                        proposal.GVDecisionName = m_EAContext.Input.PortfolioManagement.GVDecisionPrefix + 
+                                                  proposal.Symbol + "_" + 
+                                                  IntegerToString(proposal.MagicNumber) + 
+                                                  m_EAContext.Input.PortfolioManagement.GVDecisionSuffix;
+
+                        m_TradeProposals.Add(proposal);
+                        m_Logger.LogInfoFormat("CPortfolioManager: Loaded proposal from %s: [Symbol: %s, Type: %s, Risk: %.2f%%, Magic: %d, DecisionGV: %s]",
+                                               gv_name, proposal.Symbol, EnumToString(proposal.OrderType), proposal.RiskPercent, proposal.MagicNumber, proposal.GVDecisionName);
+                        
+                        // Now that it's loaded and marked PROCESSING, we can delete the original proposal GV.
+                        // The decision will be written to a *new* GV (proposal.GVDecisionName).
+                        if(GlobalVariableDel(gv_name))
+                        {
+                            m_Logger.LogInfoFormat("CPortfolioManager: Cleared proposal GV %s after loading.", gv_name);
+                        }
+                        else
+                        {
+                            m_Logger.LogErrorFormat("CPortfolioManager: FAILED to clear proposal GV %s after loading. Error: %d", gv_name, GetLastError());
+                        }
+                    }
+                    else
+                    {
+                        delete proposal; // Clean up if FromString failed
+                        m_Logger.LogWarningFormat("CPortfolioManager: Failed to parse proposal from %s: %s. Deleting GV.", gv_name, gv_value_str);
+                        GlobalVariableDel(gv_name); // Delete unparseable GV
+                    }
                 }
-                else
+                else if (gv_value_str == "PROCESSING" || gv_value_str == "DELETING")
                 {
-                    if(m_Logger != NULL) m_Logger.LogErrorFormat("CPortfolioManager: Failed to add proposal for %s to array.", symbolName);
-                    delete proposal; // Quan trọng: giải phóng bộ nhớ nếu không thêm được vào mảng
+                    // Potentially another master instance is handling it, or it's marked for deletion by slave.
+                    // Add a timeout for these states as well to prevent stuck GVs.
+                    if(gv_set_time > 0 && (TimeCurrent() - gv_set_time) > m_EAContext.Input.PortfolioManagement.GVProposalTimeoutSeconds * 2) // Longer timeout for processing/deleting states
+                    {
+                         m_Logger.LogWarningFormat("CPortfolioManager: Stale proposal GV '%s' in state '%s' (age %d sec). Deleting.", 
+                                            gv_name, gv_value_str, TimeCurrent() - gv_set_time);
+                        GlobalVariableDel(gv_name);
+                    }
                 }
-            }
-            else
-            {
-                if(m_Logger != NULL) m_Logger.LogWarningFormat("CPortfolioManager: Invalid format in GV '%s'. Expected 3 parts, got %d. Value: '%s'", gvName, count, gvValue);
-            }
-            
-            // Xóa Global Variable sau khi xử lý
-            if(GlobalVariableDel(gvName))
-            {
-                if(m_Logger != NULL) m_Logger.LogDebugFormat("CPortfolioManager: Deleted GV '%s' after processing.", gvName);
-            }
-            else
-            {
-                if(m_Logger != NULL) m_Logger.LogWarningFormat("CPortfolioManager: Failed to delete GV '%s'.", gvName);
             }
         }
+        checked++;
+        if(checked % 100 == 0) Sleep(1); // Small pause during large GV scan
     }
-    if(m_Logger != NULL) m_Logger.LogInfoFormat("CPortfolioManager: Finished loading. Found %d trade proposals.", m_TradeProposals.Total()); // Changed log level and message
+    m_Logger.LogInfoFormat("CPortfolioManager: Loaded %d proposals after scanning GVs.", m_TradeProposals.Total());
 }
 
 //+------------------------------------------------------------------+
-//| InitializeCorrelationMatrix (Helper)                             |
+//| InitializeCorrelationMatrix                                      |
 //+------------------------------------------------------------------+
-void CPortfolioManager::InitializeCorrelationMatrix()
+void CPortfolioManager::InitializeCorrelationMatrix(string filePath)
 {
-    // Đây là ví dụ đơn giản, bạn cần điền ma trận này với dữ liệu thực tế
-    // hoặc có một cơ chế để cập nhật nó.
-    // Chỉ khởi tạo một vài giá trị tượng trưng.
-    // EURUSD vs GBPUSD: tương quan dương mạnh
-    // USDJPY vs EURUSD: có thể tương quan âm
-    // ... và các cặp khác
+    if(m_Logger == NULL) {
+        printf("CPortfolioManager Error: Logger is NULL in InitializeCorrelationMatrix.");
+        return;
+    }
+    m_Logger.LogInfoFormat("CPortfolioManager: Initializing correlation matrix from '%s'...", filePath);
 
-    // Khởi tạo m_SymbolIndexMap
-    // Đây là ví dụ, bạn cần đảm bảo danh sách này khớp với các cặp tiền bạn giao dịch
-    // và thứ tự của chúng trong ma trận tương quan.
-    m_SymbolIndexMap[0] = "EURUSD"; m_SymbolIndexMap[1] = "GBPUSD"; m_SymbolIndexMap[2] = "USDJPY";
-    m_SymbolIndexMap[3] = "AUDUSD"; m_SymbolIndexMap[4] = "USDCAD"; m_SymbolIndexMap[5] = "NZDUSD";
-    m_SymbolIndexMap[6] = "USDCHF"; m_SymbolIndexMap[7] = "EURGBP"; m_SymbolIndexMap[8] = "EURJPY";
-    // ... thêm các cặp tiền khác cho đủ 28 hoặc theo nhu cầu
+    m_SymbolIndexMap.Clear();
+    m_CorrelationMatrix.Clear(); // Clear existing matrix data
 
-    for(int i=0; i<28; i++) {
-        for(int j=0; j<28; j++) {
-            if(i == j) m_CorrelationMatrix[i][j] = 1.0; // Tự tương quan là 1
-            else m_CorrelationMatrix[i][j] = 0.0; // Mặc định không tương quan
+    // TODO: Implement robust CSV loading for the correlation matrix.
+    // The CSV should have symbols as headers for rows and columns.
+    // Example CSV format:
+    // Symbol,EURUSD,GBPUSD,USDJPY
+    // EURUSD,1.0,0.7,-0.5
+    // GBPUSD,0.7,1.0,-0.3
+    // USDJPY,-0.5,-0.3,1.0
+
+    if(filePath == "" || !FileIsExist(filePath, FILE_COMMON | FILE_READ)){
+        m_Logger.LogWarningFormat("CPortfolioManager: Correlation matrix file '%s' not found or path is empty. Using placeholder data.", filePath);
+        // Fallback to placeholder data if file not found
+        string symbols[] = {"EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "EURJPY", "GBPJPY", "XAUUSD"};
+        m_CorrelationMatrix.Resize(ArraySize(symbols), ArraySize(symbols));
+        for(int i = 0; i < ArraySize(symbols); i++)
+        {
+            m_SymbolIndexMap.Set(symbols[i], i);
+            for(int j = 0; j < ArraySize(symbols); j++)
+            {
+                if(i == j) m_CorrelationMatrix.Set(i, j, 1.0);
+                else m_CorrelationMatrix.Set(i, j, 0.0); // Default to no correlation
+            }
         }
+        int idx_eurusd = GetSymbolIndex("EURUSD");
+        int idx_gbpusd = GetSymbolIndex("GBPUSD");
+        if(idx_eurusd != -1 && idx_gbpusd != -1) { m_CorrelationMatrix.Set(idx_eurusd, idx_gbpusd, 0.7); m_CorrelationMatrix.Set(idx_gbpusd, idx_eurusd, 0.7); }
+        int idx_usdjpy = GetSymbolIndex("USDJPY");
+        if(idx_eurusd != -1 && idx_usdjpy != -1) { m_CorrelationMatrix.Set(idx_eurusd, idx_usdjpy, -0.5); m_CorrelationMatrix.Set(idx_usdjpy, idx_eurusd, -0.5); }
+        m_Logger.LogInfoFormat("CPortfolioManager: Correlation matrix initialized for %d symbols (placeholder data).", ArraySize(symbols));
+        return;
     }
-    // Ví dụ điền một vài giá trị:
-    int eur_idx = GetSymbolIndex("EURUSD");
-    int gbp_idx = GetSymbolIndex("GBPUSD");
-    int jpy_idx = GetSymbolIndex("USDJPY");
 
-    if(eur_idx != -1 && gbp_idx != -1) {
-        m_CorrelationMatrix[eur_idx][gbp_idx] = 0.85; // EURUSD vs GBPUSD
-        m_CorrelationMatrix[gbp_idx][eur_idx] = 0.85; // Đối xứng
+    // Actual CSV Loading Logic (Simplified example, needs robust error handling and parsing)
+    int fileHandle = FileOpen(filePath, FILE_READ|FILE_CSV|FILE_ANSI, ',');
+    if(fileHandle == INVALID_HANDLE)
+    {
+        m_Logger.LogErrorFormat("CPortfolioManager: Failed to open correlation matrix file '%s'. Error: %d", filePath, GetLastError());
+        // Potentially fall back to placeholder or stop initialization
+        return;
     }
-    if(eur_idx != -1 && jpy_idx != -1) {
-        m_CorrelationMatrix[eur_idx][jpy_idx] = -0.40; // EURUSD vs USDJPY (ví dụ)
-        m_CorrelationMatrix[jpy_idx][eur_idx] = -0.40; // Đối xứng
+
+    // Read header to get symbols
+    CArrayString *headerSymbols = new CArrayString();
+    string firstCell = FileReadString(fileHandle); // Skip first cell (e.g., "Symbol")
+    while(!FileIsEnding(fileHandle) && !FileIsLineEnding(fileHandle))
+    {
+        headerSymbols.Add(FileReadString(fileHandle));
     }
-    // ... thêm các giá trị khác
-    if(m_Logger != NULL) m_Logger.LogDebug("CPortfolioManager: Correlation matrix initialized (placeholder values).");
+    FileReadString(fileHandle); // Consume rest of the line ending
+
+    if(headerSymbols.Total() == 0)
+    {
+        m_Logger.LogErrorFormat("CPortfolioManager: No symbols found in header of correlation matrix file '%s'.", filePath);
+        FileClose(fileHandle);
+        delete headerSymbols;
+        return;
+    }
+
+    m_CorrelationMatrix.Resize(headerSymbols.Total(), headerSymbols.Total());
+    for(int i=0; i<headerSymbols.Total(); i++)
+    {
+        m_SymbolIndexMap.Set(headerSymbols.At(i), i);
+    }
+
+    int row = 0;
+    while(!FileIsEnding(fileHandle) && row < headerSymbols.Total())
+    {
+        string rowSymbol = FileReadString(fileHandle); // Read the symbol for the current row
+        int rowIndex = GetSymbolIndex(rowSymbol);
+        if(rowIndex == -1)
+        {
+            m_Logger.LogWarningFormat("CPortfolioManager: Symbol '%s' from matrix file not in header map. Skipping row.", rowSymbol);
+            // Skip rest of the line
+            while(!FileIsEnding(fileHandle) && !FileIsLineEnding(fileHandle)) FileReadString(fileHandle);
+            FileReadString(fileHandle); // Consume line ending
+            row++;
+            continue;
+        }
+
+        for(int col = 0; col < headerSymbols.Total(); col++)
+        {
+            if(FileIsLineEnding(fileHandle) || FileIsEnding(fileHandle))
+            {
+                m_Logger.LogWarningFormat("CPortfolioManager: Unexpected end of line/file while reading correlations for %s. Row %d, Col %d", rowSymbol, row, col);
+                break;
+            }
+            double val = FileReadDouble(fileHandle);
+            m_CorrelationMatrix.Set(rowIndex, col, val); // Assuming columns in CSV match headerSymbols order
+        }
+        FileReadString(fileHandle); // Consume rest of the line ending if any
+        row++;
+    }
+
+    FileClose(fileHandle);
+    delete headerSymbols;
+    m_Logger.LogInfoFormat("CPortfolioManager: Correlation matrix successfully loaded for %d symbols from '%s'.", m_SymbolIndexMap.Size(), filePath);
 }
 
 //+------------------------------------------------------------------+
@@ -262,13 +363,19 @@ int CPortfolioManager::GetSymbolIndex(const string symbol_name)
 //+------------------------------------------------------------------+
 //| AnalyzeProposals                                                 |
 //+------------------------------------------------------------------+
+// Placeholder for more complex analysis if needed (e.g., ranking, prioritizing)
 void CPortfolioManager::AnalyzeProposals()
 {
-    if(m_Logger != NULL) m_Logger.LogDebugFormat("CPortfolioManager: Analyzing %d proposals...", m_TradeProposals.Total());
-    // Logic phân tích tổng thể có thể được thêm ở đây nếu cần trước khi duyệt từng proposal
-    // Ví dụ: tính toán rủi ro tổng thể hiện tại một lần
-    // double currentTotalRisk = m_RiskManager != NULL ? m_RiskManager.GetTotalRiskPercent() : 0.0;
-    // if(m_Logger != NULL) m_Logger.LogDebugFormat("CPortfolioManager: Current total portfolio risk: %.2f%%", currentTotalRisk * 100);
+    if(m_Logger == NULL) {
+        printf("CPortfolioManager Error: Logger is NULL in AnalyzeProposals.");
+        return;
+    }
+    m_Logger.LogInfo("CPortfolioManager: Analyzing proposals (currently a placeholder)...");
+    // TODO: Implement if complex inter-proposal analysis is needed before individual decisions.
+    // For example, if there are multiple competing proposals for limited capital/risk.
+    // This could involve sorting m_TradeProposals by quality score, potential reward/risk, etc.
+    // And then potentially rejecting lower quality proposals if higher quality ones consume available risk budget.
+    // For now, proposals are processed independently by DecideOnProposal.
 }
 
 //+------------------------------------------------------------------+
@@ -354,18 +461,83 @@ ENUM_PORTFOLIO_DECISION CPortfolioManager::DecideOnProposal(TradeProposal &propo
         if(m_Logger != NULL) m_Logger.LogWarningFormat("CPortfolioManager: Symbol %s not found in correlation matrix map. Skipping correlation check.", proposal.Symbol);
     }
 
-    // 4. Kiểm tra Tập trung Rủi ro (Risk Concentration) - Placeholder
-    // TODO: Implement Risk Concentration logic
-    // Ví dụ: Tính tổng rủi ro cho mỗi đồng tiền (USD, EUR, JPY, ...)
-    // Nếu rủi ro của đồng tiền liên quan đến proposal (ví dụ USD trong EURUSD) vượt ngưỡng sau khi thêm proposal này, thì REJECT.
-    // double riskConcentrationLimit = 0.60; // 60% tổng rủi ro cho một đồng tiền
-    // if (IsRiskConcentrated(proposal, riskConcentrationLimit)) return DECISION_REJECT;
-    if(m_Logger != NULL) m_Logger.LogDebug("CPortfolioManager: Risk concentration check (placeholder) - PASSED.");
+    // 4. Kiểm tra Tập trung Rủi ro (Risk Concentration)
+    double riskConcentrationLimit = 0.60; // 60% tổng rủi ro cho một đồng tiền
+    if (IsRiskConcentrated(proposal, riskConcentrationLimit)) {
+        if(m_Logger != NULL) m_Logger.LogInfoFormat("CPortfolioManager: Proposal for %s REJECTED due to risk concentration.", proposal.Symbol);
+        return DECISION_REJECT;
+    }
+    if(m_Logger != NULL) m_Logger.LogDebug("CPortfolioManager: Risk concentration check - PASSED.");
 
 
     // 5. Ra quyết định Cuối cùng
     if(m_Logger != NULL) m_Logger.LogInfoFormat("CPortfolioManager: Proposal for %s %s APPROVED.", proposal.Symbol, EnumToString(proposal.OrderType));
     return DECISION_APPROVE;
+}
+
+//+------------------------------------------------------------------+
+//| WriteDecisionToGVs                                               |
+//+------------------------------------------------------------------+
+void CPortfolioManager::WriteDecisionToGVs(const TradeProposal &proposal, ENUM_PORTFOLIO_DECISION decision, double adjustedLotFactor = 1.0)
+{
+    if(m_Logger == NULL) {
+        printf("CPortfolioManager Error: Logger is NULL in WriteDecisionToGVs.");
+        return;
+    }
+
+    string decisionGvName = proposal.GVDecisionName; // This should be pre-filled by LoadProposals
+    if(decisionGvName == "")
+    {
+        // Fallback if GVDecisionName was not set (should not happen with new LoadProposals)
+        decisionGvName = m_EAContext.Input.PortfolioManagement.GVDecisionPrefix + 
+                         proposal.Symbol + "_" + 
+                         IntegerToString(proposal.MagicNumber) + 
+                         m_EAContext.Input.PortfolioManagement.GVDecisionSuffix;
+        m_Logger.LogWarningFormat("CPortfolioManager: proposal.GVDecisionName was empty for %s. Using fallback: %s", proposal.Symbol, decisionGvName);
+    }
+
+    string decisionGvValue;
+    string decisionStr;
+
+    switch(decision)
+    {
+        case DECISION_APPROVED:
+            decisionStr = "APPROVE";
+            decisionGvValue = decisionStr + ";" + DoubleToString(adjustedLotFactor, 2); // e.g., APPROVE;1.0 or APPROVE;0.5
+            break;
+        case DECISION_REJECTED:
+            decisionStr = "REJECT";
+            decisionGvValue = decisionStr + ";0.0"; // Factor is irrelevant for reject
+            break;
+        // DECISION_ADJUST_LOT is now handled by passing adjustedLotFactor to an APPROVE decision.
+        // If DecideOnProposal returns DECISION_ADJUST_LOT, ProcessTradeProposals should set the factor and then call this with DECISION_APPROVED.
+        // For clarity, we can remove DECISION_ADJUST_LOT from this switch if it's always converted to APPROVE + factor before calling this.
+        // However, if a slave needs to explicitly see "ADJUST_LOT", then it should be kept.
+        // For now, assuming ProcessTradeProposals converts it.
+        case DECISION_POSTPONE: // Added for future use
+            decisionStr = "POSTPONE";
+            decisionGvValue = decisionStr + ";0.0";
+            break;
+        default:
+            decisionStr = "UNKNOWN";
+            decisionGvValue = decisionStr + ";0.0";
+            m_Logger.LogWarningFormat("CPortfolioManager: Unknown decision type (%d) for %s.", (int)decision, proposal.Symbol);
+            break;
+    }
+
+    // Set the GV with a timestamp to allow slaves to detect new decisions
+    string finalGvValue = decisionGvValue + ";" + TimeToString(TimeCurrent(), TIME_SECONDS);
+
+    if(GlobalVariableSet(decisionGvName, finalGvValue))
+    {
+        m_Logger.LogInfoFormat("CPortfolioManager: ==> Decision for %s (%s) written to GV '%s': %s",
+                               proposal.Symbol, EnumToString(proposal.OrderType), decisionGvName, finalGvValue);
+    }
+    else
+    {
+        m_Logger.LogErrorFormat("CPortfolioManager: ==> FAILED to write decision for %s to GV '%s'. Error: %d", 
+                                proposal.Symbol, decisionGvName, GetLastError());
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -387,51 +559,162 @@ void CPortfolioManager::ProcessTradeProposals()
         TradeProposal* proposal = m_TradeProposals.At(i);
         if(proposal == NULL) continue;
 
-        ENUM_PORTFOLIO_DECISION decision = DecideOnProposal(*proposal); // Ra quyết định cho từng proposal
-        proposal.Decision = decision; // Lưu quyết định vào proposal (nếu cần theo dõi)
+        ENUM_PORTFOLIO_DECISION raw_decision = DecideOnProposal(*proposal); // Ra quyết định cho từng proposal
+        proposal.Decision = raw_decision; // Store the raw decision
         
-        // Giao tiếp Quyết định Trở lại
-        string decisionGvName = "GV_Decision_" + proposal.Symbol;
-        string decisionGvValue;
-        double adjustedLotFactor = 1.0; // Mặc định giữ nguyên lot
+        double adjustedLotFactor = 1.0; // Default lot factor
+        ENUM_PORTFOLIO_DECISION final_decision_for_gv = raw_decision;
 
-        switch(decision)
+        if(raw_decision == DECISION_ADJUST_LOT)
         {
-            case DECISION_APPROVE:
-                decisionGvValue = "APPROVE;" + DoubleToString(adjustedLotFactor, 2);
-                break;
-            case DECISION_REJECT:
-                decisionGvValue = "REJECT;0.0";
-                break;
-            case DECISION_ADJUST_LOT:
-                // TODO: Logic điều chỉnh lot ở đây, ví dụ giảm 50%
-                adjustedLotFactor = 0.5; 
-                decisionGvValue = "ADJUST_LOT;" + DoubleToString(adjustedLotFactor, 2);
-                break;
-            case DECISION_POSTPONE:
-                decisionGvValue = "POSTPONE;0.0";
-                break;
-            default:
-                decisionGvValue = "UNKNOWN;0.0";
-                break;
+            // TODO: Implement sophisticated lot adjustment logic in DecideOnProposal or a separate helper.
+            // This logic should determine the appropriate adjustedLotFactor.
+            // For example, it could be based on available margin, overall portfolio risk, specific rules for the symbol, etc.
+            // DecideOnProposal might populate a field like 'proposal.RecommendedLotFactor' or return it somehow.
+            // For now, using a placeholder value if DECISION_ADJUST_LOT is returned.
+            adjustedLotFactor = m_EAContext.Input.PortfolioManagement.DefaultLotAdjustmentFactor; // e.g., 0.5 from inputs
+            final_decision_for_gv = DECISION_APPROVED; // Convert ADJUST_LOT to APPROVE with the new factor for GV communication
+            if(m_Logger != NULL) m_Logger.LogInfoFormat("CPortfolioManager: Proposal for %s resulted in ADJUST_LOT. Applying factor %.2f and sending as APPROVE.", proposal.Symbol, adjustedLotFactor);
         }
-        
-        if(GlobalVariableSet(decisionGvName, decisionGvValue))
+        else if(raw_decision == DECISION_APPROVED)
         {
-            m_Logger.LogInfoFormat("CPortfolioManager: ==> Decision for %s (%s) written to GV '%s': %s", 
-                                   proposal.Symbol, EnumToString(proposal.OrderType), decisionGvName, decisionGvValue); // Added arrow for emphasis
+            // Standard approval, full requested lot (factor 1.0) unless proposal itself has a different suggestion
+            // adjustedLotFactor = proposal.SuggestedFactor; // if proposal carries this
         }
-        else
-        {
-            m_Logger.LogErrorFormat("CPortfolioManager: ==> FAILED to write decision for %s to GV '%s'.", proposal.Symbol, decisionGvName); // Added arrow for emphasis
-        }
-        else
-        {
-            m_Logger.LogErrorFormat("CPortfolioManager: Failed to write decision for %s to GV '%s'.", proposal.Symbol, decisionGvName);
-        }
+
+        WriteDecisionToGVs(*proposal, final_decision_for_gv, adjustedLotFactor);
+    }
+    // Clear proposals after processing. Important to do this on the heap objects from CArrayObj
+    // m_TradeProposals.Clear(); // This would just clear pointers, not delete objects.
+    while(m_TradeProposals.Total() > 0)
+    {
+        TradeProposal* p = m_TradeProposals.Detach(); // Detach from end
+        if(p != NULL) delete p;
     }
 
     m_Logger.LogInfo("CPortfolioManager: Finished processing trade proposals.");
+}
+
+//+------------------------------------------------------------------+
+//| CalculateTotalRisk                                               |
+//+------------------------------------------------------------------+
+double CPortfolioManager::CalculateTotalRisk()
+{
+    if(m_RiskManager == NULL)
+    {
+        if(m_Logger != NULL) m_Logger.LogError("CPortfolioManager: RiskManager is NULL in CalculateTotalRisk.");
+        return 0.0;
+    }
+    // This should ideally use a more sophisticated way to get total risk from RiskManager
+    // or sum up risks from m_PositionManager if RiskManager doesn't provide a direct portfolio-wide risk.
+    return m_RiskManager.GetTotalOpenRiskPercent(); // Assuming this function exists and gives current total risk
+}
+
+//+------------------------------------------------------------------+
+//| IsRiskConcentrated                                               |
+//+------------------------------------------------------------------+
+bool CPortfolioManager::IsRiskConcentrated(const TradeProposal &proposal, double maxConcentration)
+{
+    if(m_PositionManager == NULL || m_RiskManager == NULL)
+    {
+        if(m_Logger != NULL) m_Logger.LogError("CPortfolioManager: PositionManager or RiskManager is NULL in IsRiskConcentrated.");
+        return true; // Fail safe: assume concentrated if modules are missing
+    }
+
+    string baseCurrency, quoteCurrency;
+    StringSplit(proposal.Symbol, '/', baseCurrency, quoteCurrency); // Basic split, assumes XXX/YYY format
+    if(quoteCurrency == "") { // For symbols like XAUUSD, EURJPY etc.
+        if(StringLen(proposal.Symbol) == 6) {
+             baseCurrency = StringSubstr(proposal.Symbol, 0, 3);
+             quoteCurrency = StringSubstr(proposal.Symbol, 3, 3);
+        } else {
+            if(m_Logger != NULL) m_Logger.LogWarningFormat("CPortfolioManager: Could not parse currencies from symbol '%s' in IsRiskConcentrated.", proposal.Symbol);
+            return false; // Cannot determine, so assume not concentrated for now
+        }
+    }
+
+    double baseCurrencyExposure = GetCurrencyRiskExposure(baseCurrency);
+    double quoteCurrencyExposure = GetCurrencyRiskExposure(quoteCurrency);
+
+    // Estimate risk added by this proposal to each currency
+    // This is a simplification. True exposure depends on whether it's a buy or sell.
+    // For a BUY of Base/Quote, exposure increases for Base, decreases for Quote (if selling Quote to buy Base)
+    // For a SELL of Base/Quote, exposure decreases for Base, increases for Quote
+    double proposalRisk = proposal.RiskPercent;
+    double newBaseExposure, newQuoteExposure;
+
+    if(proposal.OrderType == ORDER_TYPE_BUY) // Buying Base, Selling Quote
+    {
+        newBaseExposure = baseCurrencyExposure + proposalRisk;
+        // For quote currency, if we are selling it, its 'long' exposure effectively decreases or 'short' exposure increases.
+        // This logic needs to be very careful about how exposure is defined (e.g., net long/short).
+        // Simplification: consider absolute exposure change for now.
+        newQuoteExposure = quoteCurrencyExposure + proposalRisk; // Simplified: adding risk to both involved currencies' exposure pool
+    }
+    else // Selling Base, Buying Quote
+    {
+        newBaseExposure = baseCurrencyExposure + proposalRisk; // Simplified
+        newQuoteExposure = quoteCurrencyExposure + proposalRisk;
+    }
+    
+    double totalPortfolioRisk = CalculateTotalRisk() + proposalRisk;
+    if (totalPortfolioRisk == 0) return false; // Avoid division by zero
+
+    if ((newBaseExposure / totalPortfolioRisk) > maxConcentration) {
+        if(m_Logger != NULL) m_Logger.LogInfoFormat("CPortfolioManager: Risk concentration for %s (%.2f%% of total risk %.2f%%) would exceed limit %.2f%% on %s proposal.", 
+            baseCurrency, (newBaseExposure/totalPortfolioRisk)*100, totalPortfolioRisk*100, maxConcentration*100, proposal.Symbol);
+        return true;
+    }
+    if ((newQuoteExposure / totalPortfolioRisk) > maxConcentration) {
+        if(m_Logger != NULL) m_Logger.LogInfoFormat("CPortfolioManager: Risk concentration for %s (%.2f%% of total risk %.2f%%) would exceed limit %.2f%% on %s proposal.", 
+            quoteCurrency, (newQuoteExposure/totalPortfolioRisk)*100, totalPortfolioRisk*100, maxConcentration*100, proposal.Symbol);
+        return true;
+    }
+
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| GetCurrencyRiskExposure                                          |
+//+------------------------------------------------------------------+
+double CPortfolioManager::GetCurrencyRiskExposure(const string currency)
+{
+    if(m_PositionManager == NULL || m_RiskManager == NULL)
+    {
+        if(m_Logger != NULL) m_Logger.LogError("CPortfolioManager: PositionManager or RiskManager is NULL in GetCurrencyRiskExposure.");
+        return 0.0;
+    }
+
+    double totalExposure = 0.0;
+    for(int i = 0; i < m_PositionManager.GetOpenPositionsCount(); i++)
+    {
+        string symbol = m_PositionManager.GetOpenPositionSymbol(i);
+        double positionRisk = m_RiskManager.GetPositionRiskPercent(m_PositionManager.GetOpenPositionTicket(i)); // Needs GetPositionRiskPercent(ticket) in RiskManager
+        
+        string base, quote;
+        StringSplit(symbol, '/', base, quote);
+        if(quote == "") { // For symbols like XAUUSD, EURJPY etc.
+            if(StringLen(symbol) == 6) {
+                 base = StringSubstr(symbol, 0, 3);
+                 quote = StringSubstr(symbol, 3, 3);
+            } else continue; // Skip if symbol format is unexpected
+        }
+
+        if(StringCompare(base, currency, false) == 0)
+        {
+            // If it's BaseCurrency/XXX and we are BUYING, exposure to BaseCurrency increases.
+            // If it's BaseCurrency/XXX and we are SELLING, exposure to BaseCurrency decreases (or short exposure increases).
+            // This needs careful handling of long/short exposure. For simplicity, sum absolute risks involving the currency.
+            totalExposure += positionRisk;
+        }
+        if(StringCompare(quote, currency, false) == 0)
+        {
+            // If it's XXX/QuoteCurrency and we are BUYING XXX, we are selling QuoteCurrency, exposure to QuoteCurrency decreases.
+            // If it's XXX/QuoteCurrency and we are SELLING XXX, we are buying QuoteCurrency, exposure to QuoteCurrency increases.
+            totalExposure += positionRisk;
+        }
+    }
+    return totalExposure;
 }
 
 } // namespace ApexPullback

@@ -17,8 +17,9 @@
 #include <Files/FileBin.mqh>     // Thư viện file I/O binary
 #include "Enums.mqh"             // Các enum cho các chế độ thị trường, mặt hàng
 #include "CommonStructs.mqh"     // Enums và structs chung
+#include "Constants.mqh"         // Các hằng số
 #include "Logger.mqh"            // Tiện ích ghi log
-#include "AssetProfiler.mqh"     // Module mới thêm trong v14 để phân tích tài sản
+#include "AssetDNA.mqh"          // Module phân tích DNA tài sản (thay thế AssetProfiler)
 #include "PerformanceTracker.mqh" // Module theo dõi hiệu suất giao dịch
 
 namespace ApexPullback {
@@ -33,7 +34,8 @@ namespace ApexPullback {
 class CRiskManager
 {
 private:
-    // --- Thông tin cài đặt ---
+    EAContext*          m_Context;             // Con trỏ đến EAContext
+    // --- Thông tin cài đặt (sẽ được lấy từ m_Context) ---
     string              m_Symbol;               // Symbol chính EA đang chạy
     double              m_RiskPerTrade;         // Risk mỗi giao dịch theo phần trăm balance
     double              m_MaxDailyLossPercent;  // Giới hạn lỗ tối đa trong ngày (% của start equity)
@@ -41,6 +43,7 @@ private:
     int                 m_MaxDailyTrades;       // Số lệnh tối đa mỗi ngày
     int                 m_MaxConsecutiveLosses; // Số lần thua liên tiếp tối đa trước khi tạm dừng
     bool                m_PropFirmMode;         // Chế độ Prop firm (quản lý rủi ro nghiêm ngặt hơn)
+    ENUM_DRAWDOWN_TYPE  m_DrawdownType;         // Loại drawdown (Balance-based hoặc Equity-based)
     double              m_DrawdownReduceThreshold; // Ngưỡng DD để bắt đầu giảm risk
     double              m_MinRiskMultiplier;    // Hệ số giảm risk tối thiểu (VD: 0.3 = 30%)
     bool                m_EnableTaperedRisk;    // Bật chế độ giảm risk từ từ (không đột ngột)
@@ -168,13 +171,20 @@ private:
 
 public:
     // --- Constructor/Destructor ---
-    CRiskManager();
+    CRiskManager(EAContext* context);
     ~CRiskManager();
 
     // --- Hàm Khởi tạo ---
-    bool Initialize(string symbol, double riskPercent, double atrFactor, 
-                    double tpRRatio, double maxDailyLoss, 
-                    double maxDrawdown, bool propFirmMode = false);
+    bool Initialize();
+    
+    // Khởi tạo m_DayStartEquity cho tính toán drawdown dựa trên balance
+    void InitializeDayStartEquity() {
+        if (m_DrawdownType == DRAWDOWN_BALANCE_BASED) {
+            m_DayStartEquity = m_AccountInfo.Balance();
+        } else {
+            m_DayStartEquity = m_AccountInfo.Equity();
+        }
+    }
                   
     // Thiết lập các module liên quan
     void SetLogger(CLogger *logger) { m_Logger = logger; }
@@ -196,10 +206,10 @@ public:
                        double maxSpreadPoints, double volatilityFactor = 1.0);
     
     // --- V14.0: Cải tiến quản lý risk ---
-    double CalculateAdaptiveRiskPercent();
-    double GetRegimeFactor(ENUM_MARKET_REGIME regime);
-    double GetSessionFactor(ENUM_SESSION session);
-    double GetSymbolRiskFactor();
+    double CalculateAdaptiveRiskPercent(double baseRiskPercent = -1.0, string &adjustmentReasonOut = ""); // Added default for adjustmentReasonOut
+    double GetRegimeFactor(ENUM_MARKET_REGIME regime, bool isTransitioning = false); // Added isTransitioning with default
+    double GetSessionFactor(ENUM_SESSION session, string symbol = ""); // Added symbol with default
+    double GetSymbolRiskFactor(string symbol = ""); // Added symbol with default
     double IsApproachingDailyLossLimit();
     
     // --- Quản lý trạng thái ---
@@ -331,21 +341,39 @@ private:
 //+------------------------------------------------------------------+
 //| Constructor                                                      |
 //+------------------------------------------------------------------+
-CRiskManager::CRiskManager()
+CRiskManager::CRiskManager(EAContext* context)
 {
-    // Giá trị mặc định (có thể được ghi đè bởi Initialize)
-    m_Symbol = "";
-    m_RiskPerTrade = 1.0;
-    m_MaxDailyLossPercent = 5.0;
-    m_MaxDrawdownPercent = 10.0;
-    m_MaxDailyTrades = 10;
-    m_MaxConsecutiveLosses = 3;
-    m_PropFirmMode = false;
-    m_DrawdownReduceThreshold = 5.0;
-    m_MinRiskMultiplier = 0.3;
-    m_EnableTaperedRisk = true;
-    m_MaxRisk = 2.0;
-    m_MinRisk = 0.25;
+    m_Context = context;
+    if (m_Context != NULL)
+    {
+        m_Logger = m_Context->Logger;
+        m_AssetProfiler = m_Context->AssetProfiler;
+        m_PerformanceTracker = m_Context->PerformanceTracker;
+        // m_DetailedLogging sẽ được lấy từ m_Context->Logger->IsDetailedMode() hoặc tương tự
+        // m_PropFirmMode sẽ được lấy từ m_Context->PropFirmMode
+    }
+    else
+    {
+        // Xử lý trường hợp context là NULL nếu cần, ví dụ: ghi log lỗi hoặc ném ngoại lệ
+        // Hoặc gán giá trị mặc định an toàn cho các con trỏ
+        m_Logger = NULL;
+        m_AssetProfiler = NULL;
+        m_PerformanceTracker = NULL;
+    }
+
+    // Giá trị mặc định (có thể được ghi đè bởi Initialize hoặc lấy từ context)
+    m_Symbol = ""; // Sẽ được lấy từ context trong Initialize
+    m_RiskPerTrade = 1.0; // Sẽ được lấy từ context trong Initialize
+    m_MaxDailyLossPercent = 5.0; // Sẽ được lấy từ context trong Initialize
+    m_MaxDrawdownPercent = 10.0; // Sẽ được lấy từ context trong Initialize
+    m_MaxDailyTrades = 10; // Sẽ được lấy từ context trong Initialize
+    m_MaxConsecutiveLosses = 3; // Sẽ được lấy từ context trong Initialize
+    m_DrawdownReduceThreshold = 5.0; // Sẽ được lấy từ context trong Initialize
+    m_MinRiskMultiplier = 0.3; // Sẽ được lấy từ context trong Initialize
+    m_EnableTaperedRisk = true; // Sẽ được lấy từ context trong Initialize
+    m_MaxRisk = 2.0; // Sẽ được lấy từ context trong Initialize
+    m_MinRisk = 0.25; // Sẽ được lấy từ context trong Initialize
+    m_DrawdownType = DRAWDOWN_EQUITY_BASED;  // Sẽ được lấy từ context trong Initialize
 
     m_DayStartEquity = 0;
     m_DailyTradeCount = 0;
@@ -375,10 +403,6 @@ CRiskManager::CRiskManager()
     m_CurrentRegime = REGIME_TRENDING_BULL;
     m_CurrentSession = SESSION_AMERICAN;
     m_PreferredScenario = SCENARIO_PULLBACK;   // Kịch bản giao dịch mặc định là pullback
-    m_DetailedLogging = true;                  // Bật logging chi tiết mặc định
-    
-    m_Logger = NULL;
-    m_AssetProfiler = NULL;
 
     // Khởi tạo asset profile
     m_AssetProfile.avgATR = 0;
@@ -441,23 +465,46 @@ CRiskManager::~CRiskManager()
 }
 
 //+------------------------------------------------------------------+
-//| Khởi tạo với các tham số                                         |
+//| Khởi tạo với các tham số từ EAContext                            |
 //+------------------------------------------------------------------+
-bool CRiskManager::Initialize(string symbol, double riskPercent, double atrFactor, 
-                    double tpRRatio, double maxDailyLoss, 
-                    double maxDrawdown, bool propFirmMode = false)
+bool CRiskManager::Initialize()
 {
-    m_Symbol = symbol;
-    m_RiskPerTrade = riskPercent;
-    m_MaxDailyLossPercent = maxDailyLoss;
-    m_MaxDrawdownPercent = maxDrawdown;
-    m_MaxDailyTrades = 10;
-    m_MaxConsecutiveLosses = 3;
-    m_PropFirmMode = propFirmMode;
-    m_DrawdownReduceThreshold = 5.0;
+    if (m_Context == NULL)
+    {
+        // Không thể khởi tạo nếu không có context
+        // Ghi log lỗi nếu m_Logger đã được khởi tạo (mặc dù không nên ở đây)
+        // Hoặc xem xét việc ném một ngoại lệ hoặc trả về false sớm
+        printf("CRiskManager::Initialize - Lỗi: EAContext là NULL.");
+        return false;
+    }
+
+    // Gán các con trỏ tiện ích từ context (đã làm trong constructor, nhưng kiểm tra lại cho chắc)
+    m_Logger = m_Context->Logger;
+    m_AssetProfiler = m_Context->AssetProfiler;
+    m_PerformanceTracker = m_Context->PerformanceTracker;
+
+    // Lấy thông tin từ EAContext
+    m_Symbol = m_Context->Symbol;
+    m_RiskPerTrade = m_Context->RiskPercent;         // Ví dụ: InputRiskPercent
+    m_MaxDailyLossPercent = m_Context->MaxDailyLoss;   // Ví dụ: InputMaxDailyLoss
+    m_MaxDrawdownPercent = m_Context->MaxDrawdown;    // Ví dụ: InputMaxDrawdown
+    m_PropFirmMode = m_Context->PropFirmMode;       // Ví dụ: InputPropFirmMode
+    m_DrawdownType = m_Context->DrawdownType;       // Ví dụ: InputDrawdownType
+    m_MaxDailyTrades = m_Context->MaxDailyTrades;     // Ví dụ: InputMaxDailyTrades
+    m_MaxConsecutiveLosses = m_Context->MaxConsecutiveLosses; // Ví dụ: InputMaxConsecutiveLosses
+    
+    // Các tham số khác có thể được lấy từ m_Context nếu chúng được thêm vào EAContext
+    m_DrawdownReduceThreshold = m_Context->DrawdownReduceThreshold; // Ví dụ
+    m_MinRiskMultiplier = m_Context->MinRiskMultiplier;       // Ví dụ
+    m_EnableTaperedRisk = m_Context->EnableTaperedRisk;       // Ví dụ
+    m_MaxRisk = m_Context->MaxRiskAllowed;                // Ví dụ
+    m_MinRisk = m_Context->MinRiskAllowed;                // Ví dụ
 
     // Thiết lập thống kê ban đầu
-    m_DayStartEquity = (riskPercent > 0) ? riskPercent : m_AccountInfo.Equity();
+    // Cần đảm bảo m_AccountInfo được cập nhật trước khi gọi Equity()
+    // Hoặc lấy DayStartEquity từ context nếu nó được tính ở nơi khác
+    m_AccountInfo.Refresh(); // Cập nhật thông tin tài khoản
+    m_DayStartEquity = m_AccountInfo.Equity(); // Hoặc m_Context->InitialBalance nếu có
     m_DailyTradeCount = 0;
     m_DailyLoss = 0;
     m_WeeklyLoss = 0;
@@ -467,7 +514,8 @@ bool CRiskManager::Initialize(string symbol, double riskPercent, double atrFacto
     TimeToStruct(TimeCurrent(), time);
     m_CurrentDay = time.day;
     
-    // Khởi tạo PeakEquity ban đầu
+    // Khởi tạo PeakEquity ban đầu và DayStartEquity
+    InitializeDayStartEquity(); // Hàm này có thể cần cập nhật để sử dụng m_Context nếu cần
     m_PeakEquity = m_AccountInfo.Equity();
     
     // Khởi tạo symbol info
@@ -475,40 +523,46 @@ bool CRiskManager::Initialize(string symbol, double riskPercent, double atrFacto
     
     // Áp dụng cài đặt đặc biệt cho Prop Firm Mode
     if (m_PropFirmMode) {
-        // Giảm risk nếu > 1.0% trong chế độ prop firm
-        if (m_RiskPerTrade > 1.0) {
+        if (m_RiskPerTrade > m_Context->PropFirmMaxRiskPerTrade) { // Ví dụ: PropFirmMaxRiskPerTrade = 1.0
             LogMessage("PROP FIRM MODE: Giảm risk từ " + DoubleToString(m_RiskPerTrade, 2) + 
-                      "% xuống 1.0% (giới hạn an toàn)", true);
-            m_RiskPerTrade = 1.0;
+                      "% xuống " + DoubleToString(m_Context->PropFirmMaxRiskPerTrade, 2) + "% (giới hạn an toàn)", true);
+            m_RiskPerTrade = m_Context->PropFirmMaxRiskPerTrade;
         }
         
-        // Giảm max drawdown nếu > 5.0% trong chế độ prop firm
-        if (m_MaxDrawdownPercent > 5.0) {
+        if (m_MaxDrawdownPercent > m_Context->PropFirmMaxDrawdown) { // Ví dụ: PropFirmMaxDrawdown = 5.0
             LogMessage("PROP FIRM MODE: Giảm max drawdown từ " + DoubleToString(m_MaxDrawdownPercent, 2) + 
-                      "% xuống 5.0% (giới hạn an toàn)", true);
-            m_MaxDrawdownPercent = 5.0;
+                      "% xuống " + DoubleToString(m_Context->PropFirmMaxDrawdown, 2) + "% (giới hạn an toàn)", true);
+            m_MaxDrawdownPercent = m_Context->PropFirmMaxDrawdown;
         }
         
-        // Giảm giới hạn lỗ ngày nếu > 3.0% 
-        if (m_MaxDailyLossPercent > 3.0) {
+        if (m_MaxDailyLossPercent > m_Context->PropFirmMaxDailyLoss) { // Ví dụ: PropFirmMaxDailyLoss = 3.0
             LogMessage("PROP FIRM MODE: Giảm giới hạn lỗ ngày từ " + DoubleToString(m_MaxDailyLossPercent, 2) + 
-                      "% xuống 3.0% (giới hạn an toàn)", true);
-            m_MaxDailyLossPercent = 3.0;
+                      "% xuống " + DoubleToString(m_Context->PropFirmMaxDailyLoss, 2) + "% (giới hạn an toàn)", true);
+            m_MaxDailyLossPercent = m_Context->PropFirmMaxDailyLoss;
         }
     }
 
-    LogMessage("Risk Manager khởi tạo: Risk=" + DoubleToString(m_RiskPerTrade, 2) + "%, " +
+    LogMessage("Risk Manager khởi tạo: Symbol=" + m_Symbol +
+                    ", Risk=" + DoubleToString(m_RiskPerTrade, 2) + "%, " +
                     "Daily Loss=" + DoubleToString(m_MaxDailyLossPercent, 2) + "%, " +
                     "Max DD=" + DoubleToString(m_MaxDrawdownPercent, 2) + "%, " +
                     "Max Trades=" + IntegerToString(m_MaxDailyTrades) + ", " +
                     "Max Losses=" + IntegerToString(m_MaxConsecutiveLosses) + ", " +
-                    "PropMode=" + (propFirmMode ? "true" : "false"), true);
+                    "PropMode=" + (m_PropFirmMode ? "true" : "false") + ", " +
+                    "DrawdownType=" + EnumToString(m_DrawdownType), true);
     
     // Tải thống kê trước đó nếu có
-    LoadStatsFromFile("ApexPullback_" + symbol + "_Stats.bin");
+    // Cân nhắc việc có nên truyền tên file từ context hoặc xây dựng nó ở đây
+    string statsFilename = "ApexPullback_" + m_Symbol + "_Stats.bin";
+    if (m_Context->EnableStatsSavingLoading) { // Ví dụ: một cờ trong context
+        LoadStatsFromFile(statsFilename);
+    }
     
     // Tải Asset Profile nếu có
-    LoadAssetProfile(symbol);
+    // Tương tự, tên file hoặc logic tải có thể phụ thuộc vào context
+    if (m_Context->EnableAssetProfile) { // Ví dụ
+        LoadAssetProfile(m_Symbol);
+    }
 
     return true;
 }
@@ -553,7 +607,9 @@ void CRiskManager::SetMarketRegimeInfo(ENUM_MARKET_REGIME regime, bool isTransit
     m_CurrentSession = session;
     
     // Log chi tiết trạng thái thị trường
-    if (m_Logger != NULL) {
+    // Quy tắc #1: Sử dụng -> cho g_EAContext
+    // Quy tắc #3: Truy cập Logger qua g_EAContext
+    if (ApexPullback::g_EAContext != NULL && ApexPullback::g_EAContext->Logger != NULL) {
         string regimeStr;
         switch(regime) {
             case REGIME_TRENDING_BULL: regimeStr = "TRENDING_BULL"; break;
@@ -575,6 +631,7 @@ void CRiskManager::SetMarketRegimeInfo(ENUM_MARKET_REGIME regime, bool isTransit
             default: sessionStr = "UNKNOWN";
         }
         
+        // Sử dụng LogMessage của class, vốn đã truy cập m_Logger (đã được gán từ g_EAContext->Logger)
         LogMessage(StringFormat("Market Info: Regime=%s, Transitioning=%s, Confidence=%.2f, ATR=%.2fx, Session=%s",
                              regimeStr, isTransitioning ? "Yes" : "No", regimeConfidence, atrRatio, sessionStr));
     }
@@ -614,9 +671,13 @@ bool CRiskManager::LoadAssetProfile(string symbol = "")
             m_AssetConfig.maxSpreadPoints = 20;  // Giới hạn spread mặc định
             m_AssetConfig.volatilityFactor = 1.0; // Hệ số biến động mặc định
             
-            LogMessage("Đã tải Asset Profile từ AssetProfiler: " + symbol + 
+            // Sử dụng m_Logger nếu có
+            if (m_Logger != NULL) m_Logger->LogInfo("Đã tải Asset Profile từ AssetProfiler: " + symbol + 
                       ", ATR=" + DoubleToString(m_AssetProfile.avgATR, _Digits) + 
-                      ", Spread=" + DoubleToString(m_AssetProfile.avgSpread, 1) + " pts", false);
+                      ", Spread=" + DoubleToString(m_AssetProfile.avgSpread, 1) + " pts");
+            else Print("Đã tải Asset Profile từ AssetProfiler: " + symbol + 
+                      ", ATR=" + DoubleToString(m_AssetProfile.avgATR, _Digits) + 
+                      ", Spread=" + DoubleToString(m_AssetProfile.avgSpread, 1) + " pts");
             return true;
         }
         return false;
@@ -649,7 +710,9 @@ bool CRiskManager::LoadAssetProfile(string symbol = "")
             
             FileClose(fileHandle);
             
-            LogMessage("Đã tải Asset Profile từ file: " + filename, false);
+            // Sử dụng m_Logger nếu có
+            if (m_Logger != NULL) m_Logger->LogInfo("Đã tải Asset Profile từ file: " + filename);
+            else Print("Đã tải Asset Profile từ file: " + filename);
             return true;
         }
     }
@@ -732,7 +795,9 @@ bool CRiskManager::LoadAssetProfile(string symbol = "")
         m_AssetConfig.volatilityFactor = 1.0;
     }
     
-    LogMessage("Thiết lập Asset Profile mặc định cho: " + symbol, false);
+    // Sử dụng m_Logger nếu có
+    if (m_Logger != NULL) m_Logger->LogInfo("Thiết lập Asset Profile mặc định cho: " + symbol);
+    else Print("Thiết lập Asset Profile mặc định cho: " + symbol);
     return false;
 }
 
@@ -770,11 +835,15 @@ bool CRiskManager::SaveAssetProfile(string symbol = "")
         
         FileClose(fileHandle);
         
-        LogMessage("Đã lưu Asset Profile vào file: " + filename, false);
+        // Sử dụng m_Logger nếu có
+        if (m_Logger != NULL) m_Logger->LogInfo("Đã lưu Asset Profile vào file: " + filename);
+        else Print("Đã lưu Asset Profile vào file: " + filename);
         return true;
     }
     
-    LogMessage("Không thể mở file để lưu Asset Profile: " + filename, true);
+    // Sử dụng m_Logger nếu có
+    if (m_Logger != NULL) m_Logger->LogError("Không thể mở file để lưu Asset Profile: " + filename);
+    else Print("LỖI: Không thể mở file để lưu Asset Profile: " + filename);
     return false;
 }
 
@@ -839,8 +908,11 @@ void CRiskManager::SetAssetConfig(double riskMultiplier, double slAtrMultiplier,
     m_AssetConfig.maxSpreadPoints = maxSpreadPoints;
     m_AssetConfig.volatilityFactor = volatilityFactor;
     
-    LogMessage(StringFormat("Đã thiết lập cấu hình tài sản: Risk=%.2f, SL ATR=%.2f, TP RR=%.2f, MaxSpread=%.1f, Volatility=%.2f",
-                         riskMultiplier, slAtrMultiplier, tpRrRatio, maxSpreadPoints, volatilityFactor), false);
+    // Sử dụng m_Logger nếu có
+    string msg = StringFormat("Đã thiết lập cấu hình tài sản: Risk=%.2f, SL ATR=%.2f, TP RR=%.2f, MaxSpread=%.1f, Volatility=%.2f",
+                         riskMultiplier, slAtrMultiplier, tpRrRatio, maxSpreadPoints, volatilityFactor);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg);
+    else Print(msg);
 }
 
 //+------------------------------------------------------------------+
@@ -885,7 +957,10 @@ void CRiskManager::UpdateDailyVars()
             m_WeeklyLoss = 0;
         }
         
-        LogMessage("Cập nhật biến hàng ngày, Start equity: " + DoubleToString(m_DayStartEquity, 2), true);
+        // Sử dụng m_Logger nếu có
+        string msg = "Cập nhật biến hàng ngày, Start equity: " + DoubleToString(m_DayStartEquity, 2);
+        if (m_Logger != NULL) m_Logger->LogInfo(msg);
+        else Print(msg);
     }
 }
 
@@ -897,14 +972,24 @@ void CRiskManager::ResetDailyStats(double newStartEquity = 0.0)
 {
     m_DailyTradeCount = 0;
     m_DailyLoss = 0;
-    m_DayStartEquity = (newStartEquity > 0) ? newStartEquity : m_AccountInfo.Equity();
+    
+    // Khởi tạo m_DayStartEquity dựa trên loại drawdown
+    if (m_DrawdownType == DRAWDOWN_BALANCE_BASED) {
+        m_DayStartEquity = (newStartEquity > 0) ? newStartEquity : m_AccountInfo.Balance();
+    } else {
+        m_DayStartEquity = (newStartEquity > 0) ? newStartEquity : m_AccountInfo.Equity();
+    }
     
     // Cập nhật PeakEquity nếu tài khoản đang tăng
     if (m_DayStartEquity > m_PeakEquity) {
         m_PeakEquity = m_DayStartEquity;
     }
     
-    LogMessage("Thống kê hàng ngày đã reset. Start Equity: " + DoubleToString(m_DayStartEquity, 2), true);
+    // Sử dụng m_Logger nếu có
+    string msg = "Thống kê hàng ngày đã reset. Start Equity: " + DoubleToString(m_DayStartEquity, 2) + 
+               ", Drawdown Type: " + (m_DrawdownType == DRAWDOWN_BALANCE_BASED ? "Balance Based" : "Equity Based");
+    if (m_Logger != NULL) m_Logger->LogInfo(msg);
+    else Print(msg);
 }
 
 //+------------------------------------------------------------------+
@@ -914,51 +999,59 @@ bool CRiskManager::CanOpenNewPosition(double volume, bool isBuy)
 {
     // 1. Kiểm tra xem có đang tạm dừng không
     if (TimeCurrent() < m_PauseUntil) {
-        LogMessage("Không thể mở vị thế mới: EA đang tạm dừng đến " + 
-                  TimeToString(m_PauseUntil, TIME_DATE|TIME_MINUTES), false);
+        string msg = "Không thể mở vị thế mới: EA đang tạm dừng đến " + TimeToString(m_PauseUntil, TIME_DATE|TIME_MINUTES);
+        if (m_Logger != NULL) m_Logger->LogInfo(msg);
+        else Print(msg);
         return false;
     }
 
     // 2. Kiểm tra giới hạn lỗ
     if (IsMaxLossReached()) {
-        LogMessage("Không thể mở vị thế mới: Đã đạt giới hạn lỗ tối đa", true);
+        string msg = "Không thể mở vị thế mới: Đã đạt giới hạn lỗ tối đa";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg);
+        else Print("CẢNH BÁO: " + msg);
         return false;
     }
     
     // 3. Kiểm tra giới hạn giao dịch hàng ngày
     if (m_PropFirmMode && m_DailyTradeCount >= m_MaxDailyTrades) {
-        LogMessage("Không thể mở vị thế mới: Đã đạt số lượng giao dịch tối đa trong ngày (" 
-                   + IntegerToString(m_MaxDailyTrades) + ")", true);
+        string msg = "Không thể mở vị thế mới: Đã đạt số lượng giao dịch tối đa trong ngày (" + IntegerToString(m_MaxDailyTrades) + ")";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg);
+        else Print("CẢNH BÁO: " + msg);
         return false;
     }
     
     // 4. Kiểm tra số lần thua liên tiếp
     if (m_ConsecutiveLosses >= m_MaxConsecutiveLosses) {
-        LogMessage("Không thể mở vị thế mới: Đã đạt số lần thua liên tiếp tối đa (" 
-                   + IntegerToString(m_MaxConsecutiveLosses) + ")", true);
+        string msg = "Không thể mở vị thế mới: Đã đạt số lần thua liên tiếp tối đa (" + IntegerToString(m_MaxConsecutiveLosses) + ")";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg);
+        else Print("CẢNH BÁO: " + msg);
         return false;
     }
     
     // 5. Kiểm tra margin
     if (!m_AccountInfo.FreeMarginCheck(m_Symbol, isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, volume, 
                                      m_SymbolInfo.Ask())) {
-        LogMessage("Không thể mở vị thế mới: Không đủ margin tự do", true);
+        string msg = "Không thể mở vị thế mới: Không đủ margin tự do";
+        if (m_Logger != NULL) m_Logger->LogError(msg);
+        else Print("LỖI: " + msg);
         return false;
     }
     
     // 6. Kiểm tra thị trường đang chuyển tiếp với mức tin cậy thấp
     if (m_IsTransitioningMarket && m_MarketRegimeConfidence < 0.4) {
-        LogMessage("Không thể mở vị thế mới: Thị trường đang chuyển tiếp với mức tin cậy thấp (" + 
-                  DoubleToString(m_MarketRegimeConfidence, 2) + ")", false);
+        string msg = "Không thể mở vị thế mới: Thị trường đang chuyển tiếp với mức tin cậy thấp (" + DoubleToString(m_MarketRegimeConfidence, 2) + ")";
+        if (m_Logger != NULL) m_Logger->LogInfo(msg);
+        else Print(msg);
         return false;
     }
     
     // 7. Kiểm tra biến động quá cao 
     double volatilityThreshold = 2.5 - 1.0 * m_MarketRegimeConfidence; // Phụ thuộc vào confidence
     if (m_ATRRatio > volatilityThreshold) {
-        LogMessage("Không thể mở vị thế mới: Biến động quá cao (ATR Ratio: " + 
-                  DoubleToString(m_ATRRatio, 2) + "x > " + 
-                  DoubleToString(volatilityThreshold, 2) + "x)", true);
+        string msg = "Không thể mở vị thế mới: Biến động quá cao (ATR Ratio: " + DoubleToString(m_ATRRatio, 2) + "x > " + DoubleToString(volatilityThreshold, 2) + "x)";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg);
+        else Print("CẢNH BÁO: " + msg);
         return false;
     }
     
@@ -971,16 +1064,17 @@ bool CRiskManager::CanOpenNewPosition(double volume, bool isBuy)
     // 9. Kiểm tra heat portfolio
     double heatValue = GetPortfolioHeatValue(volume, isBuy);
     if (heatValue > 2.5) {  // Ngưỡng heat quá cao
-        LogMessage("Không thể mở vị thế mới: Portfolio heat quá cao (" 
-                   + DoubleToString(heatValue, 2) + ")", false);
+        string msg = "Không thể mở vị thế mới: Portfolio heat quá cao (" + DoubleToString(heatValue, 2) + ")";
+        if (m_Logger != NULL) m_Logger->LogInfo(msg);
+        else Print(msg);
         return false;
     }
     
     // 10. Kiểm tra tiếp cận giới hạn lỗ hàng ngày
     if (IsApproachingDailyLossLimit()) {
-        LogMessage("Không thể mở vị thế mới: Đang tiếp cận giới hạn lỗ hàng ngày (" +
-                  DoubleToString(m_DailyLoss, 2) + " / " + 
-                  DoubleToString(m_DayStartEquity * m_MaxDailyLossPercent / 100.0, 2) + ")", true);
+        string msg = "Không thể mở vị thế mới: Đang tiếp cận giới hạn lỗ hàng ngày (" + DoubleToString(m_DailyLoss, 2) + " / " + DoubleToString(m_DayStartEquity * m_MaxDailyLossPercent / 100.0, 2) + ")";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg);
+        else Print("CẢNH BÁO: " + msg);
         return false;
     }
     
@@ -1000,29 +1094,35 @@ bool CRiskManager::CanScalePosition(double additionalVolume, bool isLong)
 {
     // 1. Kiểm tra giới hạn lỗ
     if (IsMaxLossReached()) {
-        LogMessage("Không thể thêm vào vị thế: Đã đạt giới hạn lỗ tối đa", true);
+        string msg = "Không thể thêm vào vị thế: Đã đạt giới hạn lỗ tối đa";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg);
+        else Print("CẢNH BÁO: " + msg);
         return false;
     }
     
     // 2. Kiểm tra margin
     if (!m_AccountInfo.FreeMarginCheck(m_Symbol, isLong ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, 
                                      additionalVolume, m_SymbolInfo.Ask())) {
-        LogMessage("Không thể thêm vào vị thế: Không đủ margin tự do", true);
+        string msg = "Không thể thêm vào vị thế: Không đủ margin tự do";
+        if (m_Logger != NULL) m_Logger->LogError(msg);
+        else Print("LỖI: " + msg);
         return false;
     }
     
     // 3. Kiểm tra drawdown hiện tại
     double currentDD = GetCurrentDrawdownPercent();
     if (currentDD > m_DrawdownReduceThreshold) {
-        LogMessage("Không thể thêm vào vị thế: Drawdown hiện tại (" + 
-                  DoubleToString(currentDD, 2) + "%) vượt quá ngưỡng (" + 
-                  DoubleToString(m_DrawdownReduceThreshold, 2) + "%)", false);
+        string msg = "Không thể thêm vào vị thế: Drawdown hiện tại (" + DoubleToString(currentDD, 2) + "%) vượt quá ngưỡng (" + DoubleToString(m_DrawdownReduceThreshold, 2) + "%)";
+        if (m_Logger != NULL) m_Logger->LogInfo(msg);
+        else Print(msg);
         return false;
     }
     
     // 4. Kiểm tra thị trường đang chuyển tiếp
     if (m_IsTransitioningMarket) {
-        LogMessage("Không thể thêm vào vị thế: Thị trường đang trong giai đoạn chuyển tiếp", false);
+        string msg = "Không thể thêm vào vị thế: Thị trường đang trong giai đoạn chuyển tiếp";
+        if (m_Logger != NULL) m_Logger->LogInfo(msg);
+        else Print(msg);
         return false;
     }
     
@@ -1033,21 +1133,25 @@ bool CRiskManager::CanScalePosition(double additionalVolume, bool isLong)
     
     // 6. Kiểm tra tiếp cận giới hạn lỗ ngày
     if (IsApproachingDailyLossLimit()) {
-        LogMessage("Không thể thêm vào vị thế: Đang tiếp cận giới hạn lỗ hàng ngày", false);
+        string msg = "Không thể thêm vào vị thế: Đang tiếp cận giới hạn lỗ hàng ngày";
+        if (m_Logger != NULL) m_Logger->LogInfo(msg);
+        else Print(msg);
         return false;
     }
     
     // 7. Kiểm tra số lần thua liên tiếp
     if (m_ConsecutiveLosses > 1) {
-        LogMessage("Không thể thêm vào vị thế: Đang có chuỗi thua (" + 
-                  IntegerToString(m_ConsecutiveLosses) + " lần)", false);
+        string msg = "Không thể thêm vào vị thế: Đang có chuỗi thua (" + IntegerToString(m_ConsecutiveLosses) + " lần)";
+        if (m_Logger != NULL) m_Logger->LogInfo(msg);
+        else Print(msg);
         return false;
     }
     
     // 8. V14: Kiểm tra biến động thị trường
     if (m_ATRRatio > 1.5) {
-        LogMessage("Không thể thêm vào vị thế: Biến động thị trường cao (" + 
-                  DoubleToString(m_ATRRatio, 2) + "x)", false);
+        string msg = "Không thể thêm vào vị thế: Biến động thị trường cao (" + DoubleToString(m_ATRRatio, 2) + "x)";
+        if (m_Logger != NULL) m_Logger->LogInfo(msg);
+        else Print(msg);
         return false;
     }
     
@@ -1061,9 +1165,9 @@ void CRiskManager::RegisterNewPosition(ulong ticket, double volume, double riskP
 {
     m_DailyTradeCount++;
     
-    LogMessage("Đã đăng ký vị thế mới #" + IntegerToString(ticket) + 
-                    ", Volume: " + DoubleToString(volume, 2) + 
-                    ", Risk: " + DoubleToString(riskPercent, 2) + "%", false);
+    string msg = "Đã đăng ký vị thế mới #" + IntegerToString(ticket) + ", Volume: " + DoubleToString(volume, 2) + ", Risk: " + DoubleToString(riskPercent, 2) + "%";
+    if (m_Logger != NULL) m_Logger->LogInfo(msg);
+    else Print(msg);
     
     // Lưu trạng thái thống kê mỗi khi có lệnh mới (để tiện theo dõi)
     m_LastStatsUpdate = TimeCurrent();
@@ -1075,8 +1179,9 @@ void CRiskManager::RegisterNewPosition(ulong ticket, double volume, double riskP
 //+------------------------------------------------------------------+
 void CRiskManager::UpdatePositionPartial(ulong ticket, double partialVolume)
 {
-    LogMessage("Đã đóng một phần vị thế #" + IntegerToString(ticket) + 
-                    ", Volume đóng: " + DoubleToString(partialVolume, 2), false);
+    string msg = "Đã đóng một phần vị thế #" + IntegerToString(ticket) + ", Volume đóng: " + DoubleToString(partialVolume, 2);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg);
+    else Print(msg);
 }
 
 //+------------------------------------------------------------------+
@@ -1261,10 +1366,9 @@ double CRiskManager::CalculateLotSize(string symbol, double stopLossPoints, doub
     }
     
     // Log thông tin tính toán
-    LogMessage("Risk calculation: Balance=$" + DoubleToString(accountBalance, 2) + 
-             ", Risk=" + DoubleToString(riskPercent, 2) + "%, SL=" + 
-             DoubleToString(stopLossPoints, 1) + " points, Lot=" + 
-             DoubleToString(lotSize, 2), false);
+    string msg_calc = "Risk calculation: Balance=$" + DoubleToString(accountBalance, 2) + ", Risk=" + DoubleToString(riskPercent, 2) + "%, SL=" + DoubleToString(stopLossPoints, 1) + " points, Lot=" + DoubleToString(lotSize, 2);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg_calc);
+    else Print(msg_calc);
     
     return lotSize;
 }
@@ -1295,10 +1399,9 @@ double CRiskManager::CalculateDynamicLotSize(string symbol, double stopLossPoint
     dynamicLotSize = NormalizeEntryLots(dynamicLotSize);
     
     // Log thông tin
-    LogMessage("Dynamic lot calculation: Base=" + DoubleToString(baseLotSize, 2) + 
-             ", ATR ratio=" + DoubleToString(atrRatio, 2) + "x, Adjustment=" + 
-             DoubleToString(adjustment, 2) + ", Final lot=" + 
-             DoubleToString(dynamicLotSize, 2), false);
+    string msg_dyn_calc = "Dynamic lot calculation: Base=" + DoubleToString(baseLotSize, 2) + ", ATR ratio=" + DoubleToString(atrRatio, 2) + "x, Adjustment=" + DoubleToString(adjustment, 2) + ", Final lot=" + DoubleToString(dynamicLotSize, 2);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg_dyn_calc);
+    else Print(msg_dyn_calc);
     
     return dynamicLotSize;
 }
@@ -1306,38 +1409,79 @@ double CRiskManager::CalculateDynamicLotSize(string symbol, double stopLossPoint
 //+------------------------------------------------------------------+
 //| V14.0: Tính toán lot size tối ưu                                 |
 //+------------------------------------------------------------------+
-double CRiskManager::CalculateOptimalLotSize(double riskPercent, double slDistancePoints)
+double CRiskManager::CalculateOptimalLotSize(double riskPercentInput, double slDistancePoints)
 {
-    if (riskPercent <= 0) riskPercent = m_RiskPerTrade;
-    if (slDistancePoints <= 0) return 0.01; // Giá trị an toàn mặc định
+    if (slDistancePoints <= 0) 
+    {
+        string msg = "CalculateOptimalLotSize: Invalid slDistancePoints <= 0. Returning 0.01.";
+        if (m_Logger != NULL) m_Logger->LogError(msg);
+        else Print("LỖI: " + msg);
+        return 0.01; // Giá trị an toàn mặc định
+    }
     
-    // Áp dụng risk thích ứng
-    riskPercent = CalculateAdaptiveRiskPercent();
-    
-    // Áp dụng hệ số theo tài sản
-    riskPercent *= m_AssetConfig.riskMultiplier;
-    
-    // Kiểm tra giới hạn risk
-    riskPercent = MathMin(riskPercent, m_MaxRisk);
-    riskPercent = MathMax(riskPercent, m_MinRisk);
+    double riskPercent = (riskPercentInput > 0) ? riskPercentInput : m_RiskPerTrade; // Sử dụng riskPercent từ input nếu có, nếu không thì dùng m_RiskPerTrade
+
+    // Lấy risk multiplier từ CurrentAssetProfile (thông qua m_AssetConfig)
+    double assetRiskMultiplier = m_AssetConfig.riskMultiplier; 
+    riskPercent *= assetRiskMultiplier;
+    string msg1 = StringFormat("CalculateOptimalLotSize: Initial risk=%.2f%%, AssetRiskMultiplier=%.2f, Risk after asset multiplier=%.2f%%", 
+                         (riskPercentInput > 0) ? riskPercentInput : m_RiskPerTrade, assetRiskMultiplier, riskPercent);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg1);
+    else Print(msg1);
+
+    // Áp dụng risk thích ứng (có thể đã bao gồm các yếu tố từ AssetProfile)
+    riskPercent = CalculateAdaptiveRiskPercent(riskPercent); // Truyền risk đã nhân với asset multiplier
+    string msg2 = StringFormat("CalculateOptimalLotSize: Risk after adaptive adjustment=%.2f%%", riskPercent);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg2);
+    else Print(msg2);
+        
+    // Kiểm tra giới hạn risk tổng thể của EA
+    riskPercent = MathMin(riskPercent, m_MaxRisk); // Giới hạn trên
+    riskPercent = MathMax(riskPercent, m_MinRisk); // Giới hạn dưới
+    string msg3 = StringFormat("CalculateOptimalLotSize: Risk after EA limits (Min:%.2f%%, Max:%.2f%%) = %.2f%%", m_MinRisk, m_MaxRisk, riskPercent);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg3);
+    else Print(msg3);
     
     // Tính lệnh thực tế
     double accountBalance = m_AccountInfo.Balance();
+    if (accountBalance <= 0)
+    {
+        string msg = "CalculateOptimalLotSize: Invalid accountBalance <= 0. Returning 0.01.";
+        if (m_Logger != NULL) m_Logger->LogError(msg);
+        else Print("LỖI: " + msg);
+        return 0.01;
+    }
     double riskAmount = accountBalance * riskPercent / 100.0;
     
     double tickSize = SymbolInfoDouble(m_Symbol, SYMBOL_TRADE_TICK_SIZE);
     double tickValue = SymbolInfoDouble(m_Symbol, SYMBOL_TRADE_TICK_VALUE);
     double point = SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
+
+    if (tickSize == 0 || point == 0) // tickValue có thể là 0 cho một số symbol đặc biệt, nhưng tickSize và point không nên
+    {
+        string msg = StringFormat("CalculateOptimalLotSize: Invalid symbol info for %s. TickSize=%.5f, Point=%.5f. Returning 0.01.", m_Symbol, tickSize, point);
+        if (m_Logger != NULL) m_Logger->LogError(msg);
+        else Print("LỖI: " + msg);
+        return 0.01;
+    }
     double valuePerPoint = tickValue / tickSize * point;
-    
+    if (valuePerPoint <= 0) // slDistancePoints * valuePerPoint không thể âm hoặc bằng 0
+    {
+        string msg = StringFormat("CalculateOptimalLotSize: Invalid valuePerPoint <= 0 for %s (TickValue=%.5f, TickSize=%.5f, Point=%.5f). Returning 0.01.", m_Symbol, tickValue, tickSize, point);
+        if (m_Logger != NULL) m_Logger->LogError(msg);
+        else Print("LỖI: " + msg);
+        return 0.01;
+    }
+        
     double lotSize = riskAmount / (slDistancePoints * valuePerPoint);
     
     // Chuẩn hóa lot size
     lotSize = NormalizeEntryLots(lotSize);
     
-    // Ghi log
-    LogMessage(StringFormat("Optimal lot size: Risk=%.2f%%, SL=%.1f points, Lot=%.2f", 
-                         riskPercent, slDistancePoints, lotSize), false);
+    string msg_final_lot = StringFormat("Optimal lot size calculated: FinalRisk=%.2f%%, SLPoints=%.1f, AccountBalance=%.2f, RiskAmount=%.2f, ValuePerPoint=%.5f, CalculatedLot=%.2f", 
+                         riskPercent, slDistancePoints, accountBalance, riskAmount, valuePerPoint, lotSize);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg_final_lot);
+    else Print(msg_final_lot);
     
     return lotSize;
 }
@@ -1347,100 +1491,160 @@ double CRiskManager::CalculateOptimalLotSize(double riskPercent, double slDistan
 //+------------------------------------------------------------------+
 double CRiskManager::CalculateOptimalStopLoss(double entryPrice, bool isLong)
 {
-    if (entryPrice <= 0) return 0;
+    if (entryPrice <= 0) 
+    {
+        string msg = "CalculateOptimalStopLoss: Invalid entryPrice <= 0. Returning 0.";
+        if (m_Logger != NULL) m_Logger->LogError(msg);
+        else Print("LỖI: " + msg);
+        return 0;
+    }
     
-    double stopLossPrice = 0;
-    double atr = 0;
-    
-    // AssetProfiler không có phương thức GetCurrentATR
-    // Sử dụng trực tiếp từ Asset Profile
-    if (m_AssetProfiler != NULL && m_AssetProfile.avgATR > 0) {
-        atr = m_AssetProfile.avgATR;
-    } 
-    // Nếu không, sử dụng ATR từ AssetProfile
-    else if (m_AssetProfile.avgATR > 0) {
-        atr = m_AssetProfile.avgATR * m_ATRRatio; // Điều chỉnh theo tỉ lệ hiện tại
-    } 
-    // Nếu không có, tính toán ATR trực tiếp
-    else {
-        int atrHandle = iATR(m_Symbol, PERIOD_H1, 14);
-        if (atrHandle != INVALID_HANDLE) {
-            double atrBuffer[];
-            ArraySetAsSeries(atrBuffer, true);
-            if (CopyBuffer(atrHandle, 0, 0, 1, atrBuffer) > 0) {
-                atr = atrBuffer[0];
+    double currentAtr = atrValue; // Sử dụng ATR được truyền vào nếu có
+
+    // Nếu atrValue không được cung cấp (hoặc bằng 0), thử lấy từ AssetProfile hoặc tính toán
+    if (currentAtr <= 0) 
+    {
+        if (m_AssetProfile.avgATR > 0) 
+        {
+            currentAtr = m_AssetProfile.avgATR; 
+            string msg_atr_profile = StringFormat("CalculateOptimalStopLoss: Using avgATR from AssetProfile: %.5f", currentAtr);
+            if (m_Logger != NULL) m_Logger->LogInfo(msg_atr_profile);
+            else Print(msg_atr_profile);
+        }
+        else 
+        {
+            // Tính toán ATR trực tiếp nếu không có trong AssetProfile
+            int atrHandle = iATR(m_Symbol, PERIOD_CURRENT, m_AssetConfig.atrPeriod > 0 ? m_AssetConfig.atrPeriod : 14); // Sử dụng atrPeriod từ config nếu có
+            if (atrHandle != INVALID_HANDLE) 
+            {
+                double atrBuffer[];
+                ArraySetAsSeries(atrBuffer, true);
+                if (CopyBuffer(atrHandle, 0, 0, 1, atrBuffer) > 0) 
+                {
+                    currentAtr = atrBuffer[0];
+                    string msg_atr_calc = StringFormat("CalculateOptimalStopLoss: Calculated ATR(%d) directly: %.5f", m_AssetConfig.atrPeriod > 0 ? m_AssetConfig.atrPeriod : 14, currentAtr);
+                    if (m_Logger != NULL) m_Logger->LogInfo(msg_atr_calc);
+                    else Print(msg_atr_calc);
+                }
+                IndicatorRelease(atrHandle);
             }
-            IndicatorRelease(atrHandle);
         }
     }
     
-    // Nếu không thể tính ATR, sử dụng % giá
-    if (atr <= 0) {
-        // Sử dụng 1% giá trị
-        atr = entryPrice * 0.01;
+    // Nếu vẫn không thể tính ATR, sử dụng % giá như một phương án dự phòng cuối cùng
+    if (currentAtr <= 0) 
+    {        
+        currentAtr = entryPrice * (m_AssetConfig.fallbackSlPercent > 0 ? m_AssetConfig.fallbackSlPercent / 100.0 : 0.01); // Sử dụng fallbackSlPercent từ config hoặc 1%
+        string msg_fallback = StringFormat("CalculateOptimalStopLoss: ATR is zero or invalid. Using fallback SL: %.2f%% of entry price = %.5f", 
+                                (m_AssetConfig.fallbackSlPercent > 0 ? m_AssetConfig.fallbackSlPercent : 1.0), currentAtr);
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_fallback); // Changed to LogWarning as it's a fallback scenario
+        else Print("CẢNH BÁO: " + msg_fallback);
     }
     
-    // Tính SL dựa trên ATR
+    // Lấy slMultiplier từ CurrentAssetProfile (thông qua m_AssetConfig)
     double slMultiplier = m_AssetConfig.slAtrMultiplier;
+    string msg_sl_multi = StringFormat("CalculateOptimalStopLoss: Using slAtrMultiplier from AssetConfig: %.2f", slMultiplier);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg_sl_multi);
+    else Print(msg_sl_multi);
+
+    // Tính khoảng cách StopLoss bằng ATR * slMultiplier
+    double stopLossDistance = currentAtr * slMultiplier;
     
-    // Điều chỉnh SL theo ATR Ratio (tăng khoảng cách khi thị trường biến động cao)
-    if (m_ATRRatio > 1.5) {
-        slMultiplier *= 1.2; // Tăng 20% khi biến động cao
-    } else if (m_ATRRatio < 0.8) {
-        slMultiplier *= 0.9; // Giảm 10% khi biến động thấp
-    }
-    
-    // Tính giá StopLoss
+    double stopLossPrice = 0;
     if (isLong) {
-        stopLossPrice = entryPrice - (atr * slMultiplier);
+        stopLossPrice = entryPrice - stopLossDistance;
     } else {
-        stopLossPrice = entryPrice + (atr * slMultiplier);
+        stopLossPrice = entryPrice + stopLossDistance;
+    }
+    string msg_tent_sl = StringFormat("CalculateOptimalStopLoss: Entry=%.5f, ATR=%.5f, SLMultiplier=%.2f, SLDistance=%.5f, TentativeSL=%.5f", 
+                         entryPrice, currentAtr, slMultiplier, stopLossDistance, stopLossPrice);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg_tent_sl);
+    else Print(msg_tent_sl);
+    
+    // Đảm bảo SL cách xa đủ so với giá vào lệnh, dựa trên minStopDistance từ AssetProfile
+    double minStopPoints = m_AssetProfile.minStopDistance; // Đây là số điểm, không phải giá trị tiền tệ
+    double minDistanceValue = minStopPoints * SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
+    string msg_min_dist = StringFormat("CalculateOptimalStopLoss: MinStopDistancePoints from AssetProfile: %.1f, MinDistanceValue: %.5f", minStopPoints, minDistanceValue);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg_min_dist);
+    else Print(msg_min_dist);
+
+    if (isLong) {
+        if ((entryPrice - stopLossPrice) < minDistanceValue) {
+            stopLossPrice = entryPrice - minDistanceValue;
+            string msg_adj_long = StringFormat("CalculateOptimalStopLoss: Adjusted SL for LONG to meet MinDistance. New SL=%.5f", stopLossPrice);
+            if (m_Logger != NULL) m_Logger->LogInfo(msg_adj_long);
+            else Print(msg_adj_long);
+        }
+    } else { // Short
+        if ((stopLossPrice - entryPrice) < minDistanceValue) {
+            stopLossPrice = entryPrice + minDistanceValue;
+            string msg_adj_short = StringFormat("CalculateOptimalStopLoss: Adjusted SL for SHORT to meet MinDistance. New SL=%.5f", stopLossPrice);
+            if (m_Logger != NULL) m_Logger->LogInfo(msg_adj_short);
+            else Print(msg_adj_short);
+        }
     }
     
-    // Đảm bảo SL cách xa đủ so với giá hiện tại
-    double minDistance = m_AssetProfile.minStopDistance * _Point;
-    
-    if (isLong && (entryPrice - stopLossPrice) < minDistance) {
-        stopLossPrice = entryPrice - minDistance;
-    } else if (!isLong && (stopLossPrice - entryPrice) < minDistance) {
-        stopLossPrice = entryPrice + minDistance;
-    }
-    
-    return NormalizeDouble(stopLossPrice, _Digits);
+    return NormalizeDouble(stopLossPrice, (int)SymbolInfoInteger(m_Symbol, SYMBOL_DIGITS));
 }
 
 //+------------------------------------------------------------------+
 //| V14.0: Tính toán Take Profit tối ưu                              |
 //+------------------------------------------------------------------+
-double CRiskManager::CalculateOptimalTakeProfit(double entryPrice, double stopLoss, bool isLong)
+double CRiskManager::CalculateOptimalTakeProfit(double entryPrice, double stopLossPrice, bool isLong)
 {
-    if (entryPrice <= 0 || stopLoss <= 0) return 0;
+    if (entryPrice <= 0 || stopLossPrice <= 0) 
+    {
+        string msg = "CalculateOptimalTakeProfit: Invalid entryPrice or stopLossPrice <= 0. Returning 0.";
+        if (m_Logger != NULL) m_Logger->LogError(msg);
+        else Print("LỖI: " + msg);
+        return 0;
+    }
     
+    // Tính khoảng cách SL (tuyệt đối)
+    double slDistance = MathAbs(entryPrice - stopLossPrice);
+    if (slDistance == 0)
+    {
+        string msg_sl_zero = "CalculateOptimalTakeProfit: slDistance is zero. Cannot calculate TP. Returning 0.";
+        if (m_Logger != NULL) m_Logger->LogError(msg_sl_zero);
+        else Print("LỖI: " + msg_sl_zero);
+        return 0; // Tránh chia cho 0 hoặc TP trùng entry
+    }
+    string msg_sl_dist = StringFormat("CalculateOptimalTakeProfit: Entry=%.5f, SL=%.5f, SLDistance=%.5f", entryPrice, stopLossPrice, slDistance);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg_sl_dist);
+    else Print(msg_sl_dist);
+
+    // Lấy tỷ lệ R:R tối ưu từ CurrentAssetProfile (thông qua m_AssetConfig)
+    double rrRatio = m_AssetConfig.tpRrRatio;
+    string msg_rr_ratio = StringFormat("CalculateOptimalTakeProfit: Using tpRrRatio from AssetConfig: %.2f", rrRatio);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg_rr_ratio);
+    else Print(msg_rr_ratio);
+
+    // (Tùy chọn) Logic điều chỉnh rrRatio dựa trên các yếu tố khác từ AssetProfile có thể được thêm ở đây nếu cần
+    // Ví dụ: if (m_AssetProfile.marketState == SOME_STATE) rrRatio *= m_AssetProfile.rrModifierForThatState;
+    // Hiện tại, chúng ta sẽ giữ nguyên rrRatio từ AssetConfig theo yêu cầu ban đầu.
+
+    if (rrRatio <= 0) // Đảm bảo rrRatio hợp lệ
+    {
+        string msg_invalid_rr = StringFormat("CalculateOptimalTakeProfit: Invalid rrRatio <= 0 (%.2f). Using default 1.0.", rrRatio);
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_invalid_rr); // Changed to LogWarning
+        else Print("CẢNH BÁO: " + msg_invalid_rr);
+        rrRatio = 1.0; 
+    }
+
+    double takeProfitDistance = slDistance * rrRatio;
     double takeProfitPrice = 0;
     
-    // Tính khoảng cách SL
-    double slDistance = MathAbs(entryPrice - stopLoss);
-    
-    // Lấy tỷ lệ R:R tối ưu từ AssetProfile hoặc AssetConfig
-    double rrRatio = m_AssetConfig.tpRrRatio;
-    
-    // Điều chỉnh RR theo Regime
-    if (m_CurrentRegime == REGIME_TRENDING_BULL || m_CurrentRegime == REGIME_TRENDING_BEAR) {
-        // Tăng TP cho xu hướng mạnh
-        rrRatio *= 1.2;
-    } else if (m_CurrentRegime == REGIME_RANGING_STABLE || m_CurrentRegime == REGIME_RANGING_VOLATILE) {
-        // Giảm TP cho sideway
-        rrRatio *= 0.8;
-    }
-    
-    // Tính giá TP dựa trên R:R
     if (isLong) {
-        takeProfitPrice = entryPrice + (slDistance * rrRatio);
+        takeProfitPrice = entryPrice + takeProfitDistance;
     } else {
-        takeProfitPrice = entryPrice - (slDistance * rrRatio);
+        takeProfitPrice = entryPrice - takeProfitDistance;
     }
+    string msg_tp_calc = StringFormat("CalculateOptimalTakeProfit: RRRatio=%.2f, TPDistance=%.5f, CalculatedTP=%.5f", 
+                         rrRatio, takeProfitDistance, takeProfitPrice);
+    if (m_Logger != NULL) m_Logger->LogInfo(msg_tp_calc);
+    else Print(msg_tp_calc);
     
-    return NormalizeDouble(takeProfitPrice, _Digits);
+    return NormalizeDouble(takeProfitPrice, (int)SymbolInfoInteger(m_Symbol, SYMBOL_DIGITS));
 }
 
 //+------------------------------------------------------------------+
@@ -1473,49 +1677,46 @@ double CRiskManager::CalculateATRBasedLotSizeAdjustment(double atrRatio)
 //+------------------------------------------------------------------+
 //| Tính toán % risk thích ứng dựa trên drawdown, regime, session    |
 //+------------------------------------------------------------------+
-double CRiskManager::CalculateAdaptiveRiskPercent()
+double CRiskManager::CalculateAdaptiveRiskPercent(double baseRiskPercent = -1.0, string &adjustmentReasonOut = "")
 {
-    // Bắt đầu với risk cơ bản từ input
-    double baseRiskFromInput = m_RiskPerTrade;
-    double finalRisk = baseRiskFromInput;
-    string reason = "Base risk (Input): " + DoubleToString(baseRiskFromInput, 2) + "%";
+    // Nếu baseRiskPercent không được cung cấp hoặc < 0, sử dụng m_RiskPerTrade làm cơ sở
+    double initialRisk = (baseRiskPercent < 0) ? m_RiskPerTrade : baseRiskPercent;
+    string reason = "Base risk for adaptation: " + DoubleToString(initialRisk, 2) + "%";
+    double finalRisk = initialRisk; // Bắt đầu với initialRisk đã được xác định ở trên
+    // reason đã được khởi tạo ở trên.
 
-    // Lấy đề xuất từ AssetProfiler (nếu có và được kích hoạt)
-    double profilerSuggestedRisk = baseRiskFromInput; // Mặc định là risk từ input
-    if (m_AssetProfiler != NULL && m_AdaptiveMode != MODE_MANUAL) // Chỉ lấy nếu không phải Manual
-    {
-        // Giả sử AssetProfiler có hàm GetSuggestedRiskPercent(string symbol)
-        // Hiện tại, chúng ta sẽ dùng một giá trị giả định hoặc logic đơn giản hóa
-        // dựa trên m_AssetConfig.riskMultiplier nếu có
-        if(m_AssetConfig.riskMultiplier != 0 && m_AssetConfig.riskMultiplier != 1.0) // Kiểm tra xem có giá trị hợp lệ và khác 1.0 không
-        {
-           profilerSuggestedRisk = baseRiskFromInput * m_AssetConfig.riskMultiplier; 
-           if (m_Logger && m_DetailedLogging) 
-            m_Logger.LogFormat(LOG_LEVEL_DEBUG, "Profiler suggested risk based on m_AssetConfig.riskMultiplier: %.2f%% (Base: %.2f%%, Multiplier: %.2f)", profilerSuggestedRisk, baseRiskFromInput, m_AssetConfig.riskMultiplier);
-        }
-        else if (m_AssetProfiler.IsProfileAvailable(m_Symbol)) // Kiểm tra xem profile có sẵn không
-        {
-            // Đây là nơi bạn sẽ gọi hàm thực tế từ AssetProfiler để lấy risk đề xuất
-            // Ví dụ: profilerSuggestedRisk = m_AssetProfiler.GetSuggestedRiskForSymbol(m_Symbol);
-            // Vì hàm đó chưa tồn tại, tạm thời giữ nguyên hoặc có thể log một cảnh báo
-            if (m_Logger && m_DetailedLogging) 
-                m_Logger.LogFormat(LOG_LEVEL_DEBUG, "AssetProfiler profile available for %s, but GetSuggestedRiskForSymbol() not yet implemented. Using base risk for profiler suggestion.", m_Symbol);
-        }
+    // Logic lấy đề xuất từ AssetProfiler (nếu có và được kích hoạt) đã được chuyển vào CalculateOptimalLotSize
+    // hoặc có thể được tích hợp ở đây nếu CalculateAdaptiveRiskPercent được gọi độc lập và cần thông tin này.
+    // Hiện tại, chúng ta giả định initialRisk đã bao gồm ảnh hưởng từ m_AssetConfig.riskMultiplier nếu CalculateOptimalLotSize gọi hàm này.
+    // Nếu CalculateAdaptiveRiskPercent được gọi từ nơi khác, cần đảm bảo initialRisk là phù hợp.
+
+    double profilerSuggestedRisk = initialRisk; // Khởi tạo với giá trị mặc định
+    // Lấy đề xuất từ AssetProfiler nếu có
+    if (m_AssetProfiler != NULL && m_AdaptiveMode != MODE_MANUAL) {
+        // Giả sử AssetProfiler có hàm GetSuggestedRiskForSymbol trả về % risk
+        // double suggestedByProfiler = m_AssetProfiler.GetSuggestedRiskForSymbol(m_Symbol, m_CurrentRegime, m_CurrentSession, m_ATRRatio);
+        // if (suggestedByProfiler > 0) { // Nếu có đề xuất hợp lệ
+        //     profilerSuggestedRisk = suggestedByProfiler;
+        // }
+        // Tạm thời comment out vì GetSuggestedRiskForSymbol chưa được implement đầy đủ trong CAssetProfiler
+        // if (m_Logger != NULL && m_DetailedLogging) 
+        //     m_Logger->LogFormat(LOG_LEVEL_DEBUG, "AssetProfiler profile available for %s, but GetSuggestedRiskForSymbol() not yet implemented. Using base risk for profiler suggestion.", m_Symbol);
     }
 
     // Xử lý dựa trên AdaptiveMode
+    double baseRiskFromInput = initialRisk; // Lưu lại giá trị risk ban đầu từ input (hoặc m_RiskPerTrade)
     switch (m_AdaptiveMode)
     {
         case MODE_MANUAL:
-            // finalRisk đã là baseRiskFromInput
+            // finalRisk đã là baseRiskFromInput (initialRisk)
             reason += "; Mode: Manual";
             break;
 
         case MODE_LOG_ONLY:
-            // Vẫn sử dụng finalRisk = baseRiskFromInput
-            if (m_Logger && profilerSuggestedRisk != baseRiskFromInput)
+            // Vẫn sử dụng finalRisk = baseRiskFromInput (initialRisk)
+            if (m_Logger != NULL && profilerSuggestedRisk != baseRiskFromInput)
             {
-                m_Logger.LogFormat(LOG_LEVEL_INFO, 
+                m_Logger->LogFormat(LOG_LEVEL_INFO, 
                     "AdaptiveMode_LogOnly: AssetProfiler suggests RiskPercent=%.2f%%, but using user input of %.2f%% for %s.",
                     profilerSuggestedRisk, baseRiskFromInput, m_Symbol);
             }
@@ -1523,29 +1724,33 @@ double CRiskManager::CalculateAdaptiveRiskPercent()
             break;
 
         case MODE_HYBRID:
-            finalRisk = (baseRiskFromInput * 0.7) + (profilerSuggestedRisk * 0.3);
-            reason += "; Mode: Hybrid (Input: " + DoubleToString(baseRiskFromInput,2) + "%% * 0.7 + Profiler: " + DoubleToString(profilerSuggestedRisk,2) + "%% * 0.3 = " + DoubleToString(finalRisk,2) + "%%)";
-            if (m_Logger)
-            {
-                 m_Logger.LogFormat(LOG_LEVEL_INFO, 
-                    "AdaptiveMode_Hybrid: Calculated Risk=%.2f%% (Input %.2f%%, Profiler %.2f%%) for %s.",
-                    finalRisk, baseRiskFromInput, profilerSuggestedRisk, m_Symbol);
-            }
+            // finalRisk được tính dựa trên baseRiskFromInput và profilerSuggestedRisk
+            // Đảm bảo finalRisk được cập nhật ở đây nếu logic này được giữ lại
+            // Ví dụ: initialRisk = (baseRiskFromInput * 0.7) + (profilerSuggestedRisk * 0.3);
+            // reason += "; Mode: Hybrid (Input: " + DoubleToString(baseRiskFromInput,2) + "%% * 0.7 + Profiler: " + DoubleToString(profilerSuggestedRisk,2) + "%% * 0.3 = " + DoubleToString(initialRisk,2) + "%%)";
+            // if (m_Logger != NULL)
+            // {
+            //      m_Logger->LogFormat(LOG_LEVEL_INFO, 
+            //         "AdaptiveMode_Hybrid: Calculated Risk=%.2f%% (Input %.2f%%, Profiler %.2f%%) for %s.",
+            //         initialRisk, baseRiskFromInput, profilerSuggestedRisk, m_Symbol);
+            // }
+            // Hiện tại, logic hybrid sẽ được xử lý sau khi các yếu tố khác được áp dụng, hoặc initialRisk đã bao gồm nó.
+            reason += "; Mode: Hybrid (logic to be refined)";
             break;
     }
 
     // Ghi log lý do ban đầu
-    if(m_Logger && m_DetailedLogging)
-        m_Logger.LogFormat(LOG_LEVEL_DEBUG, "AdaptiveRiskCalculation (Pre-Adjustments): %s", reason);
+    if(m_Logger != NULL && m_DetailedLogging)
+        m_Logger->LogFormat(LOG_LEVEL_DEBUG, "AdaptiveRiskCalculation (Pre-Adjustments): %s", reason);
 
-    // --- BẮT ĐẦU CÁC ĐIỀU CHỈNH KHÁC LÊN finalRisk ---
-    double adjustedRisk = finalRisk;
-    string adjustmentReason = "Initial calculated risk post-adaptive_mode: " + DoubleToString(adjustedRisk, 2) + "%";
+    // Khối switch đã được đóng ở trên, tiếp tục với adjustedRisk
+    double adjustedRisk = finalRisk; // finalRisk đã được xác định bởi logic trong switch(m_AdaptiveMode)
+    adjustmentReasonOut = reason; // Tiếp tục xây dựng reason string
 
-    // --- 1. Điều chỉnh theo Drawdown (giữ lại logic cũ nhưng áp dụng lên adjustedRisk) ---
-    double currentDD = GetCurrentDrawdownPercent();
+    // --- 1. Điều chỉnh theo Drawdown ---
+    double currentDD = GetCurrentDrawdownPercent(m_AccountInfo.Equity(), m_PeakEquity, m_DrawdownType);
     double ddFactor = 1.0;
-    
+
     if (!m_EnableTaperedRisk) {
         if (currentDD >= m_DrawdownReduceThreshold && currentDD < m_MaxDrawdownPercent) {
             ddFactor = m_MinRiskMultiplier;
@@ -1570,137 +1775,73 @@ double CRiskManager::CalculateAdaptiveRiskPercent()
         }
     }
     adjustedRisk *= ddFactor;
-    adjustmentReason += ", DDReductionFactor: " + DoubleToString(ddFactor, 2);
+    adjustmentReasonOut += "; DDReductionFactor: " + DoubleToString(ddFactor, 2);
 
-    // --- CÁC YẾU TỐ ĐIỀU CHỈNH KHÁC (NẾU CÓ, ví dụ: Regime, Session) ---
-    // Ví dụ: (Cần có các hàm GetRegimeFactor, GetSessionFactor tương ứng)
-    /*
-    double regimeFactor = GetRegimeFactor(m_CurrentRegime);
-    adjustedRisk *= regimeFactor;
-    adjustmentReason += ", RegimeFactor: " + DoubleToString(regimeFactor, 2);
+    // Ghi log các điều chỉnh drawdown
+    if(m_Logger != NULL && m_DetailedLogging)
+        m_Logger->LogFormat(LOG_LEVEL_DEBUG, "RiskAfterDrawdownAdjustment: %s, AdjustedRisk: %.2f%%", adjustmentReasonOut, adjustedRisk);
 
-    double sessionFactor = GetSessionFactor(m_CurrentSession);
-    adjustedRisk *= sessionFactor;
-    adjustmentReason += ", SessionFactor: " + DoubleToString(sessionFactor, 2);
-    */
-
-    // --- Giới hạn risk trong khoảng min/max đã định (nếu có m_MinRisk, m_MaxRisk) ---
-    // adjustedRisk = MathMax(m_MinRisk, MathMin(m_MaxRisk, adjustedRisk));
-    // adjustmentReason += ", FinalClampedRisk: " + DoubleToString(adjustedRisk, 2) + "%";
-
-    if(m_Logger && m_DetailedLogging)
-        m_Logger.LogFormat(LOG_LEVEL_DEBUG, "FurtherRiskAdjustments: %s", adjustmentReason);
-
-    return adjustedRisk;
-    
     // --- 2. Điều chỉnh theo Market Regime ---
-    double regimeFactor = GetRegimeFactor(m_CurrentRegime);
-    
+    double regimeFactor = this.GetRegimeFactor(m_CurrentRegime, m_IsTransitioningMarket);
+    adjustedRisk *= regimeFactor;
+    adjustmentReasonOut += "; RegimeFactor(" + EnumToString(m_CurrentRegime) + ",Trans:" + (m_IsTransitioningMarket ? "T" : "F") + "): " + DoubleToString(regimeFactor, 2);
+
     // --- 3. Điều chỉnh theo phiên ---
-    double sessionFactor = GetSessionFactor(m_CurrentSession);
-    
+    double sessionFactor = this.GetSessionFactor(m_CurrentSession, m_Symbol);
+    adjustedRisk *= sessionFactor;
+    adjustmentReasonOut += "; SessionFactor(" + EnumToString(m_CurrentSession) + "): " + DoubleToString(sessionFactor, 2);
+
     // --- 4. Điều chỉnh theo tài sản ---
-    double symbolFactor = GetSymbolRiskFactor();
-    
+    double symbolFactor = this.GetSymbolRiskFactor(m_Symbol);
+    adjustedRisk *= symbolFactor;
+    adjustmentReasonOut += "; SymbolFactor(" + m_Symbol + "): " + DoubleToString(symbolFactor, 2);
+
     // --- 5. Điều chỉnh theo hiệu suất gần đây ---
     double performanceFactor = 1.0;
-    
-    // Nếu gần đây thắng liên tục -> tăng nhẹ risk
+
     if (m_ConsecutiveWins >= 3) {
         performanceFactor = 1.0 + MathMin(0.1, 0.02 * m_ConsecutiveWins);
     }
-    // Nếu gần đây thua liên tiếp -> giảm risk
     else if (m_ConsecutiveLosses >= 2) {
-        performanceFactor = 1.0 - MathMin(0.3, 0.1 * m_ConsecutiveLosses);
+        performanceFactor = 1.0 - MathMin(0.5, 0.1 * m_ConsecutiveLosses);
     }
-    
-    // --- Tính toán risk cuối cùng ---
-    double finalRisk = baseRisk * ddFactor * regimeFactor * sessionFactor * symbolFactor * performanceFactor;
-    
-    // Giới hạn tối đa và tối thiểu
-    finalRisk = MathMin(finalRisk, m_MaxRisk);
-    finalRisk = MathMax(finalRisk, m_MinRisk);
-    
-    // Ghi log nếu risk điều chỉnh khác risk cơ sở (không ghi quá nhiều)
-    if (MathAbs(finalRisk - baseRisk) > 0.05) {
-        LogMessage(StringFormat("Adaptive Risk: DD=%.2f(%.1f%%), Regime=%.2f, Session=%.2f, Symbol=%.2f, Perf=%.2f → Final=%.2f%%",
-                             ddFactor, currentDD, regimeFactor, sessionFactor, symbolFactor, performanceFactor, finalRisk), false);
+    adjustedRisk *= performanceFactor;
+    adjustmentReasonOut += "; PerfFactor(W:" + IntegerToString(m_ConsecutiveWins) + ",L:" + IntegerToString(m_ConsecutiveLosses) + "): " + DoubleToString(performanceFactor, 2);
+
+    // --- Giới hạn risk trong khoảng min/max đã định ---
+    if (m_MaxRisk > 0 && m_MinRisk >= 0 && m_MaxRisk >= m_MinRisk) {
+        adjustedRisk = MathMax(m_MinRisk, MathMin(m_MaxRisk, adjustedRisk));
+        adjustmentReasonOut += "; ClampedToRange[" + DoubleToString(m_MinRisk,2) + "-" + DoubleToString(m_MaxRisk,2) + "]: " + DoubleToString(adjustedRisk,2) + "%";
     }
-    
-    return NormalizeDouble(finalRisk, 2);
+
+    if(m_Logger != NULL && m_DetailedLogging)
+        m_Logger->LogFormat(LOG_LEVEL_DEBUG, "FinalAdaptiveRiskCalculation: %s, FinalAdjustedRisk: %.2f%%", adjustmentReasonOut, adjustedRisk);
+
+    return adjustedRisk;
+}
+// Các hàm GetRegimeFactor, GetSessionFactor, GetSymbolRiskFactor cần được định nghĩa ở đây hoặc trong file khác và include vào.
+// Nếu chúng không được định nghĩa, sẽ gây lỗi biên dịch.
+// Hiện tại, chúng ta giả định chúng sẽ được cung cấp sau.
+
+// --- END OF CalculateAdaptiveRiskPercent ---
+    // --- Giới hạn risk trong khoảng min/max đã định ---
+    // Đảm bảo m_MinRisk và m_MaxRisk được khai báo và khởi tạo trong class CRiskManager
+    // Chuyển đổi sang double nếu chúng là kiểu khác (ví dụ: int)
+    double minRisk = (double)m_MinRisk; // Giả sử m_MinRisk là thành viên của class
+    double maxRisk = (double)m_MaxRisk; // Giả sử m_MaxRisk là thành viên của class
+
+    if (maxRisk > 0 && minRisk >= 0 && maxRisk >= minRisk) { // Chỉ áp dụng nếu các giá trị hợp lệ
+        adjustedRisk = MathMax(minRisk, MathMin(maxRisk, adjustedRisk));
+        adjustmentReasonOut += "; ClampedToRange[" + DoubleToString(minRisk,2) + "-" + DoubleToString(maxRisk,2) + "]: " + DoubleToString(adjustedRisk,2) + "%";
+    }
+
+    if(m_Logger != NULL && m_DetailedLogging)
+        m_Logger->LogFormat(LOG_LEVEL_DEBUG, "FinalAdaptiveRiskCalculation: %s, FinalAdjustedRisk: %.2f%%", adjustmentReasonOut, adjustedRisk);
+
+    return adjustedRisk;
 }
 
-//+------------------------------------------------------------------+
-//| V14.0: Tính hệ số điều chỉnh risk theo regime                    |
-//+------------------------------------------------------------------+
-double CRiskManager::GetRegimeFactor(ENUM_MARKET_REGIME regime)
-{
-    switch (regime) {
-        case REGIME_TRENDING_BULL:
-        case REGIME_TRENDING_BEAR:
-            // Xu hướng rõ ràng: Risk bình thường
-            return 1.0;
-            
-        case REGIME_RANGING_STABLE:
-            // Sideway ổn định: Giảm nhẹ risk
-            return 0.85;
-            
-        case REGIME_RANGING_VOLATILE:
-            // Sideway biến động: Giảm risk 30%
-            return 0.7;
-            
-        case REGIME_VOLATILE_EXPANSION:
-            // Biến động cao: Giảm risk 50%
-            return 0.5;
-            
-        case REGIME_VOLATILE_CONTRACTION:
-            // Siết chặt biến động: Risk nhẹ
-            return 0.8;
-            
-        default:
-            return 1.0;
-    }
-}
 
-//+------------------------------------------------------------------+
-//| V14.0: Tính hệ số điều chỉnh risk theo phiên                     |
-//+------------------------------------------------------------------+
-double CRiskManager::GetSessionFactor(ENUM_SESSION session)
-{
-    switch (session) {
-        case SESSION_ASIAN:
-            // Phiên Á: Biến động thấp, volume thấp
-            return 0.8;
-            
-        case SESSION_EUROPEAN:
-            // Phiên Âu: Thanh khoản tốt
-            return 1.0;
-            
-        case SESSION_AMERICAN:
-            // Phiên Mỹ: Thanh khoản tốt 
-            return 1.0;
-            
-        case SESSION_EUROPEAN_AMERICAN:
-            // Phiên giao thoa Âu-Mỹ: Thanh khoản tốt nhất
-            return 1.0;
-            
-        case SESSION_CLOSING:
-            // Phiên đóng cửa: Giao dịch ít, có thể biến động do đóng lệnh
-            return 0.7;
-            
-        default:
-            return 1.0;
-    }
-}
-
-//+------------------------------------------------------------------+
-//| V14.0: Tính hệ số điều chỉnh risk theo tài sản                   |
-//+------------------------------------------------------------------+
-double CRiskManager::GetSymbolRiskFactor()
-{
-    // Đã được tích hợp trong AssetConfig
-    return m_AssetConfig.riskMultiplier;
-}
 
 //+------------------------------------------------------------------+
 //| V14.0: Kiểm tra tiếp cận giới hạn lỗ hàng ngày                   |
@@ -1720,20 +1861,23 @@ double CRiskManager::IsApproachingDailyLossLimit()
 bool CRiskManager::CheckPauseCondition()
 {
     if (GetCurrentDrawdownPercent() >= m_MaxDrawdownPercent) {
-        LogMessage("Điều kiện tạm dừng: Drawdown vượt ngưỡng tối đa " + 
-                 DoubleToString(m_MaxDrawdownPercent, 2) + "%", true);
+        string msg_dd = "Điều kiện tạm dừng: Drawdown vượt ngưỡng tối đa " + DoubleToString(m_MaxDrawdownPercent, 2) + "%";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_dd); // Changed to LogWarning
+        else Print("CẢNH BÁO: " + msg_dd);
         return true;
     }
     
     if (m_ConsecutiveLosses >= m_MaxConsecutiveLosses) {
-        LogMessage("Điều kiện tạm dừng: Đạt số lần thua liên tiếp tối đa " + 
-                 IntegerToString(m_MaxConsecutiveLosses), true);
+        string msg_cl = "Điều kiện tạm dừng: Đạt số lần thua liên tiếp tối đa " + IntegerToString(m_MaxConsecutiveLosses);
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_cl); // Changed to LogWarning
+        else Print("CẢNH BÁO: " + msg_cl);
         return true;
     }
     
     if (GetDailyLossPercent() >= m_MaxDailyLossPercent) {
-        LogMessage("Điều kiện tạm dừng: Đạt giới hạn lỗ hàng ngày " + 
-                 DoubleToString(m_MaxDailyLossPercent, 2) + "%", true);
+        string msg_dl = "Điều kiện tạm dừng: Đạt giới hạn lỗ hàng ngày " + DoubleToString(m_MaxDailyLossPercent, 2) + "%";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_dl); // Changed to LogWarning
+        else Print("CẢNH BÁO: " + msg_dl);
         return true;
     }
     
@@ -1775,7 +1919,8 @@ void CRiskManager::PauseTrading(int minutes, string reason = "")
     
     string pauseMsg = "EA tạm dừng " + (reason != "" ? "vì " + reason : "") + 
                     " đến " + TimeToString(m_PauseUntil, TIME_DATE|TIME_MINUTES);
-    LogMessage(pauseMsg, true);
+    if (m_Logger != NULL) m_Logger->LogWarning(pauseMsg); // Changed to LogWarning
+    else Print("CẢNH BÁO: " + pauseMsg);
 }
 
 //+------------------------------------------------------------------+
@@ -1786,7 +1931,8 @@ void CRiskManager::ResumeTrading(string reason = "")
     m_PauseUntil = 0;
     
     string resumeMsg = "EA tiếp tục hoạt động" + (reason != "" ? " vì " + reason : "");
-    LogMessage(resumeMsg, true);
+    if (m_Logger != NULL) m_Logger->LogInfo(resumeMsg);
+    else Print(resumeMsg);
 }
 
 //+------------------------------------------------------------------+
@@ -1797,14 +1943,18 @@ bool CRiskManager::IsMaxLossReached()
     // Kiểm tra drawdown
     double currentDD = GetCurrentDrawdownPercent();
     if (currentDD >= m_MaxDrawdownPercent) {
-        LogMessage("Đã đạt giới hạn drawdown tối đa: " + DoubleToString(currentDD, 2) + "%", true);
+        string msg_dd_max = "Đã đạt giới hạn drawdown tối đa: " + DoubleToString(currentDD, 2) + "%";
+        if (m_Logger != NULL) m_Logger->LogCritical(msg_dd_max); // Changed to LogCritical
+        else Print("NGHIÊM TRỌNG: " + msg_dd_max);
         return true;
     }
     
     // Kiểm tra lỗ hàng ngày
     double dailyLossPercent = GetDailyLossPercent();
     if (dailyLossPercent >= m_MaxDailyLossPercent) {
-        LogMessage("Đã đạt giới hạn lỗ hàng ngày: " + DoubleToString(dailyLossPercent, 2) + "%", true);
+        string msg_dl_max = "Đã đạt giới hạn lỗ hàng ngày: " + DoubleToString(dailyLossPercent, 2) + "%";
+        if (m_Logger != NULL) m_Logger->LogCritical(msg_dl_max); // Changed to LogCritical
+        else Print("NGHIÊM TRỌNG: " + msg_dl_max);
         return true;
     }
     
@@ -1821,15 +1971,17 @@ bool CRiskManager::ShouldPauseTrading()
     
     // Kiểm tra số lần thua liên tiếp
     if (m_ConsecutiveLosses >= m_MaxConsecutiveLosses) {
-        LogMessage("Nên tạm dừng giao dịch: Đã thua liên tiếp " + 
-                 IntegerToString(m_ConsecutiveLosses) + " lần", true);
+        string msg_cl = "Nên tạm dừng giao dịch: Đã thua liên tiếp " + IntegerToString(m_ConsecutiveLosses) + " lần";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_cl);
+        else Print("CẢNH BÁO: " + msg_cl);
         return true;
     }
     
     // Kiểm tra thị trường cực kỳ biến động
     if (m_ATRRatio > 2.5) {
-        LogMessage("Nên tạm dừng giao dịch: Biến động cực cao (ATR ratio = " + 
-                 DoubleToString(m_ATRRatio, 2) + "x)", true);
+        string msg_atr = "Nên tạm dừng giao dịch: Biến động cực cao (ATR ratio = " + DoubleToString(m_ATRRatio, 2) + "x)";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_atr);
+        else Print("CẢNH BÁO: " + msg_atr);
         return true;
     }
     
@@ -1844,15 +1996,18 @@ void CRiskManager::UpdatePauseStatus()
     // Tạm dừng nếu DD quá lớn
     if (GetCurrentDrawdownPercent() > m_MaxDrawdownPercent) {
         m_PauseUntil = TimeCurrent() + 12*3600; // Dừng 12 giờ
-        LogMessage("Tạm dừng EA do drawdown vượt mức, tiếp tục sau 12 giờ", true);
+        string msg_dd_pause = "Tạm dừng EA do drawdown vượt mức, tiếp tục sau 12 giờ";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_dd_pause);
+        else Print("CẢNH BÁO: " + msg_dd_pause);
         return;
     }
     
     // Tạm dừng nếu thua liên tiếp
     if (m_ConsecutiveLosses >= m_MaxConsecutiveLosses) {
         m_PauseUntil = TimeCurrent() + 8*3600; // Dừng 8 giờ
-        LogMessage("Tạm dừng EA do thua " + IntegerToString(m_ConsecutiveLosses) + 
-                 " lần liên tiếp, tiếp tục sau 8 giờ", true);
+        string msg_cl_pause = "Tạm dừng EA do thua " + IntegerToString(m_ConsecutiveLosses) + " lần liên tiếp, tiếp tục sau 8 giờ";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_cl_pause);
+        else Print("CẢNH BÁO: " + msg_cl_pause);
         return;
     }
     
@@ -1871,14 +2026,18 @@ void CRiskManager::UpdatePauseStatus()
         datetime pauseUntil = StructToTime(tomorrowStruct);
         m_PauseUntil = pauseUntil;
         
-        LogMessage("Tạm dừng EA do đạt giới hạn lỗ ngày, tiếp tục vào ngày mai", true);
+        string msg_dl_pause = "Tạm dừng EA do đạt giới hạn lỗ ngày, tiếp tục vào ngày mai";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_dl_pause);
+        else Print("CẢNH BÁO: " + msg_dl_pause);
         return;
     }
     
     // Kiểm tra thị trường nhiễu hoặc biến động cực cao
     if (m_IsTransitioningMarket && m_MarketRegimeConfidence < 0.3 && m_ATRRatio > 2.0) {
         m_PauseUntil = TimeCurrent() + 4*3600; // Dừng 4 giờ
-        LogMessage("Tạm dừng EA do thị trường nhiễu và biến động cao", true);
+        string msg_market_pause = "Tạm dừng EA do thị trường nhiễu và biến động cao";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_market_pause);
+        else Print("CẢNH BÁO: " + msg_market_pause);
         return;
     }
 }
@@ -1889,19 +2048,30 @@ void CRiskManager::UpdatePauseStatus()
 void CRiskManager::UpdateMaxDrawdown()
 {
     double currentEquity = m_AccountInfo.Equity();
+    double baseValue;
     
-    // Cập nhật peak equity nếu cao hơn
-    if (currentEquity > m_PeakEquity) {
-        m_PeakEquity = currentEquity;
+    if (m_DrawdownType == DRAWDOWN_EQUITY_BASED) {
+        // Cập nhật peak equity nếu cao hơn
+        if (currentEquity > m_PeakEquity) {
+            m_PeakEquity = currentEquity;
+            return; // Không có drawdown
+        }
+        baseValue = m_PeakEquity;
+    } else { // DRAWDOWN_BALANCE_BASED
+        baseValue = m_DayStartEquity;
     }
-    else {
+    
+    if (baseValue > 0) { // Tránh chia cho 0
         // Tính drawdown hiện tại
-        double currentDD = (m_PeakEquity - currentEquity) / m_PeakEquity * 100.0;
+        double currentDD = (baseValue - currentEquity) / baseValue * 100.0;
         
         // Cập nhật max drawdown nếu lớn hơn
         if (currentDD > m_MaxDrawdownRecorded) {
             m_MaxDrawdownRecorded = currentDD;
-            LogMessage("Cập nhật Max Drawdown mới: " + DoubleToString(m_MaxDrawdownRecorded, 2) + "%", true);
+            string ddType = (m_DrawdownType == DRAWDOWN_EQUITY_BASED) ? "Equity" : "Balance";
+            string msg_max_dd = "Cập nhật Max Drawdown mới (" + ddType + "-based): " + DoubleToString(m_MaxDrawdownRecorded, 2) + "%";
+            if (m_Logger != NULL) m_Logger->LogInfo(msg_max_dd);
+            else Print(msg_max_dd);
         }
     }
 }
@@ -1912,15 +2082,30 @@ void CRiskManager::UpdateMaxDrawdown()
 double CRiskManager::GetCurrentDrawdownPercent()
 {
     double currentEquity = m_AccountInfo.Equity();
+    double baseValue;
     
-    // Cập nhật peak equity nếu cao hơn
-    if (currentEquity > m_PeakEquity) {
-        m_PeakEquity = currentEquity;
-        return 0.0; // Không có drawdown
+    if (m_DrawdownType == DRAWDOWN_EQUITY_BASED) {
+        // Cập nhật peak equity nếu cao hơn
+        if (currentEquity > m_PeakEquity) {
+            m_PeakEquity = currentEquity;
+            return 0.0; // Không có drawdown
+        }
+        baseValue = m_PeakEquity;
+    } else { // DRAWDOWN_BALANCE_BASED
+        // Sử dụng balance đầu ngày làm cơ sở
+        baseValue = m_DayStartEquity;
+        if (baseValue <= 0) { // Nếu chưa được khởi tạo
+            InitializeDayStartEquity(); // Assuming this method exists and sets m_DayStartEquity
+            baseValue = m_DayStartEquity;
+        }
     }
     
-    // Tính và trả về drawdown hiện tại
-    return (m_PeakEquity - currentEquity) / m_PeakEquity * 100.0;
+    // Tính toán drawdown
+    if (baseValue > 0) { // Tránh chia cho 0
+        return ((baseValue - currentEquity) / baseValue) * 100.0;
+    }
+    
+    return 0.0; // Trả về 0 nếu không thể tính toán
 }
 
 //+------------------------------------------------------------------+
@@ -1954,8 +2139,9 @@ bool CRiskManager::IsSpreadAcceptable(double currentSpread = 0.0)
     
     // Kiểm tra ngưỡng cứng
     if (currentSpread > maxSpreadPoints) {
-        LogMessage("Spread quá cao: " + DoubleToString(currentSpread, 1) + 
-                 " > " + DoubleToString(maxSpreadPoints, 1) + " (max)", false);
+        string msg_spread_high = "Spread quá cao: " + DoubleToString(currentSpread, 1) + " > " + DoubleToString(maxSpreadPoints, 1) + " (max)";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_spread_high);
+        else Print("CẢNH BÁO: " + msg_spread_high);
         return false;
     }
     
@@ -1968,15 +2154,17 @@ bool CRiskManager::IsSpreadAcceptable(double currentSpread = 0.0)
         
         // Nếu spread cao hơn 3x trung bình
         if (spreadRatio > 3.0) {
-            LogMessage("Spread bất thường: " + DoubleToString(currentSpread, 1) + " điểm" +
-                     ", " + DoubleToString(spreadRatio, 1) + "x trung bình", false);
+            string msg_spread_unusual = "Spread bất thường: " + DoubleToString(currentSpread, 1) + " điểm" + ", " + DoubleToString(spreadRatio, 1) + "x trung bình";
+            if (m_Logger != NULL) m_Logger->LogWarning(msg_spread_unusual);
+            else Print("CẢNH BÁO: " + msg_spread_unusual);
             return false;
         }
         
         // Nếu spread cao 2-3x & trong chế độ Prop Firm, kiểm tra chặt hơn
         if (m_PropFirmMode && spreadRatio > 2.0) {
-            LogMessage("Prop Mode: Spread khá cao: " + DoubleToString(currentSpread, 1) + " điểm" +
-                     ", " + DoubleToString(spreadRatio, 1) + "x trung bình", false);
+            string msg_prop_spread_high = "Prop Mode: Spread khá cao: " + DoubleToString(currentSpread, 1) + " điểm" + ", " + DoubleToString(spreadRatio, 1) + "x trung bình";
+            if (m_Logger != NULL) m_Logger->LogWarning(msg_prop_spread_high);
+            else Print("CẢNH BÁO: " + msg_prop_spread_high);
             return false;
         }
     }
@@ -1996,22 +2184,25 @@ bool CRiskManager::IsVolatilityAcceptable(double currentATRratio = 0.0)
     
     // Biến động quá cao
     if (currentATRratio > 2.5) {
-        LogMessage("Biến động cực kỳ cao: " + DoubleToString(currentATRratio, 2) + 
-                 "x > 2.5x trung bình", false);
+        string msg_vol_extreme = "Biến động cực kỳ cao: " + DoubleToString(currentATRratio, 2) + "x > 2.5x trung bình";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_vol_extreme);
+        else Print("CẢNH BÁO: " + msg_vol_extreme);
         return false;
     }
     
     // Biến động cao và đang trong chế độ chuyển tiếp
     if (currentATRratio > 2.0 && m_IsTransitioningMarket) {
-        LogMessage("Biến động cao và thị trường đang chuyển tiếp: " + 
-                 DoubleToString(currentATRratio, 2) + "x", false);
+        string msg_vol_transition = "Biến động cao và thị trường đang chuyển tiếp: " + DoubleToString(currentATRratio, 2) + "x";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_vol_transition);
+        else Print("CẢNH BÁO: " + msg_vol_transition);
         return false;
     }
     
     // Biến động cao trong chế độ Prop Firm
     if (m_PropFirmMode && currentATRratio > 1.8) {
-        LogMessage("Prop Mode: Biến động cao: " + DoubleToString(currentATRratio, 2) + 
-                 "x > 1.8x", false);
+        string msg_prop_vol_high = "Prop Mode: Biến động cao: " + DoubleToString(currentATRratio, 2) + "x > 1.8x";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_prop_vol_high);
+        else Print("CẢNH BÁO: " + msg_prop_vol_high);
         return false;
     }
     
@@ -2031,8 +2222,9 @@ bool CRiskManager::IsMarketSuitableForTrading()
     
     // Nếu risk quá cao, thị trường không thích hợp
     if (riskIndex > acceptableRiskThreshold) {
-        LogMessage(StringFormat("Thị trường không thích hợp: Rủi ro quá cao (%.1f%%)", 
-                             riskIndex), false);
+        string msg_risk_too_high = StringFormat("Thị trường không thích hợp: Rủi ro quá cao (%.1f%%)", riskIndex);
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_risk_too_high);
+        else Print("CẢNH BÁO: " + msg_risk_too_high);
         return false;
     }
     
@@ -2050,14 +2242,17 @@ bool CRiskManager::IsMarketSuitableForTrading()
     
     // 3. Regime chuyển tiếp với độ tin cậy thấp?
     if (m_IsTransitioningMarket && m_MarketRegimeConfidence < 0.4) {
-        LogMessage("Thị trường không thích hợp: Đang chuyển tiếp với độ tin cậy thấp (" + 
-                 DoubleToString(m_MarketRegimeConfidence, 2) + ")", false);
+        string msg_transition_low_conf = "Thị trường không thích hợp: Đang chuyển tiếp với độ tin cậy thấp (" + DoubleToString(m_MarketRegimeConfidence, 2) + ")";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_transition_low_conf);
+        else Print("CẢNH BÁO: " + msg_transition_low_conf);
         return false;
     }
     
     // 4. Chế độ thị trường cực biến động?
     if (m_CurrentRegime == REGIME_VOLATILE_EXPANSION && m_ATRRatio > 1.5) {
-        LogMessage("Thị trường không thích hợp: Đang mở rộng biến động cao", false);
+        string msg_volatile_expansion = "Thị trường không thích hợp: Đang mở rộng biến động cao";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_volatile_expansion);
+        else Print("CẢNH BÁO: " + msg_volatile_expansion);
         return false;
     }
     
@@ -2068,8 +2263,9 @@ bool CRiskManager::IsMarketSuitableForTrading()
         double profitFactor = GetRegimeProfitFactor(m_IsTransitioningMarket);
         
         if (winRate < 35.0 && profitFactor < 0.7) {
-            LogMessage(StringFormat("Thị trường không thích hợp: Hiệu suất kém trong chế độ hiện tại (Win rate: %.1f%%, PF: %.2f)",
-                                 winRate, profitFactor), false);
+            string msg_poor_performance = StringFormat("Thị trường không thích hợp: Hiệu suất kém trong chế độ hiện tại (Win rate: %.1f%%, PF: %.2f)", winRate, profitFactor);
+            if (m_Logger != NULL) m_Logger->LogWarning(msg_poor_performance);
+            else Print("CẢNH BÁO: " + msg_poor_performance);
             return false;
         }
     }
@@ -2417,7 +2613,9 @@ bool CRiskManager::SaveStatsToFile(string filename)
 {
     int fileHandle = FileOpen(filename, FILE_WRITE|FILE_BIN|FILE_COMMON);
     if (fileHandle == INVALID_HANDLE) {
-        LogMessage("Không thể mở file để lưu thống kê: " + filename, true);
+        string msg_save_error = "Không thể mở file để lưu thống kê: " + filename;
+        if (m_Logger != NULL) m_Logger->LogError(msg_save_error);
+        else Print("LỖI: " + msg_save_error);
         return false;
     }
     
@@ -2476,7 +2674,9 @@ bool CRiskManager::SaveStatsToFile(string filename)
     
     FileClose(fileHandle);
     
-    LogMessage("Đã lưu thống kê vào file: " + filename, false);
+    string msg_save_success = "Đã lưu thống kê vào file: " + filename;
+    if (m_Logger != NULL) m_Logger->LogInfo(msg_save_success);
+    else Print(msg_save_success);
     return true;
 }
 
@@ -2486,13 +2686,17 @@ bool CRiskManager::SaveStatsToFile(string filename)
 bool CRiskManager::LoadStatsFromFile(string filename)
 {
     if (!FileIsExist(filename, FILE_COMMON)) {
-        LogMessage("File thống kê không tồn tại: " + filename, false);
+        string msg_file_not_exist = "File thống kê không tồn tại: " + filename;
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_file_not_exist);
+        else Print("CẢNH BÁO: " + msg_file_not_exist);
         return false;
     }
     
     int fileHandle = FileOpen(filename, FILE_READ|FILE_BIN|FILE_COMMON);
     if (fileHandle == INVALID_HANDLE) {
-        LogMessage("Không thể mở file để đọc thống kê: " + filename, true);
+        string msg_load_error = "Không thể mở file để đọc thống kê: " + filename;
+        if (m_Logger != NULL) m_Logger->LogError(msg_load_error);
+        else Print("LỖI: " + msg_load_error);
         return false;
     }
     
@@ -2551,7 +2755,9 @@ bool CRiskManager::LoadStatsFromFile(string filename)
     
     FileClose(fileHandle);
     
-    LogMessage("Đã tải thống kê từ file: " + filename, false);
+    string msg_load_success = "Đã tải thống kê từ file: " + filename;
+    if (m_Logger != NULL) m_Logger->LogInfo(msg_load_success);
+    else Print(msg_load_success);
     return true;
 }
 
@@ -2677,7 +2883,7 @@ double CRiskManager::CalculateMarketRiskIndex()
         }
         
         riskDetails += "FINAL RISK INDEX: " + DoubleToString(riskIndex, 1) + "%";
-        LogMessage(riskDetails, false);
+        m_Logger->LogInfo(riskDetails);
     }
     
     return riskIndex;
@@ -2709,8 +2915,9 @@ bool CRiskManager::IsSafeMarketCondition()
         return true;
     } else if (riskIndex > dangerThreshold) {
         // Điều kiện nguy hiểm
-        LogMessage("Điều kiện thị trường nguy hiểm (Risk: " + 
-                 DoubleToString(riskIndex, 1) + "%)", true);
+        string msg_danger = "Điều kiện thị trường nguy hiểm (Risk: " + DoubleToString(riskIndex, 1) + "%)";
+        if (m_Logger != NULL) m_Logger->LogCritical(msg_danger);
+        else Print("NGHIÊM TRỌNG: " + msg_danger);
         return false;
     } else if (riskIndex > warningThreshold) {
         // Điều kiện cảnh báo - tùy thuộc vào các yếu tố khác
@@ -2718,22 +2925,24 @@ bool CRiskManager::IsSafeMarketCondition()
         // Nếu đang có lợi nhuận trong ngày, có thể chấp nhận rủi ro cao hơn
         double dailyPL = m_AccountInfo.Equity() - m_DayStartEquity;
         if (dailyPL > 0) {
-            LogMessage("Điều kiện thị trường cảnh báo (Risk: " + 
-                     DoubleToString(riskIndex, 1) + "%), nhưng có lợi nhuận trong ngày", false);
+            string msg_warning_profit = "Điều kiện thị trường cảnh báo (Risk: " + DoubleToString(riskIndex, 1) + "%), nhưng có lợi nhuận trong ngày";
+            if (m_Logger != NULL) m_Logger->LogWarning(msg_warning_profit);
+            else Print("CẢNH BÁO: " + msg_warning_profit);
             return true;
         }
         
         // Nếu chuỗi thắng, có thể chấp nhận rủi ro cao hơn
         if (m_ConsecutiveWins >= 3) {
-            LogMessage("Điều kiện thị trường cảnh báo (Risk: " + 
-                     DoubleToString(riskIndex, 1) + "%), nhưng có chuỗi thắng " + 
-                     IntegerToString(m_ConsecutiveWins), false);
+            string msg_warning_streak = "Điều kiện thị trường cảnh báo (Risk: " + DoubleToString(riskIndex, 1) + "%), nhưng có chuỗi thắng " + IntegerToString(m_ConsecutiveWins);
+            if (m_Logger != NULL) m_Logger->LogWarning(msg_warning_streak);
+            else Print("CẢNH BÁO: " + msg_warning_streak);
             return true;
         }
         
         // Mặc định cảnh báo là không an toàn
-        LogMessage("Điều kiện thị trường cảnh báo (Risk: " + 
-                 DoubleToString(riskIndex, 1) + "%)", false);
+        string msg_warning = "Điều kiện thị trường cảnh báo (Risk: " + DoubleToString(riskIndex, 1) + "%)";
+        if (m_Logger != NULL) m_Logger->LogWarning(msg_warning);
+        else Print("CẢNH BÁO: " + msg_warning);
         return false;
     } else {
         // Điều kiện trung bình - vẫn an toàn
@@ -3252,79 +3461,7 @@ double CRiskManager::CalculateVolatilityChangeRate()
     return (recentATR - olderATR) / olderATR;
 }
 
-// Phương thức kiểm tra và điều chỉnh rủi ro
-double CRiskManager::GetAdjustedRiskPercent()
-{
-    double baseRisk = m_RiskPerTrade;
-    
-    // --- 1. Điều chỉnh theo Drawdown ---
-    double currentDD = GetCurrentDrawdownPercent();
-    double ddFactor = 1.0;
-    
-    // Nếu không bật chế độ tapered risk, giảm risk đột ngột theo ngưỡng
-    if (!m_EnableTaperedRisk) {
-        if (currentDD >= m_DrawdownReduceThreshold && currentDD < m_MaxDrawdownPercent) {
-            ddFactor = m_MinRiskMultiplier;
-        }
-        else if (currentDD >= m_MaxDrawdownPercent) {
-            ddFactor = 0;
-        }
-    }
-    // Chế độ tapered risk - Giảm risk tuyến tính từ DrawdownReduceThreshold đến MaxDD
-    else {
-        if (currentDD <= m_DrawdownReduceThreshold) {
-            ddFactor = 1.0;  // DD < threshold - risk bình thường
-        } else if (currentDD <= m_MaxDrawdownPercent) {
-            // DD trong khoảng threshold -> MaxDD: giảm tuyến tính
-            double riskReductionRange = m_MaxDrawdownPercent - m_DrawdownReduceThreshold;
-            double ddInRange = currentDD - m_DrawdownReduceThreshold;
-            double reducePercent = ddInRange / riskReductionRange;
-            
-            // Tỷ lệ giảm từ risk cơ sở xuống minRisk
-            double minRiskFactor = m_MinRiskMultiplier;
-            ddFactor = 1.0 - (1.0 - minRiskFactor) * reducePercent;
-        } else {
-            // DD > MaxDD: risk = 0
-            ddFactor = 0.0;
-        }
-    }
-    
-    // --- 2. Điều chỉnh theo Market Regime ---
-    double regimeFactor = GetRegimeFactor(m_CurrentRegime);
-    
-    // --- 3. Điều chỉnh theo phiên ---
-    double sessionFactor = GetSessionFactor(m_CurrentSession);
-    
-    // --- 4. Điều chỉnh theo tài sản ---
-    double symbolFactor = GetSymbolRiskFactor();
-    
-    // --- 5. Điều chỉnh theo hiệu suất gần đây ---
-    double performanceFactor = 1.0;
-    
-    // Nếu gần đây thắng liên tục -> tăng nhẹ risk
-    if (m_ConsecutiveWins >= 3) {
-        performanceFactor = 1.0 + MathMin(0.1, 0.02 * m_ConsecutiveWins);
-    }
-    // Nếu gần đây thua liên tiếp -> giảm risk
-    else if (m_ConsecutiveLosses >= 2) {
-        performanceFactor = 1.0 - MathMin(0.3, 0.1 * m_ConsecutiveLosses);
-    }
-    
-    // --- Tính toán risk cuối cùng ---
-    double finalRisk = baseRisk * ddFactor * regimeFactor * sessionFactor * symbolFactor * performanceFactor;
-    
-    // Giới hạn tối đa và tối thiểu
-    finalRisk = MathMin(finalRisk, m_MaxRisk);
-    finalRisk = MathMax(finalRisk, m_MinRisk);
-    
-    // Ghi log nếu risk điều chỉnh khác risk cơ sở (không ghi quá nhiều)
-    if (MathAbs(finalRisk - baseRisk) > 0.05) {
-        LogMessage(StringFormat("Adaptive Risk: DD=%.2f(%.1f%%), Regime=%.2f, Session=%.2f, Symbol=%.2f, Perf=%.2f → Final=%.2f%%",
-                             ddFactor, currentDD, regimeFactor, sessionFactor, symbolFactor, performanceFactor, finalRisk), false);
-    }
-    
-    return NormalizeDouble(finalRisk, 2);
-}
+
 
 bool CRiskManager::IsDrawdownExceeded()
 {
@@ -3382,6 +3519,41 @@ bool CRiskManager::IsMarketConditionSafe()
     } else {
         return true;
     }
+}
+
+// Các hàm GetRegimeFactor, GetSessionFactor, GetSymbolRiskFactor cần được định nghĩa ở đây
+// hoặc trong một file khác và được include.
+// Ví dụ mẫu (cần thay thế bằng logic thực tế):
+double CRiskManager::GetRegimeFactor(ENUM_MARKET_REGIME regime, bool isTransitioning)
+{
+    // TODO: Implement actual logic based on regime and transition status
+    if (isTransitioning) return 0.75; // Giảm risk khi thị trường chuyển tiếp
+    switch(regime)
+    {
+        case REGIME_TRENDING_BULL:
+        case REGIME_TRENDING_BEAR: return 1.0; // Risk bình thường trong trend
+        case REGIME_RANGING_TIGHT:
+        case REGIME_RANGING_WIDE: return 0.8; // Giảm risk khi ranging
+        case REGIME_VOLATILE_BREAKOUT: return 1.2; // Có thể tăng nhẹ risk khi breakout
+        default: return 1.0;
+    }
+}
+
+double CRiskManager::GetSessionFactor(ENUM_SESSION session, string symbol)
+{
+    // TODO: Implement actual logic based on session and symbol
+    // Ví dụ: Giảm risk ngoài phiên chính
+    if (session == SESSION_LONDON || session == SESSION_NEWYORK) return 1.0;
+    return 0.7;
+}
+
+double CRiskManager::GetSymbolRiskFactor(string symbol)
+{
+    // TODO: Implement actual logic based on symbol characteristics
+    // Ví dụ: Giảm risk cho các cặp tiền tệ chéo hoặc exotic
+    if (StringFind(symbol, "JPY") != -1 && StringFind(symbol, "USD") == -1 && StringFind(symbol, "EUR") == -1)
+        return 0.8; // Giảm risk cho các cặp JPY chéo
+    return 1.0;
 }
 
 } // namespace ApexPullback

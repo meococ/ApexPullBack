@@ -85,7 +85,8 @@ enum ENUM_MARKET_REGIME {
     REGIME_VOLATILE = 7,          // Chế độ biến động cao
     REGIME_VOLATILE_EXPANSION = 8, // Biến động mở rộng
     REGIME_VOLATILE_CONTRACTION = 9, // Biến động thu hẹp
-    REGIME_TRANSITIONING = 10     // Chế độ chuyển tiếp giữa các trạng thái
+    REGIME_TRANSITIONING = 10,     // Chế độ chuyển tiếp giữa các trạng thái
+    REGIME_COUNT // Tổng số lượng regime
 };
 
 // Định nghĩa các constant cho chế độ thị trường chi tiết để tương thích ngược
@@ -98,6 +99,13 @@ enum ENUM_MARKET_REGIME {
 #define REGIME_DETAILED_RANGING_STABLE    REGIME_RANGING_STABLE
 #define REGIME_DETAILED_RANGING_VOLATILE  REGIME_RANGING_VOLATILE
 #define REGIME_DETAILED_VOLATILE          REGIME_VOLATILE
+
+//===== LOẠI DRAWDOWN =====
+/// @brief Định nghĩa các loại drawdown
+enum ENUM_DRAWDOWN_TYPE {
+    DRAWDOWN_BALANCE_BASED,   // Drawdown dựa trên Balance
+    DRAWDOWN_EQUITY_BASED     // Drawdown dựa trên Equity (trailing)
+};
 #define REGIME_DETAILED_VOLATILE_EXPANSION REGIME_VOLATILE_EXPANSION
 #define REGIME_DETAILED_VOLATILE_CONTRACTION REGIME_VOLATILE_CONTRACTION
 #define REGIME_DETAILED_LOW_VOLATILITY    REGIME_RANGING_STABLE  // Map to stable ranging
@@ -176,6 +184,23 @@ enum ENUM_ENTRY_SCENARIO {
 
 // Legacy compatibility
 #define SCENARIO_UNKNOWN ((ENUM_ENTRY_SCENARIO)SCENARIO_NONE)
+
+//+------------------------------------------------------------------+
+//| Định danh (ID) cho các chiến lược giao dịch                     |
+//+------------------------------------------------------------------+
+/// @brief Định danh (ID) cho các chiến lược giao dịch
+enum ENUM_STRATEGY_ID {
+    STRATEGY_ID_UNDEFINED = 0,      // Chiến lược không xác định hoặc mặc định
+    STRATEGY_ID_PULLBACK = 1,       // Chiến lược Pullback theo xu hướng
+    STRATEGY_ID_MEAN_REVERSION = 2, // Chiến lược Hồi quy về trung bình
+    STRATEGY_ID_BREAKOUT = 3,       // Chiến lược Breakout (Phá vỡ)
+    STRATEGY_ID_SHALLOW_PULLBACK = 4, // Chiến lược Pullback nông / Theo xu hướng (Trend Following)
+    STRATEGY_ID_RANGE_TRADING = 5   // Chiến lược Giao dịch trong biên độ (Range Trading)
+    // Thêm các ID khác nếu cần, ví dụ:
+    // STRATEGY_ID_HARMONIC = 6,
+    // STRATEGY_ID_DIVERGENCE = 7
+};
+
 
 /// @brief Chế độ vào lệnh
 enum ENUM_ENTRY_MODE {
@@ -258,19 +283,19 @@ enum ENUM_NEWS_FILTER {
 //===== THÔNG BÁO VÀ CẢNH BÁO =====
 // Cấp độ cảnh báo
 enum ENUM_ALERT_LEVEL {
-    ALERT_LEVEL_NORMAL = 0,    // Thông báo bình thường
-    ALERT_LEVEL_INFO = 1,      // Thông tin 
-    ALERT_LEVEL_WARNING = 2,   // Cảnh báo
-    ALERT_LEVEL_CRITICAL = 3   // Cảnh báo quan trọng
+    ALERT_LEVEL_NORMAL,    // Thông báo bình thường (auto-assigns 0)
+    ALERT_LEVEL_INFO,      // Thông tin (auto-assigns 1)
+    ALERT_LEVEL_WARNING,   // Cảnh báo (auto-assigns 2)
+    ALERT_LEVEL_CRITICAL   // Cảnh báo quan trọng (auto-assigns 3)
 };
 /// @brief Cấp độ log
 enum ENUM_LOG_LEVEL {
-    LOG_CRITICAL = 0, // Lỗi nghiêm trọng, EA không thể tiếp tục
-    LOG_ERROR = 1,    // Lỗi nhưng EA vẫn có thể tiếp tục
-    LOG_WARNING = 2,  // Cảnh báo, có thể ảnh hưởng đến hiệu suất
-    LOG_INFO = 3,     // Thông tin quan trọng
-    LOG_DEBUG = 4,    // Thông tin gỡ lỗi (chỉ khi debug)
-    LOG_VERBOSE = 5   // Thông tin chi tiết (dành cho nhà phát triển)
+    LOG_CRITICAL, // Lỗi nghiêm trọng, EA không thể tiếp tục (auto-assigns 0)
+    LOG_ERROR,    // Lỗi nhưng EA vẫn có thể tiếp tục (auto-assigns 1)
+    LOG_WARNING,  // Cảnh báo, có thể ảnh hưởng đến hiệu suất (auto-assigns 2)
+    LOG_INFO,     // Thông tin quan trọng (auto-assigns 3)
+    LOG_DEBUG,    // Thông tin gỡ lỗi (chỉ khi debug) (auto-assigns 4)
+    LOG_VERBOSE   // Thông tin chi tiết (dành cho nhà phát triển) (auto-assigns 5)
 };
 
 // Log level constants are now defined as enums in Logger.mqh
@@ -457,6 +482,29 @@ enum ENUM_TP_MODE {
     TP_MODE_RR_FIXED,    // Chốt lời theo tỷ lệ R:R cố định
     TP_MODE_STRUCTURE,   // Chốt lời theo cấu trúc (đỉnh/đáy cũ)
     TP_MODE_VOLATILITY   // Chốt lời theo biến động (ADX)
+};
+
+//===== CHIẾN LƯỢC GIAO DỊCH =====
+/// @brief Các chiến lược giao dịch được hỗ trợ
+enum ENUM_TRADING_STRATEGY {
+    STRATEGY_UNDEFINED = -1,      // Chưa xác định hoặc không áp dụng
+    STRATEGY_PULLBACK_TREND,      // Pullback theo xu hướng (chiến lược cốt lõi)
+    STRATEGY_SHALLOW_PULLBACK,    // Pullback nông cho chỉ số
+    STRATEGY_MOMENTUM_BREAKOUT,   // Breakout theo momentum cho crypto
+    STRATEGY_MEAN_REVERSION,      // Giao dịch đảo chiều theo mean reversion
+    STRATEGY_RANGE_TRADING,       // Giao dịch trong biên độ sideway
+    STRATEGY_CUSTOM               // Chiến lược tùy chỉnh
+};
+
+//===== CHẾ ĐỘ ĐIỀU CHỈNH THAM SỐ =====
+/// @brief Các chế độ điều chỉnh tham số giao dịch
+enum ENUM_PARAMETER_ADJUSTMENT {
+    PARAM_STANDARD,        // Tham số tiêu chuẩn (không điều chỉnh)
+    PARAM_VOLATILITY,      // Điều chỉnh theo biến động
+    PARAM_SESSION,         // Điều chỉnh theo phiên giao dịch
+    PARAM_NEWS_IMPACT,     // Điều chỉnh theo tác động tin tức
+    PARAM_MARKET_REGIME,   // Điều chỉnh theo trạng thái thị trường
+    PARAM_CUSTOM           // Điều chỉnh tùy chỉnh
 };
 
 //===== CHẾ ĐỘ THÍCH NGHI (ADAPTIVE MODE) =====

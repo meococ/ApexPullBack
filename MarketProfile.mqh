@@ -25,26 +25,28 @@ namespace ApexPullback {
 class CMarketProfile
 {
 private:
+    ApexPullback::EAContext* m_Context; // Add EAContext pointer
+private:
     // Thông tin cơ bản
     string m_Symbol;                   // Symbol đang giao dịch
     ENUM_TIMEFRAMES m_MainTimeframe;   // Khung thời gian chính (H1)
     ENUM_TIMEFRAMES m_HigherTimeframe; // Khung thời gian cao hơn (H4)
-    ApexPullback::CLogger* m_Logger;    // Logger
+    // ApexPullback::CLogger* m_Logger;    // Logger is now accessed via m_Context->Logger
     bool m_Initialized;                // Trạng thái khởi tạo
     bool m_UseMultiTimeframe;          // Sử dụng đa khung thời gian
     
-    // Tham số cài đặt
-    int m_EmaFast;                     // Chu kỳ EMA nhanh (34)
-    int m_EmaMedium;                   // Chu kỳ EMA trung bình (89)
-    int m_EmaSlow;                     // Chu kỳ EMA chậm (200)
-    int m_AtrPeriod;                   // Chu kỳ ATR (14)
-    int m_AdxPeriod;                   // Chu kỳ ADX (14)
-    int m_RsiPeriod;                   // Chu kỳ RSI (14)
-    int m_MacdFast;                    // Chu kỳ MACD nhanh (12)
-    int m_MacdSlow;                    // Chu kỳ MACD chậm (26)
-    int m_MacdSignal;                  // Chu kỳ đường tín hiệu MACD (9)
-    int m_BBWPeriod;                   // Chu kỳ Bollinger Bands Width (20)
-    double m_MinAdxValue;              // Giá trị ADX tối thiểu
+    // Tham số cài đặt - will be accessed from m_Context->InputManager or m_Context directly
+    // int m_EmaFast;                     // Chu kỳ EMA nhanh (34)
+    // int m_EmaMedium;                   // Chu kỳ EMA trung bình (89)
+    // int m_EmaSlow;                     // Chu kỳ EMA chậm (200)
+    // int m_AtrPeriod;                   // Chu kỳ ATR (14)
+    // int m_AdxPeriod;                   // Chu kỳ ADX (14)
+    // int m_RsiPeriod;                   // Chu kỳ RSI (14)
+    // int m_MacdFast;                    // Chu kỳ MACD nhanh (12)
+    // int m_MacdSlow;                    // Chu kỳ MACD chậm (26)
+    // int m_MacdSignal;                  // Chu kỳ đường tín hiệu MACD (9)
+    // int m_BBWPeriod;                   // Chu kỳ Bollinger Bands Width (20)
+    // double m_MinAdxValue;              // Giá trị ADX tối thiểu
     
     // Handle của các chỉ báo - Khung H1
     int m_HandleEmaFast;               // Handle EMA nhanh
@@ -102,14 +104,14 @@ private:
     // Đã khai báo m_BBWBuffer[] ở trên - không khai báo lại để tránh lỗi duplicate
     int m_SpreadCount;                 // Số lượng spread đã lưu
     
-    // Tham số lọc pullback
-    double m_MinPullbackPercent;       // % Pullback tối thiểu
-    double m_MaxPullbackPercent;       // % Pullback tối đa
+    // Tham số lọc pullback - will be accessed from m_Context->InputManager or m_Context directly
+    // double m_MinPullbackPercent;       // % Pullback tối thiểu
+    // double m_MaxPullbackPercent;       // % Pullback tối đa
     
-    // Tham số bổ sung
-    bool m_EnableVolatilityFilter;     // Bật lọc volatility
-    bool m_EnableAdxFilter;            // Bật lọc ADX
-    double m_VolatilityThreshold;      // Ngưỡng volatility
+    // Tham số bổ sung - will be accessed from m_Context->InputManager or m_Context directly
+    // bool m_EnableVolatilityFilter;     // Bật lọc volatility
+    // bool m_EnableAdxFilter;            // Bật lọc ADX
+    // double m_VolatilityThreshold;      // Ngưỡng volatility
     
     // ----- Các hàm private -----
     
@@ -171,18 +173,18 @@ private:
     
 public:
     // Constructor và destructor
-    CMarketProfile();
+    CMarketProfile(ApexPullback::EAContext* context);
     ~CMarketProfile();
     
-    // Hàm khởi tạo
-    bool Initialize(string symbol, ENUM_TIMEFRAMES mainTimeframe, int emaFast, int emaMedium, int emaSlow,
-                  bool useMultiTimeframe, ENUM_TIMEFRAMES higherTimeframe, ApexPullback::CLogger &logger);
+    // Initialization is now part of the constructor
+    // bool Initialize(string symbol, ENUM_TIMEFRAMES mainTimeframe, int emaFast, int emaMedium, int emaSlow,
+    //               bool useMultiTimeframe, ENUM_TIMEFRAMES higherTimeframe, ApexPullback::CLogger &logger);
     
-    // Hàm thiết lập các tham số bổ sung
-    void SetParameters(double minAdxValue, double maxAdxValue, double volatilityThreshold, ENUM_MARKET_PRESET preset);
+    // Parameters are now set via EAContext or InputManager
+    // void SetParameters(double minAdxValue, double maxAdxValue, double volatilityThreshold, ENUM_MARKET_PRESET preset);
     
-    // Hàm thiết lập tham số pullback
-    void SetPullbackParameters(double minPullbackPercent, double maxPullbackPercent);
+    // Pullback parameters are now set via EAContext or InputManager
+    // void SetPullbackParameters(double minPullbackPercent, double maxPullbackPercent);
     
     // Hàm cập nhật dữ liệu thị trường - gọi trong OnTimer()
     bool Update();
@@ -292,27 +294,14 @@ public:
 //+------------------------------------------------------------------+
 //| Constructor                                                      |
 //+------------------------------------------------------------------+
-CMarketProfile::CMarketProfile()
+CMarketProfile::CMarketProfile(ApexPullback::EAContext* context)
 {
-    m_Symbol = _Symbol;
-    m_MainTimeframe = PERIOD_H1;
-    m_HigherTimeframe = PERIOD_H4;
-    // m_Logger là đối tượng không phải con trỏ, không cần gán NULL
+    m_Context = context;
+    m_Symbol = m_Context->Symbol;
+    m_MainTimeframe = m_Context->MainTimeframe;
+    m_HigherTimeframe = m_Context->HigherTimeframe;
     m_Initialized = false;
-    m_UseMultiTimeframe = true;
-    
-    // Thiết lập mặc định cho các tham số chỉ báo
-    m_EmaFast = 34;
-    m_EmaMedium = 89;
-    m_EmaSlow = 200;
-    m_AtrPeriod = 14;
-    m_AdxPeriod = 14;
-    m_RsiPeriod = 14;
-    m_MacdFast = 12;
-    m_MacdSlow = 26;
-    m_MacdSignal = 9;
-    m_BBWPeriod = 20; // Default BBW period
-    m_MinAdxValue = 18.0;
+    m_UseMultiTimeframe = m_Context->InputManager.UseMultiTimeframeAnalysis;
     
     // Giá trị mặc định cho các handle chỉ báo
     m_HandleEmaFast = INVALID_HANDLE;
@@ -334,13 +323,6 @@ CMarketProfile::CMarketProfile()
     m_LastUpdateTime = 0;
     m_AverageDailyAtr = 0;
     m_SpreadCount = 0;
-    
-    // Thiết lập mặc định các tham số lọc
-    m_MinPullbackPercent = 20.0;
-    m_MaxPullbackPercent = 70.0;
-    m_EnableVolatilityFilter = true;
-    m_EnableAdxFilter = true;
-    m_VolatilityThreshold = 2.0;
     
     // Phân bổ bộ nhớ ban đầu cho các buffer
     ArrayResize(m_CloseBuffer, 200);
@@ -369,6 +351,44 @@ CMarketProfile::CMarketProfile()
     
     ArrayResize(m_AtrHistory, 20);
     ArrayResize(m_SpreadBuffer, 50);
+
+    // Log thông tin khởi tạo
+    if (m_Context->Logger != NULL) {
+        string logMessage = StringFormat("MarketProfile: Initializing for %s, Timeframe: %s, EMAs: %d/%d/%d", 
+                                      m_Symbol, 
+                                      EnumToString(m_MainTimeframe), 
+                                      m_Context->InputManager.EMA_Fast, m_Context->InputManager.EMA_Medium, m_Context->InputManager.EMA_Slow);
+        m_Context->Logger.LogInfo(logMessage);
+    } 
+    // Khởi tạo các chỉ báo
+    if (!InitializeAllIndicators(false)) // Sử dụng InitializeAllIndicators cho khung thời gian chính
+    {
+        if (m_Context->Logger != NULL) {
+            m_Context->Logger.LogError("MarketProfile: Failed to initialize indicators");
+        }
+        return; // Constructor doesn't return bool, handle error appropriately
+    }
+    
+    // Khởi tạo các chỉ báo trên khung H4
+    if (m_UseMultiTimeframe)
+    {
+        if (!InitializeAllIndicators(true)) // Sử dụng InitializeAllIndicators với tham số true cho khung thời gian cao hơn
+        {
+            if (m_Context->Logger != NULL) {
+                m_Context->Logger.LogError("MarketProfile: Failed to initialize higher timeframe indicators");
+            }
+            return; // Constructor doesn't return bool, handle error appropriately
+        }
+    }
+    
+    // Khởi tạo lịch sử ATR
+    UpdateAtrHistory();
+    
+    m_Initialized = true;
+    
+    if (m_Context->Logger != NULL) {
+        m_Context->Logger.LogInfo("MarketProfile: Initialized successfully");
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -380,126 +400,7 @@ CMarketProfile::~CMarketProfile()
     // Logic giải phóng indicator handles được quản lý bởi CIndicatorUtils.
 }
 
-//+------------------------------------------------------------------+
-//| Hàm khởi tạo MarketProfile                                      |
-//+------------------------------------------------------------------+
-bool CMarketProfile::Initialize(string symbol, ENUM_TIMEFRAMES mainTimeframe, int emaFast, int emaMedium, int emaSlow,
-                              bool useMultiTimeframe, ENUM_TIMEFRAMES higherTimeframe, ApexPullback::CLogger &logger)
-{
-    // Lưu các tham số
-    m_Symbol = symbol;
-    m_MainTimeframe = mainTimeframe;
-    m_HigherTimeframe = higherTimeframe;
-    m_Logger = &logger;
-    m_UseMultiTimeframe = useMultiTimeframe;
-    
-    // Lưu các tham số chỉ báo
-    m_EmaFast = emaFast;
-    m_EmaMedium = emaMedium;
-    m_EmaSlow = emaSlow;
-    
-    // Log thông tin khởi tạo
-    if (m_Logger != NULL) {
-        string logMessage = StringFormat("MarketProfileManager: Initializing for %s, Timeframe: %s, EMAs: %d/%d/%d", 
-                                      m_Symbol, 
-                                      EnumToString(m_MainTimeframe), 
-                                      m_EmaFast, m_EmaMedium, m_EmaSlow);
-        m_Logger.LogInfo(logMessage);
-    } 
-    // Khởi tạo các chỉ báo
-    if (!InitializeAllIndicators(false)) // Sử dụng InitializeAllIndicators cho khung thời gian chính
-    {
-        if (m_Logger != NULL) {
-            m_Logger.LogError("MarketProfileManager: Failed to initialize indicators");
-        }
-        return false;
-    }
-    
-    // Khởi tạo các chỉ báo trên khung H4
-    if (m_UseMultiTimeframe)
-    {
-        if (!InitializeAllIndicators(true)) // Sử dụng InitializeAllIndicators với tham số true cho khung thời gian cao hơn
-        {
-            if (m_Logger != NULL) {
-                m_Logger.LogError("MarketProfileManager: Failed to initialize higher timeframe indicators");
-            }
-            return false;
-        }
-    }
-    
-    // Khởi tạo lịch sử ATR
-    UpdateAtrHistory();
-    
-    m_Initialized = true;
-    
-    if (m_Logger != NULL) {
-        m_Logger.LogInfo("MarketProfileManager: Initialized successfully");
-    }
-    
-    return true;
-}
-
-
-
-//+------------------------------------------------------------------+
-//| Hàm thiết lập các tham số bổ sung                               |
-//+------------------------------------------------------------------+
-void CMarketProfile::SetParameters(double minAdxValue, double maxAdxValue, double volatilityThreshold, ENUM_MARKET_PRESET preset)
-{
-    m_MinAdxValue = minAdxValue;
-    m_VolatilityThreshold = volatilityThreshold;
-    
-    // Thiết lập các thông số theo preset
-    switch (preset)
-    {
-        case 1: // PRESET_CONSERVATIVE (1)
-            // Chế độ bảo thủ - ít tín hiệu hơn, chất lượng cao hơn
-            m_MinAdxValue = MathMax(minAdxValue, 22.0);  // Yêu cầu ADX cao hơn
-            m_MinPullbackPercent = 25.0;                 // Pullback sâu hơn
-            m_MaxPullbackPercent = 65.0;                 // Không quá sâu
-            break;
-            
-        case 3: // PRESET_AGGRESSIVE (3)
-            // Chế độ tích cực - nhiều tín hiệu hơn
-            m_MinAdxValue = MathMax(minAdxValue * 0.9, 15.0);  // Yêu cầu ADX thấp hơn
-            m_MinPullbackPercent = 15.0;                        // Chấp nhận pullback nông hơn
-            m_MaxPullbackPercent = 80.0;                        // Chấp nhận pullback sâu hơn
-            break;
-            
-        case 2: // PRESET_BALANCED (2)
-            // Giữ các giá trị đã thiết lập
-            break;
-            
-        case 0: // PRESET_AUTO (0)
-        default:
-            // Tự động điều chỉnh theo thị trường (sẽ thay đổi trong quá trình update)
-            break;
-    }
-    
-    if (m_Logger != NULL) {
-        string logMessage = StringFormat("MarketProfileManager: Parameters set - MinADX: %.1f, Volatility Threshold: %.1f, Preset: %s", 
-                                      m_MinAdxValue, 
-                                      m_VolatilityThreshold, 
-                                      EnumToString(preset));
-        m_Logger.LogInfo(logMessage);
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Hàm thiết lập các tham số pullback                             |
-//+------------------------------------------------------------------+
-void CMarketProfile::SetPullbackParameters(double minPullbackPercent, double maxPullbackPercent)
-{
-    m_MinPullbackPercent = minPullbackPercent;
-    m_MaxPullbackPercent = maxPullbackPercent;
-    
-    if (m_Logger != NULL) {
-        string logMessage = StringFormat("MarketProfileManager: Pullback parameters set - Min: %.1f%%, Max: %.1f%%", 
-                                      m_MinPullbackPercent, 
-                                      m_MaxPullbackPercent);
-        m_Logger.LogInfo(logMessage);
-    }
-}
+// Initialize, SetParameters, and SetPullbackParameters are now part of the constructor or use EAContext directly.
 
 //+------------------------------------------------------------------+
 //| Hàm cập nhật dữ liệu thị trường - gọi trong OnTimer()           |
@@ -534,8 +435,8 @@ bool CMarketProfile::Update()
         CopyLow(m_Symbol, m_MainTimeframe, 0, 100, m_LowBuffer) <= 0 ||
         CopyTime(m_Symbol, m_MainTimeframe, 0, 100, m_TimeBuffer) <= 0)
     {
-        if (m_Logger != NULL) {
-            m_Logger.LogError(StringFormat("MarketProfileManager: Failed to copy price data - Error %d", GetLastError()));
+        if (m_Context->Logger != NULL) {
+            m_Context->Logger.LogError(StringFormat("MarketProfile: Failed to copy price data - Error %d", GetLastError()));
         }
         
         return false;
@@ -561,8 +462,8 @@ bool CMarketProfile::Update()
         CopyBuffer(m_HandleEmaMedium, 0, 0, 100, m_EmaMediumBuffer) <= 0 ||
         CopyBuffer(m_HandleEmaSlow, 0, 0, 100, m_EmaSlowBuffer) <= 0)
     {
-        if (m_Logger != NULL) {
-            m_Logger.LogError(StringFormat("MarketProfileManager: Failed to copy EMA data - Error %d", GetLastError()));
+        if (m_Context->Logger != NULL) {
+            m_Context->Logger.LogError(StringFormat("MarketProfile: Failed to copy EMA data - Error %d", GetLastError()));
         }
         
         return false;
@@ -571,8 +472,8 @@ bool CMarketProfile::Update()
     // Copy dữ liệu ATR
     if (CopyBuffer(m_HandleAtr, 0, 0, 100, m_AtrBuffer) <= 0)
     {
-        if (m_Logger != NULL) {
-            m_Logger.LogError(StringFormat("MarketProfileManager: Failed to copy ATR data - Error %d", GetLastError()));
+        if (m_Context->Logger != NULL) {
+            m_Context->Logger.LogError(StringFormat("MarketProfile: Failed to copy ATR data - Error %d", GetLastError()));
         }
         
         return false;
@@ -583,8 +484,8 @@ bool CMarketProfile::Update()
         CopyBuffer(m_HandleAdx, 1, 0, 100, m_AdxPlusBuffer) <= 0 ||
         CopyBuffer(m_HandleAdx, 2, 0, 100, m_AdxMinusBuffer) <= 0)
     {
-        if (m_Logger != NULL) {
-            m_Logger.LogError(StringFormat("MarketProfileManager: Failed to copy ADX data - Error %d", GetLastError()));
+        if (m_Context->Logger != NULL) {
+            m_Context->Logger.LogError(StringFormat("MarketProfile: Failed to copy ADX data - Error %d", GetLastError()));
         }
         
         return false;
@@ -593,9 +494,9 @@ bool CMarketProfile::Update()
     // Copy dữ liệu RSI
     if (CopyBuffer(m_HandleRsi, 0, 0, 100, m_RsiBuffer) <= 0)
     {
-        if (m_Logger != NULL) {
-            string logMessage = StringFormat("MarketProfileManager: Failed to copy RSI data - Error %d", GetLastError());
-            m_Logger.LogError(logMessage);
+        if (m_Context->Logger != NULL) {
+            string logMessage = StringFormat("MarketProfile: Failed to copy RSI data - Error %d", GetLastError());
+            m_Context->Logger.LogError(logMessage);
         }
         
         return false;
@@ -605,9 +506,9 @@ bool CMarketProfile::Update()
     if (CopyBuffer(m_HandleMacd, 0, 0, 100, m_MacdBuffer) <= 0 ||
         CopyBuffer(m_HandleMacd, 1, 0, 100, m_MacdSignalBuffer) <= 0)
     {
-        if (m_Logger != NULL) {
-            string logMessage = StringFormat("MarketProfileManager: Failed to copy MACD data - Error %d", GetLastError());
-            m_Logger.LogError(logMessage);
+        if (m_Context->Logger != NULL) {
+            string logMessage = StringFormat("MarketProfile: Failed to copy MACD data - Error %d", GetLastError());
+            m_Context->Logger.LogError(logMessage);
         }
         
         return false;
@@ -639,8 +540,8 @@ bool CMarketProfile::Update()
          CopyBuffer(m_HandleBBW, 1, 0, 100, upperBand) <= 0 ||
          CopyBuffer(m_HandleBBW, 2, 0, 100, lowerBand) <= 0))
     {
-        if (m_Logger != NULL) {
-            m_Logger.LogError(StringFormat("MarketProfileManager: Failed to copy Bollinger Bands data - Error %d", GetLastError()));
+        if (m_Context->Logger != NULL) {
+            m_Context->Logger.LogError(StringFormat("MarketProfile: Failed to copy Bollinger Bands data - Error %d", GetLastError()));
         }
         // Decide if this is a fatal error or if we can proceed without BBW
         // For now, let's log and continue, BBW score will be 0 if data is missing.
@@ -652,9 +553,9 @@ bool CMarketProfile::Update()
         {
             // Sử dụng 0 hoặc EMPTY_VALUE thay thế INVALID_VALUE để tránh lỗi
             // EMPTY_VALUE là hằng số có sẵn trong MQL5
-            if(middleBand[i] != 0 && !MathIsValidNumber(middleBand[i]) && !MathIsValidNumber(upperBand[i]) && !MathIsValidNumber(lowerBand[i])) 
+            if(middleBand[i] != 0 && MathIsValidNumber(middleBand[i]) && MathIsValidNumber(upperBand[i]) && MathIsValidNumber(lowerBand[i])) 
                 m_BBWBuffer[i] = (upperBand[i] - lowerBand[i]) / middleBand[i]; 
-            else if (!MathIsValidNumber(upperBand[i]) && !MathIsValidNumber(lowerBand[i])) // Fallback if middle is zero or invalid
+            else if (MathIsValidNumber(upperBand[i]) && MathIsValidNumber(lowerBand[i])) // Fallback if middle is zero or invalid
                  m_BBWBuffer[i] = upperBand[i] - lowerBand[i]; // Simplified: Upper - Lower
             else
                 m_BBWBuffer[i] = 0;
@@ -664,8 +565,8 @@ bool CMarketProfile::Update()
     {
         // HandleBBW is invalid, fill BBWBuffer with 0s
         for(int i = 0; i < 100; i++) m_BBWBuffer[i] = 0;
-        if (m_Logger != NULL) {
-             m_Logger.LogDebug("MarketProfileManager: m_HandleBBW is INVALID_HANDLE. BBW data will be zero.");
+        if (m_Context->Logger != NULL) {
+             m_Context->Logger.LogDebug("MarketProfile: m_HandleBBW is INVALID_HANDLE. BBW data will be zero.");
         }
     }
     
@@ -690,8 +591,8 @@ bool CMarketProfile::Update()
             CopyBuffer(m_HandleEmaMediumH4, 0, 0, 50, m_EmaMediumBufferH4) <= 0 ||
             CopyBuffer(m_HandleEmaSlowH4, 0, 0, 50, m_EmaSlowBufferH4) <= 0)
         {
-            if (m_Logger != NULL) {
-                m_Logger.LogError(StringFormat("MarketProfileManager: Failed to copy H4 EMA data - Error %d", GetLastError()));
+            if (m_Context->Logger != NULL) {
+                m_Context->Logger.LogError(StringFormat("MarketProfile: Failed to copy H4 EMA data - Error %d", GetLastError()));
             }
             
             return false;
@@ -700,9 +601,9 @@ bool CMarketProfile::Update()
         // Copy dữ liệu ATR H4
         if (CopyBuffer(m_HandleAtrH4, 0, 0, 50, m_AtrBufferH4) <= 0)
         {
-            if (m_Logger != NULL) {
-                string logMessage = StringFormat("MarketProfileManager: Failed to copy H4 ATR data - Error %d", GetLastError());
-                m_Logger.LogError(logMessage);
+            if (m_Context->Logger != NULL) {
+                string logMessage = StringFormat("MarketProfile: Failed to copy H4 ATR data - Error %d", GetLastError());
+                m_Context->Logger.LogError(logMessage);
             }
             
             return false;
@@ -711,9 +612,9 @@ bool CMarketProfile::Update()
         // Copy dữ liệu ADX H4
         if (CopyBuffer(m_HandleAdxH4, 0, 0, 50, m_AdxBufferH4) <= 0)
         {
-            if (m_Logger != NULL) {
-                string logMessage = StringFormat("MarketProfileManager: Failed to copy H4 ADX data - Error %d", GetLastError());
-                m_Logger.LogError(logMessage);
+            if (m_Context->Logger != NULL) {
+                string logMessage = StringFormat("MarketProfile: Failed to copy H4 ADX data - Error %d", GetLastError());
+                m_Context->Logger.LogError(logMessage);
             }
             
             return false;
@@ -747,6 +648,7 @@ bool CMarketProfile::Update()
     // Cập nhật giá trị ADX và Slope
     m_CurrentProfile.adxValue = m_AdxBuffer[0];
     m_CurrentProfile.adxSlope = CalculateSlope(m_AdxBuffer, 5);
+    m_CurrentProfile.minAdxValue = m_Context->InputManager.ADX_MinLevel; // Store Min ADX from context
     
     // Cập nhật giá trị RSI và Slope
     m_CurrentProfile.rsiValue = m_RsiBuffer[0];
@@ -830,21 +732,22 @@ bool CMarketProfile::Update()
     m_LastUpdateTime = currentTime;
     
     // Ghi log chi tiết nếu cần
-    if (m_Logger != NULL && m_Logger.IsDebugEnabled())
+    if (m_Context->Logger != NULL && m_Context->Logger.IsDebugEnabled())
     {
         string profileInfo = StringFormat(
-            "Market Profile [%s]: Trend=%s, Regime=%s, Session=%s, ADX=%.1f, ATR=%.5f (%.1fx), RSI=%.1f",
+            "Market Profile [%s]: Trend=%s, Regime=%s, Session=%s, ADX=%.1f (Min: %.1f), ATR=%.5f (%.1fx), RSI=%.1f",
             m_Symbol,
             EnumToString(m_CurrentProfile.trend),
             EnumToString(m_CurrentProfile.regime),
             EnumToString(m_CurrentProfile.currentSession),
             m_CurrentProfile.adxValue,
+            m_CurrentProfile.minAdxValue, // Log Min ADX
             m_CurrentProfile.atrCurrent,
             m_CurrentProfile.atrRatio,
             m_CurrentProfile.rsiValue
         );
         
-        m_Logger.LogDebug(profileInfo);
+        m_Context->Logger.LogDebug(profileInfo);
     }
     
     return true;
@@ -892,7 +795,7 @@ ENUM_MARKET_TREND CMarketProfile::DetermineTrend()
     
     // Xác định trạng thái ADX và DI
     bool strongADX = (adx > 25);
-    bool moderateADX = (adx > m_MinAdxValue && adx <= 25);
+    bool moderateADX = (adx > m_Context->InputManager.ADX_MinLevel && adx <= 25);
     bool diPlusStronger = (diPlus > diMinus);
     bool diMinusStronger = (diMinus > diPlus);
     
@@ -959,9 +862,9 @@ ENUM_MARKET_REGIME CMarketProfile::DetermineRegime()
     }
     
     // Thị trường biến động cao
-    if (atrRatio > m_VolatilityThreshold)
+    if (atrRatio > m_Context->InputManager.VolatilityThreshold)
     {
-        if (adx > m_MinAdxValue)
+        if (adx > m_Context->InputManager.ADX_MinLevel)
             return REGIME_VOLATILE_EXPANSION;  // Biến động cao + có xu hướng
         else
             return REGIME_RANGING_VOLATILE;   // Biến động cao không xu hướng
@@ -977,7 +880,7 @@ ENUM_MARKET_REGIME CMarketProfile::DetermineRegime()
     }
     
     // Thị trường có xu hướng yếu
-    if (adx > m_MinAdxValue && adx <= 25)
+    if (adx > m_Context->InputManager.ADX_MinLevel && adx <= 25)
     {
         if (m_CurrentProfile.trend == TREND_UP_NORMAL || m_CurrentProfile.trend == TREND_UP_PULLBACK)
             return REGIME_TRENDING_BULL;
@@ -1089,7 +992,7 @@ double CMarketProfile::CalculateTrendStrength()
         score += 0.25;
     else if (m_CurrentProfile.adxValue > 20)
         score += 0.2;
-    else if (m_CurrentProfile.adxValue > m_MinAdxValue)
+    else if (m_CurrentProfile.adxValue > m_Context->InputManager.ADX_MinLevel)
         score += 0.1;
     
     // 2. EMA Alignment - đóng góp 30%
@@ -1179,11 +1082,11 @@ void CMarketProfile::UpdateAtrHistory()
     double atrDailyBuffer[];
     ArraySetAsSeries(atrDailyBuffer, true);
     
-    int handleAtrDaily = iATR(m_Symbol, PERIOD_D1, m_AtrPeriod);
+    int handleAtrDaily = iATR(m_Symbol, PERIOD_D1, m_Context->InputManager.ATR_Period);
     if (handleAtrDaily == INVALID_HANDLE)
     {
-        if (m_Logger != NULL) {
-            m_Logger.LogError("MarketProfileManager: Failed to create daily ATR handle");
+        if (m_Context->Logger != NULL) {
+            m_Context->Logger.LogError("MarketProfile: Failed to create daily ATR handle");
         }
         
         return;
@@ -1191,8 +1094,8 @@ void CMarketProfile::UpdateAtrHistory()
     
     if (CopyBuffer(handleAtrDaily, 0, 0, 20, atrDailyBuffer) <= 0)
     {
-        if (m_Logger != NULL) {
-            m_Logger.LogError("MarketProfileManager: Failed to copy daily ATR data");
+        if (m_Context->Logger != NULL) {
+            m_Context->Logger.LogError("MarketProfile: Failed to copy daily ATR data");
         }
         
         IndicatorRelease(handleAtrDaily);
@@ -1223,9 +1126,9 @@ void CMarketProfile::UpdateAtrHistory()
     
     IndicatorRelease(handleAtrDaily);
     
-    if (m_Logger != NULL && m_Logger.IsDebugEnabled())
+    if (m_Context->Logger != NULL && m_Context->Logger.IsDebugEnabled())
     {
-        m_Logger.LogDebug("MarketProfileManager: Updated ATR history - Average Daily ATR: " + 
+        m_Context->Logger.LogDebug("MarketProfile: Updated ATR history - Average Daily ATR: " + 
                        DoubleToString(m_AverageDailyAtr, _Digits));
     }
 }
@@ -1265,7 +1168,7 @@ void CMarketProfile::UpdateSpreadHistory()
 bool CMarketProfile::IsChoppyMarket() const
 {
     // Kiểm tra ADX thấp
-    if (m_CurrentProfile.adxValue < m_MinAdxValue)
+    if (m_CurrentProfile.adxValue < m_Context->InputManager.ADX_MinLevel)
     {
         // Kiểm tra thêm độ biến động
         if (m_CurrentProfile.atrRatio < 0.8 || m_CurrentProfile.atrRatio > 1.5)
@@ -1391,8 +1294,8 @@ bool CMarketProfile::IsPriceInPullbackZone(bool isLong)
         rangeAvg /= (5 * m_AtrBuffer[0]);
         
         if (rangeAvg < 0.7) { // Biên độ trung bình thấp
-            if (m_Logger != NULL) {
-                m_Logger.LogDebug("Thị trường đang sideway dựa trên price action. Range/ATR: " + 
+            if (m_Context->Logger != NULL) {
+                m_Context->Logger.LogDebug("Thị trường đang sideway dựa trên price action. Range/ATR: " + 
                          DoubleToString(range, 2));
             }
             return true;
@@ -1413,8 +1316,8 @@ double CMarketProfile::CalculateSidewaysScore()
         ArraySize(m_BBWBuffer) < 20) // Chỉ cần kiểm tra 20 nến thay vì 100 để tránh lỗi
     {
         // Sử dụng trực tiếp phương thức LogDebug mà không cần kiểm tra level
-        if(m_Logger != NULL)
-            m_Logger.LogDebug("CalculateSidewaysScore: Not enough data in buffers for calculation.");
+        if(m_Context->Logger != NULL)
+            m_Context->Logger.LogDebug("CalculateSidewaysScore: Not enough data in buffers for calculation.");
         return -1.0; // Return -1.0 to indicate insufficient data
     }
 
@@ -1481,8 +1384,8 @@ double CMarketProfile::CalculateSidewaysScore()
     }
 
     double final_score = adx_score + ema_score + bbw_score;
-    if(m_Logger != NULL) 
-        m_Logger.LogDebug(StringFormat("Sideways Score: %.0f (ADX:%.0f, EMA:%.0f, BBW:%.0f). ADX:%.2f, EMA_Dist/ATR:%.2f, Curr BBW:%.5f, Low BBW100:%.5f", 
+    if(m_Context->Logger != NULL) 
+        m_Context->Logger.LogDebug(StringFormat("Sideways Score: %.0f (ADX:%.0f, EMA:%.0f, BBW:%.0f). ADX:%.2f, EMA_Dist/ATR:%.2f, Curr BBW:%.5f, Low BBW100:%.5f", 
                                                     final_score, adx_score, ema_score, bbw_score, 
                                                     m_AdxBuffer[0], 
                                                     (atr_current > Point()*10 ? MathAbs(ema34 - ema89) / atr_current : 0.0),
@@ -1527,7 +1430,7 @@ double CMarketProfile::GetVolatilityRatio() const {
 //+------------------------------------------------------------------+
 bool CMarketProfile::IsTrendStrongEnough() const {
     // Kiểm tra ADX đủ mạnh
-    if (m_CurrentProfile.adxValue < m_MinAdxValue) {
+    if (m_CurrentProfile.adxValue < m_Context->InputManager.ADX_MinLevel) {
         return false;
     }
     
@@ -1572,21 +1475,21 @@ bool CMarketProfile::InitializeAllIndicators(bool isHigherTimeframe)
     // Xác định khung thời gian cần khởi tạo
     ENUM_TIMEFRAMES timeframe = isHigherTimeframe ? m_HigherTimeframe : m_MainTimeframe;
     
-    if (m_Logger != NULL) {
-        string logMessage = StringFormat("MarketProfileManager: Initializing indicators for %s timeframe %s", 
+    if (m_Context->Logger != NULL) {
+        string logMessage = StringFormat("MarketProfile: Initializing indicators for %s timeframe %s", 
                                m_Symbol, 
                                EnumToString(timeframe));
-        m_Logger.LogInfo(logMessage);
+        m_Context->Logger.LogInfo(logMessage);
     }
     
     // Khởi tạo các handle chỉ báo khác nhau dựa vào isHigherTimeframe
     if (isHigherTimeframe) {
         // Khởi tạo các chỉ báo cho khung thời gian cao hơn (H4)
-        m_HandleEmaFastH4 = iMA(m_Symbol, timeframe, m_EmaFast, 0, MODE_EMA, PRICE_CLOSE);
-        m_HandleEmaMediumH4 = iMA(m_Symbol, timeframe, m_EmaMedium, 0, MODE_EMA, PRICE_CLOSE);
-        m_HandleEmaSlowH4 = iMA(m_Symbol, timeframe, m_EmaSlow, 0, MODE_EMA, PRICE_CLOSE);
-        m_HandleAtrH4 = iATR(m_Symbol, timeframe, m_AtrPeriod);
-        m_HandleAdxH4 = iADX(m_Symbol, timeframe, m_AdxPeriod);
+        m_HandleEmaFastH4 = iMA(m_Symbol, timeframe, m_Context->InputManager.EMA_Fast, 0, MODE_EMA, PRICE_CLOSE);
+        m_HandleEmaMediumH4 = iMA(m_Symbol, timeframe, m_Context->InputManager.EMA_Medium, 0, MODE_EMA, PRICE_CLOSE);
+        m_HandleEmaSlowH4 = iMA(m_Symbol, timeframe, m_Context->InputManager.EMA_Slow, 0, MODE_EMA, PRICE_CLOSE);
+        m_HandleAtrH4 = iATR(m_Symbol, timeframe, m_Context->InputManager.ATR_Period);
+        m_HandleAdxH4 = iADX(m_Symbol, timeframe, m_Context->InputManager.ADX_Period);
         
         // Kiểm tra nếu có lỗi khởi tạo
         if (m_HandleEmaFastH4 == INVALID_HANDLE ||
@@ -1595,22 +1498,22 @@ bool CMarketProfile::InitializeAllIndicators(bool isHigherTimeframe)
             m_HandleAtrH4 == INVALID_HANDLE ||
             m_HandleAdxH4 == INVALID_HANDLE) {
                 
-            if (m_Logger != NULL) {
-                m_Logger.LogError("MarketProfileManager: Failed to initialize higher timeframe indicators");
+            if (m_Context->Logger != NULL) {
+                m_Context->Logger.LogError("MarketProfile: Failed to initialize higher timeframe indicators");
             }
             
             return false;
         }
     } else {
         // Khởi tạo các chỉ báo cho khung thời gian chính (H1)
-        m_HandleEmaFast = iMA(m_Symbol, timeframe, m_EmaFast, 0, MODE_EMA, PRICE_CLOSE);
-        m_HandleEmaMedium = iMA(m_Symbol, timeframe, m_EmaMedium, 0, MODE_EMA, PRICE_CLOSE);
-        m_HandleEmaSlow = iMA(m_Symbol, timeframe, m_EmaSlow, 0, MODE_EMA, PRICE_CLOSE);
-        m_HandleAtr = iATR(m_Symbol, timeframe, m_AtrPeriod);
-        m_HandleAdx = iADX(m_Symbol, timeframe, m_AdxPeriod);
-        m_HandleRsi = iRSI(m_Symbol, timeframe, m_RsiPeriod, PRICE_CLOSE);
-        m_HandleMacd = iMACD(m_Symbol, timeframe, m_MacdFast, m_MacdSlow, m_MacdSignal, PRICE_CLOSE);
-        m_HandleBBW = iBands(m_Symbol, timeframe, m_BBWPeriod, 0, 2, PRICE_CLOSE); // Using iBands for BBW
+        m_HandleEmaFast = iMA(m_Symbol, timeframe, m_Context->InputManager.EMA_Fast, 0, MODE_EMA, PRICE_CLOSE);
+        m_HandleEmaMedium = iMA(m_Symbol, timeframe, m_Context->InputManager.EMA_Medium, 0, MODE_EMA, PRICE_CLOSE);
+        m_HandleEmaSlow = iMA(m_Symbol, timeframe, m_Context->InputManager.EMA_Slow, 0, MODE_EMA, PRICE_CLOSE);
+        m_HandleAtr = iATR(m_Symbol, timeframe, m_Context->InputManager.ATR_Period);
+        m_HandleAdx = iADX(m_Symbol, timeframe, m_Context->InputManager.ADX_Period);
+        m_HandleRsi = iRSI(m_Symbol, timeframe, m_Context->InputManager.RSI_Period, PRICE_CLOSE);
+        m_HandleMacd = iMACD(m_Symbol, timeframe, m_Context->InputManager.MACD_Fast, m_Context->InputManager.MACD_Slow, m_Context->InputManager.MACD_Signal, PRICE_CLOSE);
+        m_HandleBBW = iBands(m_Symbol, timeframe, m_Context->InputManager.BBW_Period, 0, 2, PRICE_CLOSE); // Using iBands for BBW
         
         // Kiểm tra nếu có lỗi khởi tạo
         if (m_HandleEmaFast == INVALID_HANDLE ||
@@ -1622,16 +1525,16 @@ bool CMarketProfile::InitializeAllIndicators(bool isHigherTimeframe)
             m_HandleMacd == INVALID_HANDLE ||
             m_HandleBBW == INVALID_HANDLE) {
                 
-            if (m_Logger != NULL) {
-                m_Logger.LogError("MarketProfileManager: Failed to initialize indicators");
+            if (m_Context->Logger != NULL) {
+                m_Context->Logger.LogError("MarketProfile: Failed to initialize indicators");
             }
             
             return false;
         }
     }
     
-    if (m_Logger != NULL) {
-        m_Logger.LogInfo(StringFormat("MarketProfileManager: Successfully initialized %s timeframe indicators", 
+    if (m_Context->Logger != NULL) {
+        m_Context->Logger.LogInfo(StringFormat("MarketProfile: Successfully initialized %s timeframe indicators", 
                                 EnumToString(timeframe)));
     }
     

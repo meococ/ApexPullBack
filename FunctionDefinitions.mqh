@@ -95,92 +95,7 @@ public:
     }
 };
 
-// Định nghĩa class cho logging
-class CLogger {
-private:
-    bool m_enableDebugLogs;
-    bool m_enableInfoLogs;
-    bool m_enableWarningLogs;
-    bool m_enableErrorLogs;
-    string m_logFilePath;
-    int m_fileHandle;
 
-public:
-    // Constructor
-    CLogger(bool enableDebug = true, bool enableInfo = true, bool enableWarning = true, bool enableError = true) {
-        m_enableDebugLogs = enableDebug;
-        m_enableInfoLogs = enableInfo;
-        m_enableWarningLogs = enableWarning;
-        m_enableErrorLogs = enableError;
-        m_logFilePath = "Logs\\ApexPullback_" + Symbol() + "_" + (string)TimeTradeServer() + ".log";
-        m_fileHandle = INVALID_HANDLE;
-    }
-    
-    // Destructor
-    ~CLogger() {
-        if(m_fileHandle != INVALID_HANDLE) {
-            FileClose(m_fileHandle);
-        }
-    }
-    
-    void LogDebug(string message) {
-        if(m_enableDebugLogs) {
-            string logMsg;
-            string timeStr = TimeToString(TimeTradeServer(), TIME_DATE|TIME_MINUTES|TIME_SECONDS);
-            logMsg = timeStr + " [DEBUG] ";
-            logMsg = logMsg + message;
-            Print(logMsg);
-            WriteToLogFile(logMsg);
-        }
-    }
-    
-    void LogInfo(string message) {
-        if(m_enableInfoLogs) {
-            string logMsg;
-            string timeStr = TimeToString(TimeTradeServer(), TIME_DATE|TIME_MINUTES|TIME_SECONDS);
-            logMsg = timeStr + " [INFO] ";
-            logMsg = logMsg + message;
-            Print(logMsg);
-            WriteToLogFile(logMsg);
-        }
-    }
-    
-    void LogWarning(string message) {
-        if(m_enableWarningLogs) {
-            string logMsg;
-            string timeStr = TimeToString(TimeTradeServer(), TIME_DATE|TIME_MINUTES|TIME_SECONDS);
-            logMsg = timeStr + " [WARNING] ";
-            logMsg = logMsg + message;
-            Print(logMsg);
-            WriteToLogFile(logMsg);
-        }
-    }
-    
-    void LogError(string message) {
-        if(m_enableErrorLogs) {
-            string logMsg;
-            string timeStr = TimeToString(TimeTradeServer(), TIME_DATE|TIME_MINUTES|TIME_SECONDS);
-            logMsg = timeStr + " [ERROR] ";
-            logMsg = logMsg + message;
-            Print(logMsg);
-            WriteToLogFile(logMsg);
-        }
-    }
-    
-    private:
-    void WriteToLogFile(string message) {
-        if(m_fileHandle == INVALID_HANDLE) {
-            m_fileHandle = FileOpen(m_logFilePath, FILE_WRITE|FILE_ANSI|FILE_TXT);
-            if(m_fileHandle == INVALID_HANDLE) return;
-        }
-        // Tránh dùng phép nối chuỗi trong FileWriteString
-        string lineEnd = "\n";
-        string fullMessage = message;
-        fullMessage = fullMessage + lineEnd;
-        FileWriteString(m_fileHandle, fullMessage);
-        FileFlush(m_fileHandle);
-    }
-};
 
 // Global Logger instance (sẽ được khởi tạo trong OnInit và truy cập qua g_EAContext.Logger)
 // CLogger* g_Logger = NULL;
@@ -374,24 +289,23 @@ namespace ApexPullback {
     }
     
     // Hàm nạp cấu hình
-    bool LoadConfiguration() {
-        string configFile = "ApexPullback_" + _Symbol + ".cfg";
+    bool LoadConfiguration(EAContext* context) { // Added EAContext* context
+        if (context == NULL || context->Logger == NULL) {
+            Print("LoadConfiguration: Context hoặc Logger không hợp lệ.");
+            return false;
+        }
+
+        string configFile = "ApexPullback_" + context->Symbol + ".cfg"; // Use context->Symbol
         if (!FileIsExist(configFile, FILE_COMMON)) {
-            // Tạo message riêng biệt tránh dùng phép nối chuỗi trong call hàm
-            string warningMsg;
-            warningMsg = "File cấu hình không tồn tại: ";
-            warningMsg = warningMsg + configFile;
-            
-            // Sử dụng GlobalLogWarning thay vì gọi trực tiếp đến g_Logger để tránh lỗi
-            GlobalLogWarning(warningMsg);
+            string warningMsg = "File cấu hình không tồn tại: " + configFile;
+            context->Logger->LogWarning(warningMsg);
             return false;
         }
         
         int fileHandle = FileOpen(configFile, FILE_READ|FILE_BIN|FILE_COMMON);
         if (fileHandle == INVALID_HANDLE) {
-            string errMsg = "Không thể mở file cấu hình để đọc: ";
-            errMsg = errMsg + configFile;
-            GlobalLogError(errMsg); // Sử dụng hàm global
+            string errMsg = "Không thể mở file cấu hình để đọc: " + configFile;
+            context->Logger->LogError(errMsg);
             return false;
         }
         
@@ -404,33 +318,32 @@ namespace ApexPullback {
         double minPullback = FileReadDouble(fileHandle);
         double maxPullback = FileReadDouble(fileHandle);
         double riskPct = FileReadDouble(fileHandle);
-        double slAtr = FileReadDouble(fileHandle);
-        double tpRR = FileReadDouble(fileHandle);
+        double slAtrMultiplier = FileReadDouble(fileHandle); // Changed to slAtrMultiplier to match context
+        double tpRRRatio = FileReadDouble(fileHandle);     // Changed to tpRRRatio to match context
         
         int maxTrades = FileReadInteger(fileHandle);
         int maxPos = FileReadInteger(fileHandle);
         int trailMode = FileReadInteger(fileHandle);
         
-        // Cập nhật các biến toàn cục
-        if(emaFast > 0) EMA_Fast = emaFast;
-        if(emaMedium > 0) EMA_Medium = emaMedium;
-        if(emaSlow > 0) EMA_Slow = emaSlow;
-        if(atrPeriod > 0) ATR_Period = atrPeriod;
+        // Cập nhật các trường trong context
+        if(emaFast > 0) context->EMA_Fast = emaFast;
+        if(emaMedium > 0) context->EMA_Medium = emaMedium;
+        if(emaSlow > 0) context->EMA_Slow = emaSlow;
+        if(atrPeriod > 0) context->ATR_Period = atrPeriod;
         
-        if(minPullback > 0) MinPullbackPercent = minPullback;
-        if(maxPullback > 0) MaxPullbackPercent = maxPullback;
-        if(riskPct > 0) RiskPercent = riskPct;
-        if(slAtr > 0) StopLoss_ATR = slAtr;
-        if(tpRR > 0) TakeProfit_RR = tpRR;
+        if(minPullback > 0) context->MinPullbackPercent = minPullback;
+        if(maxPullback > 0) context->MaxPullbackPercent = maxPullback;
+        if(riskPct > 0) context->RiskPercent = riskPct;
+        if(slAtrMultiplier > 0) context->StopLoss_ATR_Multiplier = slAtrMultiplier;
+        if(tpRRRatio > 0) context->TakeProfit_RR_Ratio = tpRRRatio;
         
-        if(maxTrades > 0) MaxTradesPerDay = maxTrades;
-        if(maxPos > 0) MaxPositions = maxPos;
-        TrailingMode = trailMode;
+        if(maxTrades > 0) context->MaxTradesPerDay = maxTrades;
+        if(maxPos > 0) context->MaxPositions = maxPos;
+        if(trailMode >= 0) context->TrailingStopMode = (ENUM_TRAILING_MODE)trailMode; // Assuming TrailingMode maps to TrailingStopMode
         
         FileClose(fileHandle);
-        string infoMsg = "Đã nạp cấu hình từ file: ";
-        infoMsg = infoMsg + configFile;
-        GlobalLogInfo(infoMsg); // Sử dụng hàm global
+        string infoMsg = "Đã nạp cấu hình từ file: " + configFile;
+        context->Logger->LogInfo(infoMsg);
         return true;
     }
     
@@ -475,47 +388,52 @@ namespace ApexPullback {
     }
     
     // Hàm điều chỉnh tham số theo preset
-    bool AdjustParametersByPreset(int preset) {
+    bool AdjustParametersByPreset(EAContext* context, int preset) { // Added EAContext* context
+        if (context == NULL || context->Logger == NULL) {
+            Print("AdjustParametersByPreset: Context hoặc Logger không hợp lệ.");
+            return false;
+        }
+
         switch(preset) {
             case PRESET_TRENDING:
                 // Điều chỉnh tham số cho thị trường xu hướng
-                GlobalLogInfo("Điều chỉnh tham số cho thị trường xu hướng");
-                MinPullbackPercent = 30.0;
-                MaxPullbackPercent = 61.8;
-                StopLoss_ATR = 1.5;
-                TakeProfit_RR = 2.0;
-                TrailingMode = TRAILING_ATR;
+                context->Logger->LogInfo("Điều chỉnh tham số cho thị trường xu hướng (PRESET_TRENDING)");
+                context->MinPullbackPercent = 30.0;
+                context->MaxPullbackPercent = 61.8;
+                context->StopLoss_ATR_Multiplier = 1.5; // Assuming StopLoss_ATR maps to StopLoss_ATR_Multiplier in context
+                context->TakeProfit_RR_Ratio = 2.0;   // Assuming TakeProfit_RR maps to TakeProfit_RR_Ratio in context
+                context->TrailingStopMode = TRAILING_ATR;
                 return true;
                 
             case PRESET_RANGING:
                 // Điều chỉnh tham số cho thị trường sideway
-                GlobalLogInfo("Điều chỉnh tham số cho thị trường sideway");
-                MinPullbackPercent = 40.0;
-                MaxPullbackPercent = 80.0;
-                StopLoss_ATR = 1.2;
-                TakeProfit_RR = 1.5;
-                TrailingMode = TRAILING_SWING_POINTS;
+                context->Logger->LogInfo("Điều chỉnh tham số cho thị trường sideway (PRESET_RANGING)");
+                context->MinPullbackPercent = 40.0;
+                context->MaxPullbackPercent = 80.0;
+                context->StopLoss_ATR_Multiplier = 1.2;
+                context->TakeProfit_RR_Ratio = 1.5;
+                context->TrailingStopMode = TRAILING_SWING_POINTS;
                 return true;
                 
             case PRESET_VOLATILE:
                 // Điều chỉnh tham số cho thị trường biến động
-                GlobalLogInfo("Điều chỉnh tham số cho thị trường biến động");
-                MinPullbackPercent = 20.0;
-                MaxPullbackPercent = 50.0;
-                StopLoss_ATR = 2.0;
-                TakeProfit_RR = 2.5;
-                TrailingMode = TRAILING_ADAPTIVE;
+                context->Logger->LogInfo("Điều chỉnh tham số cho thị trường biến động (PRESET_VOLATILE)");
+                context->MinPullbackPercent = 20.0;
+                context->MaxPullbackPercent = 50.0;
+                context->StopLoss_ATR_Multiplier = 2.0;
+                context->TakeProfit_RR_Ratio = 2.5;
+                context->TrailingStopMode = TRAILING_ADAPTIVE;
                 return true;
                 
             case PRESET_CONSERVATIVE:
                 // Điều chỉnh tham số cho giao dịch bảo thủ
-                GlobalLogInfo("Điều chỉnh tham số cho giao dịch bảo thủ");
-                MinPullbackPercent = 40.0;
-                MaxPullbackPercent = 61.8;
-                StopLoss_ATR = 1.2;
-                TakeProfit_RR = 2.0;
-                TrailingMode = TRAILING_ATR;
-                RiskPercent = 0.5;
+                context->Logger->LogInfo("Điều chỉnh tham số cho giao dịch bảo thủ (PRESET_CONSERVATIVE)");
+                context->MinPullbackPercent = 40.0;
+                context->MaxPullbackPercent = 61.8;
+                context->StopLoss_ATR_Multiplier = 1.2;
+                context->TakeProfit_RR_Ratio = 2.0;
+                context->TrailingStopMode = TRAILING_ATR;
+                context->RiskPercent = 0.5; // Assuming RiskPercent is directly in context
                 return true;
                 
             default:
@@ -528,5 +446,57 @@ namespace ApexPullback {
         }
     }
 } // kết thúc namespace ApexPullback
+
+
+//+------------------------------------------------------------------+
+//| Namespace for APEX Pullback EA specific functions and utilities  |
+//+------------------------------------------------------------------+
+namespace ApexPullback {
+
+//+------------------------------------------------------------------+
+//| Mã hóa MagicNumber với ID Chiến lược                             |
+//+------------------------------------------------------------------+
+/// @brief Mã hóa số magic cơ sở với ID chiến lược.
+/// @param baseMagic Số magic number cơ sở của EA.
+/// @param strategyId ID của chiến lược (từ ENUM_STRATEGY_ID).
+/// @return MagicNumber đã được mã hóa.
+int EncodeMagicNumber(int baseMagic, ENUM_STRATEGY_ID strategyId) {
+    // Đảm bảo strategyId nằm trong khoảng hợp lệ (ví dụ 0-99)
+    // Nếu strategyId lớn hơn 99, nó sẽ làm thay đổi cả phần baseMagic
+    if (strategyId < 0 || strategyId > 99) {
+        // Ghi log hoặc xử lý lỗi nếu ID không hợp lệ
+        // PrintFormat("Warning: Invalid Strategy ID %d for encoding MagicNumber. Using 0.", strategyId);
+        // strategyId = STRATEGY_ID_UNDEFINED; // Hoặc trả về lỗi
+        // For now, let's assume strategyId is always valid as per ENUM_STRATEGY_ID
+    }
+    return baseMagic * 100 + strategyId; // Dành 2 chữ số cuối cho ID chiến lược
+}
+
+//+------------------------------------------------------------------+
+//| Giải mã ID Chiến lược từ MagicNumber                             |
+//+------------------------------------------------------------------+
+/// @brief Giải mã ID chiến lược từ một MagicNumber đã được mã hóa.
+/// @param magicNumber MagicNumber của một giao dịch/lệnh.
+/// @return ID của chiến lược (ENUM_STRATEGY_ID).
+ENUM_STRATEGY_ID DecodeStrategyFromMagic(int magicNumber) {
+    int strategyIdValue = magicNumber % 100;
+    // Kiểm tra xem giá trị giải mã có nằm trong phạm vi của ENUM_STRATEGY_ID không
+    // Điều này quan trọng nếu có các magic number khác không theo quy ước này
+    switch((ENUM_STRATEGY_ID)strategyIdValue) {
+        case STRATEGY_ID_UNDEFINED:
+        case STRATEGY_ID_PULLBACK:
+        case STRATEGY_ID_MEAN_REVERSION:
+        case STRATEGY_ID_BREAKOUT:
+        case STRATEGY_ID_SHALLOW_PULLBACK:
+        case STRATEGY_ID_RANGE_TRADING:
+            return (ENUM_STRATEGY_ID)strategyIdValue;
+        default:
+            // Nếu ID không được định nghĩa, trả về UNDEFINED
+            // PrintFormat("Warning: Decoded unknown Strategy ID %d from MagicNumber %d. Returning UNDEFINED.", strategyIdValue, magicNumber);
+            return STRATEGY_ID_UNDEFINED;
+    }
+}
+
+} // namespace ApexPullback
 
 #endif // _FUNCTION_DEFINITIONS_MQH_

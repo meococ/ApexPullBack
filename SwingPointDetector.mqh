@@ -116,7 +116,12 @@ struct MarketRegimeInfo {
 //+------------------------------------------------------------------+
 //| Lớp CSwingPointDetector - Phát hiện đỉnh/đáy                     |
 //+------------------------------------------------------------------+
-class CSwingPointDetector {
+class CSwingPointDetector
+{
+public:
+    bool HasHigherHighsAndHigherLows(int minSwings = 2);
+    bool HasLowerHighsAndLowerLows(int minSwings = 2);
+    bool HasValidMarketStructure(bool isLong, int minMajorSwings = 1);
 private:
    string            m_Symbol;            // Symbol để phân tích
    ENUM_TIMEFRAMES   m_Timeframe;         // Khung thời gian chính
@@ -3078,6 +3083,127 @@ double CSwingPointDetector::GetMinSwingLowInRange(int bars)
    if(minLow == DBL_MAX) return 0.0;
    
    return minLow;
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra xu hướng dựa trên các đỉnh/đáy cao hơn/thấp hơn         |
+//+------------------------------------------------------------------+
+bool CSwingPointDetector::HasHigherHighsAndHigherLows(int minSwings = 2)
+{
+   if(m_SwingPointCount < minSwings * 2) return false; // Cần ít nhất minSwings đỉnh và minSwings đáy
+
+   int hhCount = 0; // Higher Highs
+   int hlCount = 0; // Higher Lows
+   double lastHigh = 0, prevHigh = 0;
+   double lastLow = 0, prevLow = 0;
+   int highSwingsFound = 0;
+   int lowSwingsFound = 0;
+
+   for(int i = m_SwingPointCount - 1; i >= 0; i--) {
+      if(m_SwingPoints[i].type == SWING_HIGH) {
+         highSwingsFound++;
+         if(highSwingsFound == 1) lastHigh = m_SwingPoints[i].price;
+         else if(highSwingsFound == 2) {
+            prevHigh = lastHigh;
+            lastHigh = m_SwingPoints[i].price;
+            if(lastHigh > prevHigh) hhCount++;
+         }
+         else if(highSwingsFound > 2) {
+             prevHigh = lastHigh;
+             lastHigh = m_SwingPoints[i].price;
+             if(lastHigh > prevHigh) hhCount++;
+         }
+      }
+      if(m_SwingPoints[i].type == SWING_LOW) {
+         lowSwingsFound++;
+         if(lowSwingsFound == 1) lastLow = m_SwingPoints[i].price;
+         else if(lowSwingsFound == 2) {
+            prevLow = lastLow;
+            lastLow = m_SwingPoints[i].price;
+            if(lastLow > prevLow) hlCount++;
+         }
+         else if(lowSwingsFound > 2) {
+             prevLow = lastLow;
+             lastLow = m_SwingPoints[i].price;
+             if(lastLow > prevLow) hlCount++;
+         }
+      }
+      if(hhCount >= minSwings && hlCount >= minSwings) return true;
+   }
+   return (hhCount >= minSwings && hlCount >= minSwings);
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra xu hướng dựa trên các đỉnh/đáy thấp hơn/thấp hơn         |
+//+------------------------------------------------------------------+
+bool CSwingPointDetector::HasLowerHighsAndLowerLows(int minSwings = 2)
+{
+   if(m_SwingPointCount < minSwings * 2) return false;
+
+   int lhCount = 0; // Lower Highs
+   int llCount = 0; // Lower Lows
+   double lastHigh = 0, prevHigh = 0;
+   double lastLow = 0, prevLow = 0;
+   int highSwingsFound = 0;
+   int lowSwingsFound = 0;
+
+   for(int i = m_SwingPointCount - 1; i >= 0; i--) {
+      if(m_SwingPoints[i].type == SWING_HIGH) {
+         highSwingsFound++;
+         if(highSwingsFound == 1) lastHigh = m_SwingPoints[i].price;
+         else if(highSwingsFound == 2) {
+            prevHigh = lastHigh;
+            lastHigh = m_SwingPoints[i].price;
+            if(lastHigh < prevHigh) lhCount++;
+         }
+         else if(highSwingsFound > 2) {
+             prevHigh = lastHigh;
+             lastHigh = m_SwingPoints[i].price;
+             if(lastHigh < prevHigh) lhCount++;
+         }
+      }
+      if(m_SwingPoints[i].type == SWING_LOW) {
+         lowSwingsFound++;
+         if(lowSwingsFound == 1) lastLow = m_SwingPoints[i].price;
+         else if(lowSwingsFound == 2) {
+            prevLow = lastLow;
+            lastLow = m_SwingPoints[i].price;
+            if(lastLow < prevLow) llCount++;
+         }
+         else if(lowSwingsFound > 2) {
+             prevLow = lastLow;
+             lastLow = m_SwingPoints[i].price;
+             if(lastLow < prevLow) llCount++;
+         }
+      }
+      if(lhCount >= minSwings && llCount >= minSwings) return true;
+   }
+   return (lhCount >= minSwings && llCount >= minSwings);
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra cấu trúc thị trường hợp lệ cho giao dịch                 |
+//+------------------------------------------------------------------+
+bool CSwingPointDetector::HasValidMarketStructure(bool isLong, int minMajorSwings = 1)
+{
+   if(m_SwingPointCount < minMajorSwings * 2) return false;
+
+   int majorHighCount = 0;
+   int majorLowCount = 0;
+   for(int i = 0; i < m_SwingPointCount; i++) {
+      if(m_SwingPoints[i].importance >= SWING_MAJOR) {
+         if(m_SwingPoints[i].type == SWING_HIGH) majorHighCount++;
+         else if(m_SwingPoints[i].type == SWING_LOW) majorLowCount++;
+      }
+   }
+
+   if(isLong) {
+      // Cần ít nhất một đỉnh major và một đáy major, và xu hướng tăng được xác nhận bởi các swing points
+      return (majorHighCount >= minMajorSwings && majorLowCount >= minMajorSwings && HasHigherHighsAndHigherLows());
+   } else {
+      // Cần ít nhất một đỉnh major và một đáy major, và xu hướng giảm được xác nhận bởi các swing points
+      return (majorHighCount >= minMajorSwings && majorLowCount >= minMajorSwings && HasLowerHighsAndLowerLows());
+   }
 }
 
 } // đóng namespace ApexPullback

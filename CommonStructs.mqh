@@ -7,15 +7,118 @@
 #ifndef _COMMON_STRUCTS_MQH_
 #define _COMMON_STRUCTS_MQH_
 
-// #include "IncludeManager.mqh"       // Đã loại bỏ, các kiểu cơ bản có sẵn trong MQL5 hoặc từ Enums
+#include "Constants.mqh" // Ensure MAX_HISTORY_DAYS is defined
 #include "Enums.mqh"                   // Định nghĩa enums
-//+------------------------------------------------------------------+
-//| Định nghĩa cấu trúc dữ liệu Market Profile                       |
-//+------------------------------------------------------------------+
 
 namespace ApexPullback {
 
-/// @brief Cấu trúc lưu trữ thông tin thị trường toàn diện
+// Forward declarations for classes used in EAContext
+class CLogger;
+class CMarketProfile;
+class CSwingPointDetector;
+class CPositionManager;
+class CRiskManager;
+class CTradeManager;
+class CSessionManager;
+class CNewsFilter;
+class CDashboard;
+class CPatternDetector;
+class CPerformanceTracker;
+class CIndicatorUtils;
+class CPortfolioManager;
+class CAssetDNA;
+
+//+------------------------------------------------------------------+
+//| Enum for Portfolio Manager Decisions                             |
+//+------------------------------------------------------------------+
+enum ENUM_PORTFOLIO_DECISION
+{
+    DECISION_PENDING,  // Proposal is pending review
+    DECISION_APPROVED, // Proposal is approved
+    DECISION_REJECTED  // Proposal is rejected
+};
+
+//+------------------------------------------------------------------+
+//| Struct for Trade Proposals                                       |
+//+------------------------------------------------------------------+
+struct TradeProposal
+{
+    string            symbol;           // Symbol (e.g., "EURUSD")
+    ENUM_ORDER_TYPE   orderType;        // Order type (ORDER_TYPE_BUY or ORDER_TYPE_SELL)
+    double            price;            // Proposed entry price
+    double            stopLoss;         // Proposed stop loss price
+    double            takeProfit;       // Proposed take profit price
+    double            riskPercent;      // Proposed risk percentage for this trade
+    double            qualityScore;     // Quality score of the trade signal (0.0 - 1.0)
+    string            strategyName;     // Name of the strategy generating the proposal
+    long              magicNumber;      // Magic number for the EA instance
+    datetime          proposalTime;     // Timestamp of when the proposal was generated
+    string            gvProposalName;   // Global variable name used for this proposal
+    string            gvDecisionName;   // Global variable name for the decision
+    ENUM_PORTFOLIO_DECISION decision; // Decision made by the Portfolio Manager
+
+    // Constructor
+    TradeProposal() :
+        orderType(WRONG_VALUE),
+        price(0.0),
+        stopLoss(0.0),
+        takeProfit(0.0),
+        riskPercent(0.0),
+        qualityScore(0.0),
+        magicNumber(0),
+        proposalTime(0),
+        decision(DECISION_PENDING) {}
+
+    // Method to format proposal to string for GV
+    string ToString() const
+    {
+        return StringFormat("PROPOSAL;%s;%s;%f;%f;%f;%f;%f;%s;%d;%s;%s",
+                            symbol,
+                            EnumToString(orderType),
+                            price,
+                            stopLoss,
+                            takeProfit,
+                            riskPercent,
+                            qualityScore,
+                            strategyName,
+                            magicNumber,
+                            gvProposalName, // Include GV names for easier tracking
+                            gvDecisionName);
+    }
+
+    // Method to parse proposal from string (from GV)
+    // Returns true if parsing is successful, false otherwise
+    bool FromString(const string& s)
+    {
+        string parts[];
+        if(StringSplit(s, ';', parts) < 12) // Expecting 12 parts now
+            return false;
+
+        if(parts[0] != "PROPOSAL") return false;
+
+        symbol = parts[1];
+        if(parts[2] == EnumToString(ORDER_TYPE_BUY)) orderType = ORDER_TYPE_BUY;
+        else if(parts[2] == EnumToString(ORDER_TYPE_SELL)) orderType = ORDER_TYPE_SELL;
+        else return false; // Invalid order type
+
+        price = StringToDouble(parts[3]);
+        stopLoss = StringToDouble(parts[4]);
+        takeProfit = StringToDouble(parts[5]);
+        riskPercent = StringToDouble(parts[6]);
+        qualityScore = StringToDouble(parts[7]);
+        strategyName = parts[8];
+        magicNumber = StringToInteger(parts[9]);
+        gvProposalName = parts[10];
+        gvDecisionName = parts[11];
+        proposalTime = TimeCurrent(); // Set proposal time to current time when parsing
+        decision = DECISION_PENDING; // Default decision
+        return true;
+    }
+};
+
+//+------------------------------------------------------------------+
+//| Định nghĩa cấu trúc dữ liệu Market Profile                       |
+//+------------------------------------------------------------------+
 struct MarketProfileData {
     // Phương thức copy để thay thế cho operator= mặc định
     void CopyFrom(const MarketProfileData& src) {
@@ -787,15 +890,23 @@ struct DashboardPanel {
     }
 };
 
-} // Kết thúc namespace ApexPullback
-
 //+------------------------------------------------------------------+
 //| Định nghĩa cấu trúc dữ liệu Asset Profile Data                     |
 //+------------------------------------------------------------------+
-struct AssetProfileData {
+
+struct AssetProfileDataStruct { // Đổi tên để tránh trùng lặp với struct MarketProfileData
     string symbol;                 // Biểu tượng tài sản
     ENUM_ASSET_CLASS assetClass;   // Phân loại tài sản (Forex, Gold, Indices, ...)
     ENUM_SYMBOL_GROUP symbolGroup; // Nhóm cặp tiền (Major, Minor, Exotic, ...)
+
+    // --- Trường DNA Chiến lược (Mới) ---
+    ENUM_TRADING_STRATEGY preferredStrategy; // Kịch bản giao dịch ưa thích
+    double optimalSlAtrMultiplier;           // Hệ số SL ATR tối ưu
+    double optimalTpRrRatio;                 // Tỷ lệ R:R tối ưu
+    bool   isMeanReverting;                  // Có thiên hướng hồi quy trung bình?
+    bool   isStrongTrending;                 // Có thiên hướng xu hướng mạnh?
+    int    activeTradingStartHour;           // Giờ bắt đầu phiên giao dịch sôi động (GMT)
+    int    activeTradingEndHour;             // Giờ kết thúc phiên giao dịch sôi động (GMT)
     ENUM_ASSET_VOLATILITY volatilityLevel; // Mức độ biến động (Low, Medium, High, ...)
     
     // Các thông số thống kê
@@ -837,6 +948,15 @@ struct AssetProfileData {
         symbol = "";
         assetClass = ASSET_CLASS_FOREX;
         symbolGroup = GROUP_UNDEFINED;
+
+        // Khởi tạo các trường DNA Chiến lược
+        preferredStrategy = STRATEGY_UNDEFINED; // Hoặc một giá trị mặc định khác
+        optimalSlAtrMultiplier = 1.5; // Giá trị mặc định ví dụ
+        optimalTpRrRatio = 2.0;       // Giá trị mặc định ví dụ
+        isMeanReverting = false;
+        isStrongTrending = false;
+        activeTradingStartHour = 7;   // GMT, ví dụ: London open
+        activeTradingEndHour = 16;    // GMT, ví dụ: NY close
         volatilityLevel = VOLATILITY_MEDIUM;
         
         // Khởi tạo các giá trị khác về 0
@@ -878,8 +998,6 @@ struct AssetProfileData {
 //+------------------------------------------------------------------+
 
 /// @brief Cấu trúc lưu trữ các indicator handle sử dụng trong EA
-namespace ApexPullback {
-
 struct IndicatorHandles {
     // Các handle cơ bản
     int atrHandle;                     // ATR indicator
@@ -925,43 +1043,483 @@ struct IndicatorHandles {
     }
 };
 
+
+
+//+------------------------------------------------------------------+
+//| Định nghĩa cấu trúc dữ liệu EA Context                           |
+//+------------------------------------------------------------------+
+struct EAContext {
+    // === Các con trỏ đến các module chính ===
+    CLogger*            Logger;              // Module ghi log
+    CMarketProfile*     MarketProfile;       // Module phân tích thị trường
+    CSwingPointDetector* SwingDetector;      // Module phát hiện swing
+    CPositionManager*   PositionManager;     // Module quản lý vị thế
+    CRiskManager*       RiskManager;         // Module quản lý rủi ro
+    CTradeManager*      TradeManager;        // Module quản lý giao dịch
+    CSessionManager*    SessionManager;      // Module quản lý phiên
+    CNewsFilter*        NewsFilter;          // Module lọc tin tức
+    CDashboard*         Dashboard;           // Module hiển thị
+    CPatternDetector*   PatternDetector;     // Module phát hiện mẫu hình
+    CPerformanceTracker* PerformanceTracker; // Module theo dõi hiệu suất
+    CIndicatorUtils*    IndicatorUtils;      // Module tiện ích indicator
+    CPortfolioManager*  PortfolioManager;    // Module quản lý danh mục
+    CAssetDNA*          AssetDNA;            // Module Phân tích DNA Tài sản (MỚI)
+
+    // === Các tham số từ Inputs.mqh ===
+    // Thông tin chung
+    bool    AllowNewTrades;         // Cho phép vào lệnh mới
+    bool    EnableDetailedLogs;      // Bật log chi tiết
+    bool    AlertsEnabled;           // Bật cảnh báo
+    bool    SendNotifications;       // Gửi thông báo đẩy
+    bool    SendEmailAlerts;         // Gửi email
+    bool    EnableTelegramNotify;    // Bật thông báo Telegram
+    bool    TelegramImportantOnly;   // Chỉ gửi thông báo quan trọng
+    bool    DisableDashboardInBacktest; // Tắt dashboard trong backtest
+
+    // Cài đặt chiến lược
+    double  MinPullbackPct;         // % Pullback tối thiểu
+    double  MaxPullbackPct;         // % Pullback tối đa
+    bool    RequirePriceAction;      // Yêu cầu xác nhận Price Action
+    bool    RequireMomentum;         // Yêu cầu xác nhận Momentum
+    bool    RequireVolume;           // Yêu cầu xác nhận Volume
+    bool    EnableMarketRegime;      // Bật lọc Market Regime
+    bool    EnableVolatility;        // Lọc biến động bất thường
+    bool    EnableAdx;               // Lọc ADX
+    double  MinAdxValue;             // Giá trị ADX tối thiểu
+    double  MaxAdxValue;             // Giá trị ADX tối đa
+    double  VolatilityThreshold;     // Ngưỡng biến động (xATR)
+    double  MaxSpreadPoints;         // Spread tối đa (points)
+
+    // Quản lý rủi ro
+    double  RiskPercent;             // Risk % mỗi lệnh
+    double  StopLoss_ATR;            // Hệ số ATR cho Stop Loss
+    double  TakeProfit_RR;           // Tỷ lệ R:R cho Take Profit
+    bool    PropFirmMode;            // Chế độ Prop Firm
+    double  DailyLossLimit;          // Giới hạn lỗ ngày (%)
+    double  MaxDrawdown;             // Drawdown tối đa (%)
+    int     MaxTradesPerDay;         // Số lệnh tối đa/ngày
+    int     MaxConsecutiveLosses;    // Số lần thua liên tiếp tối đa
+    int     MaxPositions;            // Số vị thế tối đa
+
+    // Điều chỉnh risk theo drawdown
+    double  DrawdownReduceThreshold; // Ngưỡng DD để giảm risk (%)
+    bool    EnableTaperedRisk;       // Giảm risk từ từ
+    double  MinRiskMultiplier;       // Hệ số risk tối thiểu khi DD cao
+
+    // Quản lý vị thế
+    int     EntryMode;               // Chế độ vào lệnh
+    bool    UsePartialClose;         // Sử dụng đóng từng phần
+    double  PartialCloseR1;          // R-multiple cho đóng phần 1
+    double  PartialCloseR2;          // R-multiple cho đóng phần 2
+    double  PartialClosePercent1;    // % đóng ở mức R1
+    double  PartialClosePercent2;    // % đóng ở mức R2
+
+    // Trailing stop
+    bool    UseAdaptiveTrailing;     // Trailing thích ứng theo regime
+    int     TrailingMode;            // Chế độ trailing mặc định
+    double  TrailingAtrMultiplier;   // Hệ số ATR cho trailing
+    double  BreakEvenAfterR;         // Chuyển BE sau (R-multiple)
+    double  BreakEvenBuffer;         // Buffer cho breakeven (points)
+
+    // THÔNG TIN CHUNG (tiếp theo)
+    string  EAName;
+    string  EAVersion;
+    int     MagicNumber;
+    string  OrderComment;
+
+    // HIỂN THỊ & THÔNG BÁO (tiếp theo)
+    bool    EnableCsvLog;
+    string  CsvLogFilename;
+    bool    DisplayDashboard;
+    ENUM_DASHBOARD_THEME DashboardTheme;
+    string  TelegramBotToken;
+    string  TelegramChatID;
+
+    // CHIẾN LƯỢC CỐT LÕI (tiếp theo)
+    ENUM_TIMEFRAMES MainTimeframe;
+    int     EMA_Fast;
+    int     EMA_Medium;
+    int     EMA_Slow;
+    bool    UseMultiTimeframe;
+    ENUM_TIMEFRAMES HigherTimeframe;
+    int     TrendDirection;
+
+    // ĐỊNH NGHĨA PULLBACK CHẤT LƯỢNG CAO (tiếp theo)
+    bool    EnablePriceActionInput; // Renamed from EnablePriceAction
+    bool    EnableSwingLevels;
+
+    // BỘ LỌC THỊ TRƯỜNG (tiếp theo)
+    int     MarketPreset;
+
+    // CHANDELIER EXIT
+    bool    UseChandelierExit;
+    int     ChandelierPeriod;
+    double  ChandelierMultiplier;
+
+    // LỌC PHIÊN
+    bool    FilterBySession;
+    int     SessionFilterMode; // Renamed from SessionFilter
+    bool    UseGmtOffset;
+    int     GmtOffset;
+    bool    TradeLondonOpen;
+    bool    TradeNewYorkOpen;
+
+    // LỌC TIN TỨC
+    int     NewsFilterLevelInput; // Renamed from NewsFilter
+    string  NewsDataFile;
+    int     NewsImportanceInput; // Renamed
+    int     MinutesBeforeNews;
+    int     MinutesAfterNews;
+
+    // TỰ ĐỘNG TẠM DỪNG & KHÔI PHỤC
+    bool    EnableAutoPause;
+    double  VolatilityPauseThresholdInput; // Renamed
+    double  DrawdownPauseThresholdInput; // Renamed
+    bool    EnableAutoResume;
+    int     PauseDurationMinutes;
+    bool    ResumeOnLondonOpen;
+
+    // ASSETPROFILER - MODULE MỚI
+    bool    UseAssetProfiler;
+    int     AssetProfileDays;
+    bool    AdaptRiskByAsset;
+    bool    AdaptSLByAsset;
+    bool    AdaptSpreadFilterByAsset;
+    ENUM_ADAPTIVE_MODE AdaptiveModeInput; // Renamed
+
+    // CHẾ ĐỘ TAKE PROFIT
+    ENUM_TP_MODE TakeProfitModeInput; // Renamed
+    double  StopLossBufferATR_Ratio;
+    double  StopLossATR_Multiplier_TP; // Renamed
+    double  TakeProfitStructureBufferATR_Ratio;
+    double  ADXThresholdForVolatilityTP;
+    double  VolatilityTP_ATR_Multiplier_High;
+    double  VolatilityTP_ATR_Multiplier_Low;
+
+    // QUẢN LÝ DANH MỤC
+    bool    IsMasterPortfolioManager;
+
+    // Trạng thái EA
+    ENUM_EA_STATE EAState;           // Trạng thái hiện tại của EA
+    bool    EmergencyMode;           // Chế độ khẩn cấp
+    MarketProfileData CurrentProfileData; // Dữ liệu Market Profile hiện tại
+
+    // Constructor
+    EAContext() {
+        // Khởi tạo các con trỏ là NULL
+        Logger = NULL;
+        MarketProfile = NULL;
+        SwingDetector = NULL;
+        PositionManager = NULL;
+        RiskManager = NULL;
+        TradeManager = NULL;
+        SessionManager = NULL;
+        NewsFilter = NULL;
+        Dashboard = NULL;
+        PatternDetector = NULL;
+        PerformanceTracker = NULL;
+        IndicatorUtils = NULL;
+        PortfolioManager = NULL;
+        AssetDNA = NULL;
+
+        // Khởi tạo các biến thành viên với giá trị mặc định
+        AllowNewTrades = true;
+        EnableDetailedLogs = false;
+        AlertsEnabled = true;
+        SendNotifications = false;
+        SendEmailAlerts = false;
+        EnableTelegramNotify = false;
+        TelegramImportantOnly = true;
+        DisableDashboardInBacktest = false;
+
+        MinPullbackPct = 30.0;
+        MaxPullbackPct = 70.0;
+        RequirePriceAction = true;
+        RequireMomentum = true;
+        RequireVolume = false;
+        EnableMarketRegime = true;
+        EnableVolatility = true;
+        EnableAdx = false;
+        MinAdxValue = 20.0;
+        MaxAdxValue = 50.0;
+        VolatilityThreshold = 2.0;
+        MaxSpreadPoints = 50.0;
+
+        RiskPercent = 1.0;
+        StopLoss_ATR = 1.5;
+        TakeProfit_RR = 2.0;
+        PropFirmMode = false;
+        DailyLossLimit = 5.0;
+        MaxDrawdown = 10.0;
+        MaxTradesPerDay = 5;
+        MaxConsecutiveLosses = 3;
+        MaxPositions = 1;
+
+        DrawdownReduceThreshold = 5.0;
+        EnableTaperedRisk = true;
+        MinRiskMultiplier = 0.3;
+
+        EntryMode = 0;
+        UsePartialClose = false;
+        PartialCloseR1 = 1.0;
+        PartialCloseR2 = 2.0;
+        PartialClosePercent1 = 50.0;
+        PartialClosePercent2 = 50.0;
+
+        UseAdaptiveTrailing = true;
+        TrailingMode = 0;
+        TrailingAtrMultiplier = 2.0;
+        BreakEvenAfterR = 0.5;
+        BreakEvenBuffer = 5.0;
+
+        // THÔNG TIN CHUNG (tiếp theo)
+        EAName = "APEX Pullback EA v14.0";
+        EAVersion = "14.0";
+        MagicNumber = 14000;
+        OrderComment = "ApexPullback v14";
+
+        // HIỂN THỊ & THÔNG BÁO (tiếp theo)
+        EnableCsvLog = false;
+        CsvLogFilename = "ApexPullback_Log.csv";
+        DisplayDashboard = true;
+        DashboardTheme = DASHBOARD_DARK;
+        TelegramBotToken = "";
+        TelegramChatID = "";
+
+        // CHIẾN LƯỢC CỐT LÕI (tiếp theo)
+        MainTimeframe = PERIOD_H1;
+        EMA_Fast = 34;
+        EMA_Medium = 89;
+        EMA_Slow = 200;
+        UseMultiTimeframe = true;
+        HigherTimeframe = PERIOD_H4;
+        TrendDirection = 0; // 0-Cả hai
+
+        // ĐỊNH NGHĨA PULLBACK CHẤT LƯỢNG CAO (tiếp theo)
+        EnablePriceActionInput = true;
+        EnableSwingLevels = true;
+
+        // BỘ LỌC THỊ TRƯỜNG (tiếp theo)
+        MarketPreset = PRESET_AUTO; // Assuming PRESET_AUTO is defined in Enums.mqh
+
+        // CHANDELIER EXIT
+        UseChandelierExit = true;
+        ChandelierPeriod = 20;
+        ChandelierMultiplier = 3.0;
+
+        // LỌC PHIÊN
+        FilterBySession = false;
+        SessionFilterMode = FILTER_ALL_SESSIONS; // Assuming FILTER_ALL_SESSIONS is defined
+        UseGmtOffset = true;
+        GmtOffset = 0;
+        TradeLondonOpen = true;
+        TradeNewYorkOpen = true;
+
+        // LỌC TIN TỨC
+        NewsFilterLevelInput = 2;
+        NewsDataFile = "news_calendar.csv";
+        NewsImportanceInput = 2;
+        MinutesBeforeNews = 30;
+        MinutesAfterNews = 15;
+
+        // TỰ ĐỘNG TẠM DỪNG & KHÔI PHỤC
+        EnableAutoPause = true;
+        VolatilityPauseThresholdInput = 2.5;
+        DrawdownPauseThresholdInput = 7.0;
+        EnableAutoResume = true;
+        PauseDurationMinutes = 120;
+        ResumeOnLondonOpen = true;
+
+        // ASSETPROFILER - MODULE MỚI
+        UseAssetProfiler = true;
+        AssetProfileDays = 30;
+        AdaptRiskByAsset = true;
+        AdaptSLByAsset = true;
+        AdaptSpreadFilterByAsset = true;
+        AdaptiveModeInput = MODE_MANUAL; // Assuming MODE_MANUAL is defined
+
+        // CHẾ ĐỘ TAKE PROFIT
+        TakeProfitModeInput = TP_MODE_STRUCTURE; // Assuming TP_MODE_STRUCTURE is defined
+        StopLossBufferATR_Ratio = 0.2;
+        StopLossATR_Multiplier_TP = 2.0;
+        TakeProfitStructureBufferATR_Ratio = 0.1;
+        ADXThresholdForVolatilityTP = 25.0;
+        VolatilityTP_ATR_Multiplier_High = 2.5;
+        VolatilityTP_ATR_Multiplier_Low = 1.8;
+
+        // QUẢN LÝ DANH MỤC
+        IsMasterPortfolioManager = false;
+
+        EAState = STATE_INIT;
+        EmergencyMode = false;
+    }
+
+    // Copy Assignment Operator
+    EAContext& operator=(const EAContext& other)
+    {
+        if (this == &other) // Self-assignment check
+            return *this;
+
+        // Perform member-wise copy for all members
+        this->Logger = other.Logger;
+        this->MarketProfile = other.MarketProfile;
+        this->SwingDetector = other.SwingDetector;
+        this->PositionManager = other.PositionManager;
+        this->RiskManager = other.RiskManager;
+        this->TradeManager = other.TradeManager;
+        this->SessionManager = other.SessionManager;
+        this->NewsFilter = other.NewsFilter;
+        this->Dashboard = other.Dashboard;
+        this->PatternDetector = other.PatternDetector;
+        this->PerformanceTracker = other.PerformanceTracker;
+        this->IndicatorUtils = other.IndicatorUtils;
+        this->PortfolioManager = other.PortfolioManager;
+        this->AssetDNA = other.AssetDNA;
+
+        this->Symbol = other.Symbol;
+        this->Timeframe = other.Timeframe;
+        this->AccountLeverage = other.AccountLeverage;
+        this->IsHedgingAccount = other.IsHedgingAccount;
+        this->IsStrategyTester = other.IsStrategyTester;
+        this->IsOptimization = other.IsOptimization;
+        this->IsVisualMode = other.IsVisualMode;
+        this->MaxLot = other.MaxLot;
+        this->MinLot = other.MinLot;
+        this->LotStep = other.LotStep;
+        this->TickValue = other.TickValue;
+        this->PointSize = other.PointSize;
+        this->DigitsValue = other.DigitsValue;
+        this->StopLevel = other.StopLevel;
+        this->FreezeLevel = other.FreezeLevel;
+
+        this->AllowNewTrades = other.AllowNewTrades;
+        this->EnableDetailedLogs = other.EnableDetailedLogs;
+        this->AlertsEnabled = other.AlertsEnabled;
+        this->SendNotifications = other.SendNotifications;
+        this->SendEmailAlerts = other.SendEmailAlerts;
+        this->EnableTelegramNotify = other.EnableTelegramNotify;
+        this->TelegramImportantOnly = other.TelegramImportantOnly;
+        this->DisableDashboardInBacktest = other.DisableDashboardInBacktest;
+
+        this->MinPullbackPct = other.MinPullbackPct;
+        this->MaxPullbackPct = other.MaxPullbackPct;
+        this->RequirePriceAction = other.RequirePriceAction;
+        this->RequireMomentum = other.RequireMomentum;
+        this->RequireVolume = other.RequireVolume;
+        this->EnableMarketRegime = other.EnableMarketRegime;
+        this->EnableVolatility = other.EnableVolatility;
+        this->EnableAdx = other.EnableAdx;
+        this->MinAdxValue = other.MinAdxValue;
+        this->MaxAdxValue = other.MaxAdxValue;
+        this->VolatilityThreshold = other.VolatilityThreshold;
+        this->MaxSpreadPoints = other.MaxSpreadPoints;
+
+        this->RiskPercent = other.RiskPercent;
+        this->StopLoss_ATR = other.StopLoss_ATR;
+        this->TakeProfit_RR = other.TakeProfit_RR;
+        this->PropFirmMode = other.PropFirmMode;
+        this->DailyLossLimit = other.DailyLossLimit;
+        this->MaxDrawdown = other.MaxDrawdown;
+        this->MaxTradesPerDay = other.MaxTradesPerDay;
+        this->MaxConsecutiveLosses = other.MaxConsecutiveLosses;
+        this->MaxPositions = other.MaxPositions;
+
+        this->DrawdownReduceThreshold = other.DrawdownReduceThreshold;
+        this->EnableTaperedRisk = other.EnableTaperedRisk;
+        this->MinRiskMultiplier = other.MinRiskMultiplier;
+
+        this->EntryMode = other.EntryMode;
+        this->UsePartialClose = other.UsePartialClose;
+        this->PartialCloseR1 = other.PartialCloseR1;
+        this->PartialCloseR2 = other.PartialCloseR2;
+        this->PartialClosePercent1 = other.PartialClosePercent1;
+        this->PartialClosePercent2 = other.PartialClosePercent2;
+
+        this->UseAdaptiveTrailing = other.UseAdaptiveTrailing;
+        this->TrailingMode = other.TrailingMode;
+        this->TrailingAtrMultiplier = other.TrailingAtrMultiplier;
+        this->BreakEvenAfterR = other.BreakEvenAfterR;
+        this->BreakEvenBuffer = other.BreakEvenBuffer;
+
+        this->EAName = other.EAName;
+        this->EAVersion = other.EAVersion;
+        this->MagicNumber = other.MagicNumber;
+        this->OrderComment = other.OrderComment;
+
+        this->EnableCsvLog = other.EnableCsvLog;
+        this->CsvLogFilename = other.CsvLogFilename;
+        this->DisplayDashboard = other.DisplayDashboard;
+        this->DashboardTheme = other.DashboardTheme;
+        this->TelegramBotToken = other.TelegramBotToken;
+        this->TelegramChatID = other.TelegramChatID;
+
+        this->MainTimeframe = other.MainTimeframe;
+        this->EMA_Fast = other.EMA_Fast;
+        this->EMA_Medium = other.EMA_Medium;
+        this->EMA_Slow = other.EMA_Slow;
+        this->UseMultiTimeframe = other.UseMultiTimeframe;
+        this->HigherTimeframe = other.HigherTimeframe;
+        this->TrendDirection = other.TrendDirection;
+
+        this->EnablePriceActionInput = other.EnablePriceActionInput;
+        this->EnableSwingLevels = other.EnableSwingLevels;
+
+        this->MarketPreset = other.MarketPreset;
+
+        this->UseChandelierExit = other.UseChandelierExit;
+        this->ChandelierPeriod = other.ChandelierPeriod;
+        this->ChandelierMultiplier = other.ChandelierMultiplier;
+
+        this->FilterBySession = other.FilterBySession;
+        this->SessionFilterMode = other.SessionFilterMode;
+        this->UseGmtOffset = other.UseGmtOffset;
+        this->GmtOffset = other.GmtOffset;
+        this->TradeLondonOpen = other.TradeLondonOpen;
+        this->TradeNewYorkOpen = other.TradeNewYorkOpen;
+
+        this->NewsFilterLevelInput = other.NewsFilterLevelInput;
+        this->NewsDataFile = other.NewsDataFile;
+        this->NewsImportanceInput = other.NewsImportanceInput;
+        this->MinutesBeforeNews = other.MinutesBeforeNews;
+        this->MinutesAfterNews = other.MinutesAfterNews;
+
+        this->EnableAutoPause = other.EnableAutoPause;
+        this->VolatilityPauseThresholdInput = other.VolatilityPauseThresholdInput;
+        this->DrawdownPauseThresholdInput = other.DrawdownPauseThresholdInput;
+        this->EnableAutoResume = other.EnableAutoResume;
+        this->PauseDurationMinutes = other.PauseDurationMinutes;
+        this->ResumeOnLondonOpen = other.ResumeOnLondonOpen;
+
+        this->UseAssetProfiler = other.UseAssetProfiler;
+        this->AssetProfileDays = other.AssetProfileDays;
+        this->AdaptRiskByAsset = other.AdaptRiskByAsset;
+        this->AdaptSLByAsset = other.AdaptSLByAsset;
+        this->AdaptSpreadFilterByAsset = other.AdaptSpreadFilterByAsset;
+        this->AdaptiveModeInput = other.AdaptiveModeInput;
+
+        this->TakeProfitModeInput = other.TakeProfitModeInput;
+        this->StopLossBufferATR_Ratio = other.StopLossBufferATR_Ratio;
+        this->StopLossATR_Multiplier_TP = other.StopLossATR_Multiplier_TP;
+        this->TakeProfitStructureBufferATR_Ratio = other.TakeProfitStructureBufferATR_Ratio;
+        this->ADXThresholdForVolatilityTP = other.ADXThresholdForVolatilityTP;
+        this->VolatilityTP_ATR_Multiplier_High = other.VolatilityTP_ATR_Multiplier_High;
+        this->VolatilityTP_ATR_Multiplier_Low = other.VolatilityTP_ATR_Multiplier_Low;
+
+        this->IsMasterPortfolioManager = other.IsMasterPortfolioManager;
+
+        this->EAState = other.EAState;
+        this->EmergencyMode = other.EmergencyMode;
+        this->CurrentProfileData = other.CurrentProfileData; // Uses MarketProfileData's operator=
+
+        return *this;
+    }
+
+    // Destructor
+    ~EAContext() {
+        // Các module sẽ được giải phóng trong hàm CleanupPartialInit của EA
+    }
+};
+
 } // Kết thúc namespace ApexPullback
 
-// Enum cho quyết định của PortfolioManager
-enum ENUM_PORTFOLIO_DECISION
-{
-    DECISION_APPROVE,       // Phê duyệt lệnh
-    DECISION_REJECT,        // Từ chối lệnh
-    DECISION_ADJUST_LOT,    // Điều chỉnh khối lượng
-    DECISION_POSTPONE,      // Trì hoãn lệnh
-    DECISION_NONE           // Chưa có quyết định / Lỗi
-};
-
-// Cấu trúc để lưu trữ một đề xuất giao dịch từ một EA instance
-struct TradeProposal : public CObject // Kế thừa từ CObject để dùng với CArrayObj
-{
-    double StopLossPrice;
-    double TakeProfitPrice;
-    long MagicNumber;
-    string Comment;
-    datetime ExpirationTime; // Thời gian hết hạn của đề xuất (nếu có)
-    double SignalQuality;    // Điểm chất lượng từ 0.0-1.0 (thêm mới)
-    double RiskPercent;      // Mức rủi ro đề xuất cho lệnh này (thêm mới)
-
-    // Constructor mặc định
-    TradeProposal() :
-        Symbol(""),
-        OrderType(ORDER_TYPE_BUY), // Giá trị mặc định
-        LotSize(0.01),
-        EntryPrice(0.0),
-        StopLossPrice(0.0),
-        TakeProfitPrice(0.0),
-        MagicNumber(0),
-        Comment(""),
-        ExpirationTime(0),
-        SignalQuality(0.0),    // Khởi tạo giá trị mặc định
-        RiskPercent(0.0)       // Khởi tạo giá trị mặc định
-    {}
-};
-
-#endif // _COMMON_STRUCTS_MQH_ // _STRUCTS_MQH_
+#endif // _COMMON_STRUCTS_MQH_

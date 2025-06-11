@@ -27,8 +27,7 @@
 #include "SafeDataProvider.mqh"   // Safe data provider for indicator data
 #include "MarketProfile.mqh"      // Market analysis module
 #include "SwingPointDetector.mqh" // Swing point detection module
-#include "AssetProfileManager.mqh"// Manages asset profiles
-#include "AssetProfiler.mqh"      // Asset profiling module
+#include "AssetDNA.mqh"           // Module phân tích DNA tài sản (thay thế AssetProfiler và AssetProfileManager)
 #include "NewsFilter.mqh"         // News filtering module
 #include "PerformanceTracker.mqh"   // Performance tracking module
 

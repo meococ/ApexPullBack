@@ -13,12 +13,36 @@
 #include "MarketProfile.mqh"
 #include "RiskManager.mqh"
 #include "NewsFilter.mqh"
-#include "AssetProfiler.mqh"
+#include "AssetDNA.mqh" // Module phân tích DNA tài sản (thay thế AssetProfiler)
 #include "CommonStructs.mqh"
 #include "Enums.mqh"
 
 // Sử dụng namespace ApexPullback
 namespace ApexPullback {
+
+//+------------------------------------------------------------------+
+//| Hàm GetAdaptiveModeString                                        |
+//+------------------------------------------------------------------+
+// Hàm hỗ trợ để lấy chuỗi ENUM_ADAPTIVE_MODE
+string GetAdaptiveModeString(ENUM_ADAPTIVE_MODE mode)
+{
+    switch(mode)
+    {
+        case MODE_MANUAL: return "Manual";
+        case MODE_CONSERVATIVE: return "Conservative";
+        case MODE_BALANCED: return "Balanced";
+        case MODE_AGGRESSIVE: return "Aggressive";
+        case MODE_LOG_ONLY: return "Log Only";
+        case MODE_ADAPTIVE_TRAILING: return "Adaptive Trailing";
+        case MODE_DYNAMIC_LOT: return "Dynamic Lot";
+        case MODE_HYBRID: return "Hybrid";
+        default: return "Unknown";
+    }
+}
+
+
+
+
 
 //+------------------------------------------------------------------+
 //| Lớp Dashboard                                                     |
@@ -401,22 +425,6 @@ void CDashboard::DeleteRiskModeDropdownOptions()
 //+------------------------------------------------------------------+
 //| Xử lý sự kiện click cho các control                              |
 //+------------------------------------------------------------------+
-// Hàm hỗ trợ để lấy chuỗi ENUM_ADAPTIVE_MODE
-string GetAdaptiveModeString(ENUM_ADAPTIVE_MODE mode)
-{
-    switch(mode)
-    {
-        case MODE_MANUAL: return "Manual";
-        case MODE_CONSERVATIVE: return "Conservative";
-        case MODE_BALANCED: return "Balanced";
-        case MODE_AGGRESSIVE: return "Aggressive";
-        case MODE_LOG_ONLY: return "Log Only";
-        case MODE_ADAPTIVE_TRAILING: return "Adaptive Trailing";
-        case MODE_DYNAMIC_LOT: return "Dynamic Lot";
-        case MODE_HYBRID: return "Hybrid";
-        default: return "Unknown";
-    }
-}
 
 void CDashboard::OnClick(string object_name)
 {
@@ -617,8 +625,24 @@ void CDashboard::CreateHeader()
     ObjectSetInteger(0, prefix + "STATUS", OBJPROP_FONTSIZE, 9);
     ObjectSetInteger(0, prefix + "STATUS", OBJPROP_COLOR, statusColor);
     ObjectSetInteger(0, prefix + "STATUS", OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, prefix + "STATUS", OBJPROP_HIDDEN, true);
+    ObjectSetInteger(0, prefix + "STATUS", OBJPROP_HIDDEN, !m_ShowDashboard);
     ObjectSetInteger(0, prefix + "STATUS", OBJPROP_ZORDER, 2);
+
+    // Hiển thị tên chiến lược
+    if(m_EAContext != NULL && m_EAContext.EAInputs.General.StrategyName != "")
+    {
+        string strategyText = "Strategy: " + m_EAContext.EAInputs.General.StrategyName;
+        ObjectCreate(0, prefix + "STRATEGY", OBJ_LABEL, 0, 0, 0);
+        ObjectSetInteger(0, prefix + "STRATEGY", OBJPROP_XDISTANCE, m_DashX + 10);
+        ObjectSetInteger(0, prefix + "STRATEGY", OBJPROP_YDISTANCE, m_DashY + 50); // Dưới Symbol
+        ObjectSetString(0, prefix + "STRATEGY", OBJPROP_TEXT, strategyText);
+        ObjectSetString(0, prefix + "STRATEGY", OBJPROP_FONT, "Arial");
+        ObjectSetInteger(0, prefix + "STRATEGY", OBJPROP_FONTSIZE, 8);
+        ObjectSetInteger(0, prefix + "STRATEGY", OBJPROP_COLOR, clrWhite);
+        ObjectSetInteger(0, prefix + "STRATEGY", OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, prefix + "STRATEGY", OBJPROP_HIDDEN, !m_ShowDashboard);
+        ObjectSetInteger(0, prefix + "STRATEGY", OBJPROP_ZORDER, 2);
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -940,6 +964,83 @@ void CDashboard::CreateRiskPanel()
     ObjectSetString(0, prefix + "TITLE", OBJPROP_TEXT, "QUẢN LÝ RỦI RO");
     ObjectSetString(0, prefix + "TITLE", OBJPROP_FONT, "Arial Bold");
     ObjectSetInteger(0, prefix + "TITLE", OBJPROP_FONTSIZE, 9);
+    ObjectSetInteger(0, prefix + "TITLE", OBJPROP_COLOR, m_TitleColor);
+    ObjectSetInteger(0, prefix + "TITLE", OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, prefix + "TITLE", OBJPROP_HIDDEN, !m_ShowDashboard);
+    ObjectSetInteger(0, prefix + "TITLE", OBJPROP_ZORDER, 2);
+
+    // Thêm chỉ báo sức khỏe danh mục
+    if(m_RiskManager != NULL && m_EAContext != NULL)
+    {
+        color healthColor = m_SuccessColor; // Mặc định là tốt
+        string healthStatusText = "HEALTH: GOOD";
+
+        // Lấy các giá trị từ RiskManager và EAContext
+        double overallDDForHealth = drawdown; // Sử dụng giá trị drawdown hiện có
+        double dailyLossPercentForHealth = (dailyProfit < 0) ? MathAbs(dailyProfit) : 0.0; // Chuyển đổi lỗ thành số dương
+        int consecLossesForHealth = consecutiveLosses; // Sử dụng giá trị consecutiveLosses hiện có
+
+        // Lấy các ngưỡng từ EAContext
+        double maxOverallDDLimit = m_EAContext.EAInputs.RiskManagement.MaxDrawdownOverall;
+        double maxDailyDDLimit = m_EAContext.EAInputs.RiskManagement.MaxDrawdownDaily;
+        int maxConsecLossesLimit = m_EAContext.EAInputs.RiskManagement.MaxConsecutiveLosses;
+
+        bool isBad = false;
+        bool isWarning = false;
+
+        // Kiểm tra điều kiện Xấu
+        if (maxOverallDDLimit > 0 && overallDDForHealth >= maxOverallDDLimit) isBad = true;
+        if (maxDailyDDLimit > 0 && dailyLossPercentForHealth >= maxDailyDDLimit) isBad = true;
+        if (maxConsecLossesLimit > 0 && consecLossesForHealth >= maxConsecLossesLimit) isBad = true;
+
+        // Kiểm tra điều kiện Cảnh báo (nếu không phải Xấu)
+        if (!isBad) {
+            if (maxOverallDDLimit > 0 && overallDDForHealth >= maxOverallDDLimit * 0.7) isWarning = true;
+            if (maxDailyDDLimit > 0 && dailyLossPercentForHealth >= maxDailyDDLimit * 0.7) isWarning = true;
+            if (maxConsecLossesLimit > 0 && consecLossesForHealth >= maxConsecLossesLimit * 0.7) isWarning = true;
+        }
+
+        if (isBad) {
+            healthColor = m_AlertColor;
+            healthStatusText = "HEALTH: BAD";
+        } else if (isWarning) {
+            healthColor = clrOrange;
+            healthStatusText = "HEALTH: WARN";
+        }
+
+        int indicatorX = m_DashX + m_Width - 100; // Vị trí góc trên phải của panel
+        int indicatorY = panelY + 12;
+        int iconSize = 10;
+
+        // Tạo icon hình tròn cho trạng thái
+        ObjectCreate(0, prefix + "HEALTH_ICON", OBJ_RECTANGLE_LABEL, 0, 0, 0);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_XDISTANCE, indicatorX);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_YDISTANCE, indicatorY + 2);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_XSIZE, iconSize);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_YSIZE, iconSize);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_BGCOLOR, healthColor);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_COLOR, healthColor);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_BORDER_TYPE, BORDER_FLAT);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_STYLE, STYLE_SOLID);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_BACK, false);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_HIDDEN, !m_ShowDashboard);
+        ObjectSetInteger(0, prefix + "HEALTH_ICON", OBJPROP_ZORDER, 3);
+
+        // Tạo text hiển thị trạng thái
+        ObjectCreate(0, prefix + "HEALTH_TEXT", OBJ_LABEL, 0, 0, 0);
+        ObjectSetInteger(0, prefix + "HEALTH_TEXT", OBJPROP_XDISTANCE, indicatorX + iconSize + 5);
+        ObjectSetInteger(0, prefix + "HEALTH_TEXT", OBJPROP_YDISTANCE, indicatorY + 1);
+        ObjectSetString(0, prefix + "HEALTH_TEXT", OBJPROP_TEXT, healthStatusText);
+        ObjectSetString(0, prefix + "HEALTH_TEXT", OBJPROP_FONT, "Arial Bold");
+        ObjectSetInteger(0, prefix + "HEALTH_TEXT", OBJPROP_FONTSIZE, 8);
+        ObjectSetInteger(0, prefix + "HEALTH_TEXT", OBJPROP_COLOR, healthColor);
+        ObjectSetInteger(0, prefix + "HEALTH_TEXT", OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, prefix + "HEALTH_TEXT", OBJPROP_HIDDEN, !m_ShowDashboard);
+        ObjectSetInteger(0, prefix + "HEALTH_TEXT", OBJPROP_ZORDER, 3);
+    }
+
     double riskPercent = 1.0; // Mặc định
     if(m_RiskManager != NULL) {
         // Sử dụng giá trị mặc định nếu phương thức không tồn tại

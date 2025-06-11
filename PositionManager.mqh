@@ -18,12 +18,12 @@
 #include "RiskManager.mqh"
 #include "Logger.mqh"
 #include "NewsFilter.mqh"
-#include "AssetProfiler.mqh"
+#include "AssetDNA.mqh" // Module phân tích DNA tài sản (thay thế AssetProfiler)
 #include "FunctionDefinitions.mqh"
 
 // Định nghĩa các hằng số và biến toàn cục
 #define TP_NONE 0
-#define MAX_HISTORY_DAYS 30  // Tối đa số ngày lịch sử
+// #define MAX_HISTORY_DAYS 30  // Đã được định nghĩa trong Constants.mqh
 
 namespace ApexPullback {
 
@@ -114,16 +114,16 @@ private:
     // --- HÀM NỘI BỘ: QUẢN LÝ VỊ THẾ ---
     
     // Cập nhật thông tin vị thế hiện có
-    void UpdatePositionInfo(ApexPullback::PositionInfoExt &posInfo);
+    void CPositionManager::UpdatePositionInfo(ApexPullback::PositionInfoExt &posInfo);
     
     // Tính toán các giá trị R hiện tại
-    double CalculateCurrentR(ApexPullback::PositionInfoExt &posInfo);
+    double CPositionManager::CalculateCurrentR(ApexPullback::PositionInfoExt &posInfo);
     
     // Tính toán lợi nhuận chưa thực hiện
-    double CalculateUnrealizedPnL(const ApexPullback::PositionInfoExt &posInfo);
+    double CPositionManager::CalculateUnrealizedPnL(const ApexPullback::PositionInfoExt &posInfo);
     
     // Cập nhật trạng thái vị thế
-    void UpdatePositionState(ApexPullback::PositionInfoExt &posInfo);
+    void CPositionManager::UpdatePositionState(ApexPullback::PositionInfoExt &posInfo);
     
     // Đánh giá sức khỏe danh mục
     void EvaluatePortfolio();
@@ -894,7 +894,7 @@ void CPositionManager::UpdatePositionState(ApexPullback::PositionInfoExt &posInf
                 posInfo.state = POSITION_STATE_BREAKEVEN;
                 
                 if (m_logger != NULL) {
-                    m_logger.LogInfo(StringFormat(
+                    m_logger->LogInfo(StringFormat(
                         "PositionManager: Vị thế #%d đạt breakeven - R: %.2f",
                         posInfo.ticket, posInfo.currentR
                     ));
@@ -939,11 +939,15 @@ void CPositionManager::UpdatePositionState(ApexPullback::PositionInfoExt &posInf
     // Kiểm tra cần trailing
     double atr = 0;
     if (m_marketProfile != NULL) {
-        // Sử dụng giá trị mặc định hoặc tính toán ATR trực tiếp nếu cần
-        atr = 0.0001; // Giá trị mặc định hoặc tính toán trực tiếp tại đây
+        // Lấy ATR từ MarketProfile
+        MarketProfileData profile;
+        m_marketProfile->GetCurrentProfile(profile);
+        atr = profile.atr;
     } else if (m_assetProfiler != NULL) {
-        // Sử dụng giá trị mặc định hoặc tính toán ATR trực tiếp nếu cần
-        atr = 0.0001; // Giá trị mặc định hoặc tính toán trực tiếp tại đây
+        // Lấy ATR từ AssetProfiler
+        AssetProfileData profile;
+        m_assetProfiler->GetCurrentProfile(profile);
+        atr = profile.volatility;
     }
     
     if (atr > 0) {
@@ -988,7 +992,7 @@ void CPositionManager::UpdatePositionState(ApexPullback::PositionInfoExt &posInf
 //+------------------------------------------------------------------+
 //| EvaluatePositionQuality - Đánh giá chất lượng vị thế             |
 //+------------------------------------------------------------------+
-double ApexPullback::CPositionManager::EvaluatePositionQuality(const PositionInfoExt &posInfo)
+double CPositionManager::EvaluatePositionQuality(const PositionInfoExt &posInfo)
 {
     // Điểm cơ bản: 50/100
     double score = 50.0;
@@ -1048,7 +1052,7 @@ double ApexPullback::CPositionManager::EvaluatePositionQuality(const PositionInf
 //+------------------------------------------------------------------+
 //| RemoveClosedPositions - Loại bỏ vị thế đã đóng                  |
 //+------------------------------------------------------------------+
-void ApexPullback::CPositionManager::RemoveClosedPositions()
+void CPositionManager::RemoveClosedPositions()
 {
     // Kiểm tra từng vị thế
     for (int i = m_positionsInfo.Total() - 1; i >= 0; i--) {
@@ -1095,7 +1099,7 @@ void ApexPullback::CPositionManager::RemoveClosedPositions()
 //+------------------------------------------------------------------+
 //| ClearAllPositions - Xóa toàn bộ vị thế                          |
 //+------------------------------------------------------------------+
-void ApexPullback::CPositionManager::ClearAllPositions()
+void CPositionManager::ClearAllPositions()
 {
     // Kiểm tra nếu nên đóng tất cả vị thế
     if (ShouldCloseAllPositions()) {
@@ -1207,7 +1211,7 @@ void CPositionManager::CalculateAverageR()
 //+------------------------------------------------------------------+
 //| HasTooManyOneDirectionPositions - Kiểm tra quá nhiều vị thế cùng chiều |
 //+------------------------------------------------------------------+
-bool ApexPullback::CPositionManager::HasTooManyOneDirectionPositions()
+bool CPositionManager::HasTooManyOneDirectionPositions()
 {
     // Kiểm tra số vị thế buy
     if (m_portfolioStatus.buyPositions > m_maxPositionsPerDirection) {
@@ -1237,7 +1241,7 @@ bool ApexPullback::CPositionManager::HasTooManyOneDirectionPositions()
 //+------------------------------------------------------------------+
 //| HasTooMuchRiskFromOneScenario - Kiểm tra quá nhiều rủi ro từ 1 kịch bản |
 //+------------------------------------------------------------------+
-bool ApexPullback::CPositionManager::HasTooMuchRiskFromOneScenario()
+bool CPositionManager::HasTooMuchRiskFromOneScenario()
 {
     // Tính rủi ro theo từng kịch bản
     double riskPullback = 0;
@@ -1400,7 +1404,7 @@ void CPositionManager::AnalyzePositionCorrelation()
     // Kiểm tra nếu có quá nhiều vị thế cùng loại và kịch bản
     if (buyPullback >= 2 || sellPullback >= 2) {
         if (m_logger != NULL && m_enableDetailedLogs) {
-            m_logger.LogInfo(StringFormat(
+                m_logger->LogInfo(StringFormat(
                 "PositionManager: Nhiều vị thế Pullback - Buy: %d, Sell: %d",
                 buyPullback, sellPullback
             ));
@@ -1409,7 +1413,7 @@ void CPositionManager::AnalyzePositionCorrelation()
     
     if (buyBreakout >= 2 || sellBreakout >= 2) {
         if (m_logger != NULL && m_enableDetailedLogs) {
-            m_logger.LogInfo(StringFormat(
+                m_logger->LogInfo(StringFormat(
                 "PositionManager: Nhiều vị thế Breakout - Buy: %d, Sell: %d",
                 buyBreakout, sellBreakout
             ));
@@ -1418,7 +1422,7 @@ void CPositionManager::AnalyzePositionCorrelation()
     
     if (buyScaling >= 2 || sellScaling >= 2) {
         if (m_logger != NULL && m_enableDetailedLogs) {
-            m_logger.LogInfo(StringFormat(
+                m_logger->LogInfo(StringFormat(
                 "PositionManager: Nhiều vị thế Scaling - Buy: %d, Sell: %d",
                 buyScaling, sellScaling
             ));
@@ -1610,7 +1614,7 @@ void CPositionManager::EvaluatePortfolio()
 //+------------------------------------------------------------------+
 //| ShouldCloseAll - Kiểm tra nếu nên đóng tất cả vị thế            |
 //+------------------------------------------------------------------+
-bool ApexPullback::CPositionManager::ShouldCloseAll(string &reason)
+bool CPositionManager::ShouldCloseAll(string &reason)
 {
     // Kiểm tra drawdown
     double maxDrawDown = 0;
@@ -1806,7 +1810,7 @@ bool CPositionManager::IsScalingAllowed(ulong ticket)
 
 //| ShouldPartialClose - Kiểm tra nếu nên đóng một phần              |
 //+------------------------------------------------------------------+
-bool ApexPullback::CPositionManager::ShouldPartialClose(ulong ticket, double &percentToClose)
+bool CPositionManager::ShouldPartialClose(ulong ticket, double &percentToClose)
 {
     // Tìm vị thế
     PositionInfoExt pos;
@@ -1819,7 +1823,7 @@ bool ApexPullback::CPositionManager::ShouldPartialClose(ulong ticket, double &pe
 //+------------------------------------------------------------------+
 //| ShouldMoveToBreakeven - Kiểm tra nếu đạt điều kiện breakeven    |
 //+------------------------------------------------------------------+
-bool ApexPullback::CPositionManager::ShouldMoveToBreakeven(ulong ticket)
+bool CPositionManager::ShouldMoveToBreakeven(ulong ticket)
 {
     // Tìm vị thế
     PositionInfoExt pos;
@@ -1832,7 +1836,7 @@ bool ApexPullback::CPositionManager::ShouldMoveToBreakeven(ulong ticket)
 //+------------------------------------------------------------------+
 //| ShouldClose - Kiểm tra nếu nên đóng lệnh                         |
 //+------------------------------------------------------------------+
-bool ApexPullback::CPositionManager::ShouldClose(ulong ticket, string &reason)
+bool CPositionManager::ShouldClose(ulong ticket, string &reason)
 {
     // Tìm vị thế
     PositionInfoExt pos;
@@ -2417,7 +2421,7 @@ bool CPositionManager::GetPositionInfo(ulong ticket, ApexPullback::PositionInfoE
 //+------------------------------------------------------------------+
 //| GetPositionByIndex - Lấy thông tin vị thế theo chỉ số trong mảng   |
 //+------------------------------------------------------------------+
-bool ApexPullback::CPositionManager::GetPositionByIndex(int index, PositionInfoExt &posInfo)
+bool CPositionManager::GetPositionByIndex(int index, PositionInfoExt &posInfo)
 {
     // Kiểm tra chỉ số hợp lệ
     if(index < 0 || index >= m_positionsInfo.Total())
