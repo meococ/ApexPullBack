@@ -4,11 +4,9 @@
 //|                                       Copyright 2023-2024, APEX   |
 //+------------------------------------------------------------------+
 
-#ifndef _SESSION_MANAGER_MQH_
-#define _SESSION_MANAGER_MQH_
+#pragma once
 
-#include "Logger.mqh"
-#include "Enums.mqh"      // Thêm include Enums.mqh để sử dụng enum ENUM_SESSION đã định nghĩa
+
 
 namespace ApexPullback {
 
@@ -121,6 +119,12 @@ public:
    
    // Lấy giờ GMT điều chỉnh
    int GetGmtOffset() const { return m_GmtOffset; }
+   
+   // --- Public Getter Functions ---
+   bool IsFilterEnabled() const { return m_FilterBySession; }
+   ENUM_SESSION_FILTER GetSessionFilter() const { return m_SessionFilter; }
+   bool IsTradingLondonOpen() const { return m_TradeLondonOpen; }
+   bool IsTradingNewYorkOpen() const { return m_TradeNewYorkOpen; }
    
    // Kiểm tra DST
    bool IsDST();

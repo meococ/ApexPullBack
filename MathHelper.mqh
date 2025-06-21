@@ -5,10 +5,18 @@
 //|                          Copyright 2023-2024, APEX Forex        |
 //+------------------------------------------------------------------+
 
-#ifndef _MATH_HELPER_MQH_
-#define _MATH_HELPER_MQH_
+#ifndef MATHHELPER_MQH_
+#define MATHHELPER_MQH_
 
-// Để tránh xung đột namespace
+// === CORE INCLUDES (BẮT BUỘC CHO HẦU HẾT CÁC FILE) ===
+#include "CommonStructs.mqh"      // Core structures, enums, and inputs
+#include "Enums.mqh"            // TẤT CẢ các enum
+
+
+// === INCLUDES CỤ THỂ (NẾU CẦN) ===
+// #include "Logger.mqh"
+
+// BẮT ĐẦU NAMESPACE
 namespace ApexPullback {
 
 //+------------------------------------------------------------------+
@@ -1166,6 +1174,6 @@ void FindPriceClusters(const double &prices[], double &clusters[], int maxCluste
     }
 }
 
-} // Kết thúc namespace ApexPullback
+} // END NAMESPACE ApexPullback
 
-#endif // _MATH_HELPER_MQH_
+#endif // MATHHELPER_MQH_

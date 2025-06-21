@@ -3,8 +3,8 @@
 //| Module for risk and money management optimization              |
 //+------------------------------------------------------------------+
 
-#ifndef _RISK_OPTIMIZER_MQH_
-#define _RISK_OPTIMIZER_MQH_
+#ifndef RISKOPTIMIZER_MQH
+#define RISKOPTIMIZER_MQH
 
 // --- Standard MQL5 Libraries ---
 // #include <Trade/Trade.mqh>       // Uncomment if CTrade or related trade functions are used directly
@@ -13,45 +13,32 @@
 // #include <Arrays/ArrayObj.mqh>   // Uncomment if CArrayObj or other array classes are used
 // #include <Math/Stat/Math.mqh>    // Uncomment if advanced math/stat functions are used
 
-// --- Custom EA Core Includes ---
-#include "Namespace.mqh"          // Defines namespaces (e.g., ApexPullback) and related macros
-#include "CommonDefinitions.mqh"  // General definitions, possibly macros like TREND_NONE, SIGNAL_NONE
-#include "Constants.mqh"          // EA-specific constants
-#include "Enums.mqh"              // Enumerations (e.g., ENUM_TRAILING_PHASE, ENUM_MARKET_STRATEGY)
-#include "CommonStructs.mqh"      // Common data structures (e.g., SRiskOptimizerConfig, MarketProfileData)
-#include "FunctionDefinitions.mqh"// Global utility functions (if any are used by this module)
-#include "MathHelper.mqh"         // Math utility functions (if any are used by this module)
+// --- ApexPullback EA Includes ---
+#include "CommonStructs.mqh"      // For EAContext and other common structures
+#include "Enums.mqh"              // For various ENUM definitions
+#include "Logger.mqh"             // For CLogger
+#include "MarketProfile.mqh"      // For CMarketProfile
+#include "SwingPointDetector.mqh" // For CSwingPointDetector
+#include "NewsFilter.mqh"         // For CNewsFilter
+#include "SafeDataProvider.mqh"   // For CSafeDataProvider
 
-// --- Custom EA Module Includes ---
-#include "Logger.mqh"             // Logging facility
-#include "SafeDataProvider.mqh"   // Safe data provider for indicator data
-#include "MarketProfile.mqh"      // Market analysis module
-#include "SwingPointDetector.mqh" // Swing point detection module
-#include "AssetDNA.mqh"           // Module phân tích DNA tài sản (thay thế AssetProfiler và AssetProfileManager)
-#include "NewsFilter.mqh"         // News filtering module
-#include "PerformanceTracker.mqh"   // Performance tracking module
-
-#ifndef RISK_OPTIMIZER_INCLUDED
-#define RISK_OPTIMIZER_INCLUDED
-// This guard is usually for the file itself, but here it seems to guard PerformanceTracker.mqh inclusion.
-// If PerformanceTracker.mqh has its own include guards, this might be redundant or misplaced.
-// For now, keeping the structure as is, but this is a point for potential cleanup.
-#endif
-
-// Đảm bảo các constant được xác định
+// Đảm bảo các constant được xác định (This might belong in Enums.mqh or a constants file if CLUSTER_TYPE_COUNTER is an enum)
 #ifndef CLUSTER_2_COUNTERTREND
-#define CLUSTER_2_COUNTERTREND CLUSTER_TYPE_COUNTER
+#define CLUSTER_2_COUNTERTREND CLUSTER_TYPE_COUNTER // Assuming CLUSTER_TYPE_COUNTER is defined elsewhere (e.g. Enums.mqh)
 #endif
 
 // Bắt đầu namespace ApexPullback - chứa tất cả các lớp và cấu trúc của EA
 namespace ApexPullback {
 
-class CMarketProfile;
-class CSwingPointDetector;
-class CLogger;
-class CAssetProfiler;
-class CNewsFilter;
-class CSafeDataProvider;
+// Forward declarations are generally not needed if headers are included above.
+// However, keeping them if they resolve potential circular dependencies not immediately obvious.
+// class CMarketProfile; // Already included via MarketProfile.mqh
+// class CSwingPointDetector; // Already included via SwingPointDetector.mqh
+// class CLogger; // Already included via Logger.mqh
+// class CAssetProfiler; // Already included via AssetProfiler.mqh
+// class CNewsFilter; // Already included via NewsFilter.mqh
+// class CSafeDataProvider; // Already included via SafeDataProvider.mqh
+
 
 // Định nghĩa ENUM_TRAILING_PHASE
 enum ENUM_TRAILING_PHASE {
@@ -317,14 +304,8 @@ enum ENUM_PAUSE_REASON {
     PAUSE_MANUAL               // Dừng thủ công
 };
 
-// Enum cho các chiến lược giao dịch
-enum ENUM_TRADING_STRATEGY {
-    STRATEGY_BREAKOUT,           // Breakout - khi xu hướng mạnh
-    STRATEGY_PULLBACK,           // Pullback - khi xu hướng ổn định
-    STRATEGY_MEAN_REVERSION,     // Mean reversion - khi sideway
-    STRATEGY_VOLATILITY_BREAKOUT, // Volatility breakout - khi biến động thấp chuẩn bị bùng nổ
-    STRATEGY_PRESERVATION        // Preservation - khi thị trường bất ổn
-};
+// ENUM_TRADING_STRATEGY đã được định nghĩa trong Enums.mqh
+// Xóa định nghĩa trùng lặp để tránh xung đột
 
 // Struct cho trạng thái pause
 struct PauseState {
@@ -438,11 +419,35 @@ private:
     // Lịch sử spread
     double m_SpreadHistory[20];
     
+    // ===== AUTOMATIC RISK ADJUSTMENT VARIABLES =====
+    // Biến theo dõi hiệu suất cho automatic risk adjustment
+    double m_BaseRiskPercent;           // Risk percent gốc từ input
+    double m_CurrentRiskMultiplier;     // Hệ số nhân risk hiện tại
+    double m_LastEquityPeak;            // Đỉnh equity gần nhất
+    double m_MaxDrawdownPercent;        // Max drawdown % từ đỉnh
+    int m_ConsecutiveWins;              // Số lệnh thắng liên tiếp
+    int m_ConsecutiveLossesForRisk;     // Số lệnh thua liên tiếp (cho risk adjustment)
+    double m_WeeklyProfitPercent;       // Lợi nhuận tuần %
+    double m_MonthlyProfitPercent;      // Lợi nhuận tháng %
+    datetime m_LastRiskAdjustmentTime;  // Lần cuối điều chỉnh risk
+    bool m_RiskAdjustmentEnabled;       // Có bật automatic risk adjustment không
+    double m_VolatilityBasedMultiplier; // Hệ số dựa trên volatility
+    double m_MarketConditionMultiplier; // Hệ số dựa trên điều kiện thị trường
+    
     // Phương thức private hỗ trợ
     bool ValidateMomentumAlternative(bool isLong); // Phương pháp thay thế khi không có profile
     double GetSLMultiplierForCluster(ENUM_CLUSTER_TYPE cluster); // Hệ số SL dựa trên loại cluster
     double GetTPMultiplierForCluster(ENUM_CLUSTER_TYPE cluster); // Hệ số TP dựa trên loại cluster
     double GetTrailingFactorForRegime(ENUM_MARKET_REGIME regime); // Hệ số trailing stop theo regime
+    
+    // Phương thức tự động điều chỉnh Risk
+    double CalculatePerformanceBasedRiskAdjustment(); // Điều chỉnh risk dựa trên performance
+    double CalculateDrawdownBasedRiskAdjustment(); // Điều chỉnh risk dựa trên drawdown
+    double CalculateVolatilityBasedRiskAdjustment(); // Điều chỉnh risk dựa trên volatility
+    double CalculateMarketConditionRiskAdjustment(); // Điều chỉnh risk dựa trên market conditions
+    void UpdatePerformanceMetrics(); // Cập nhật metrics performance
+    bool ShouldReduceRisk(); // Kiểm tra có nên giảm risk không
+    bool ShouldIncreaseRisk(); // Kiểm tra có nên tăng risk không
     
 public:
 //| Constructor - Khởi tạo với thông số mặc định nâng cao            |
@@ -479,7 +484,20 @@ CRiskOptimizer() :
     m_ConsecutiveLosses(0),
     m_TotalTradesDay(0),
     m_IsNewBar(false),
-    m_ScalingCount(0)
+    m_ScalingCount(0),
+    // Khởi tạo automatic risk adjustment variables
+    m_BaseRiskPercent(1.0),
+    m_CurrentRiskMultiplier(1.0),
+    m_LastEquityPeak(0.0),
+    m_MaxDrawdownPercent(0.0),
+    m_ConsecutiveWins(0),
+    m_ConsecutiveLossesForRisk(0),
+    m_WeeklyProfitPercent(0.0),
+    m_MonthlyProfitPercent(0.0),
+    m_LastRiskAdjustmentTime(0),
+    m_RiskAdjustmentEnabled(true),
+    m_VolatilityBasedMultiplier(1.0),
+    m_MarketConditionMultiplier(1.0)
 {
     // Khởi tạo config với giá trị mặc định
     m_Config = SRiskOptimizerConfig();
@@ -1192,7 +1210,363 @@ double CRiskOptimizer::NormalizeLotSize(string symbol, double lotSize) {
     return MathMax(lotSize, minLot);
 }
 
-} // đóng class CRiskOptimizer
+//+------------------------------------------------------------------+
+//| AUTOMATIC RISK ADJUSTMENT IMPLEMENTATIONS                        |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Lấy RiskPercent đã được tối ưu hóa                              |
+//+------------------------------------------------------------------+
+double CRiskOptimizer::GetOptimizedRiskPercent()
+{
+    if (!m_RiskAdjustmentEnabled) {
+        return m_Config.RiskPercent;
+    }
+    
+    // Cập nhật metrics trước khi tính toán
+    UpdatePerformanceMetrics();
+    
+    // Tính toán adaptive risk percent
+    double adaptiveRisk = CalculateAdaptiveRiskPercent();
+    
+    // Áp dụng các giới hạn an toàn
+    double maxRisk = m_Config.MaxRiskPercent > 0 ? m_Config.MaxRiskPercent : m_BaseRiskPercent * 2.0;
+    double minRisk = m_BaseRiskPercent * 0.25; // Tối thiểu 25% risk gốc
+    
+    adaptiveRisk = MathMax(minRisk, MathMin(maxRisk, adaptiveRisk));
+    
+    if (m_Logger != NULL) {
+        m_Logger->LogInfo(StringFormat(
+            "RiskOptimizer: Optimized Risk = %.2f%% (Base: %.2f%%, Multiplier: %.2f)",
+            adaptiveRisk, m_BaseRiskPercent, m_CurrentRiskMultiplier
+        ));
+    }
+    
+    return adaptiveRisk;
+}
+
+//+------------------------------------------------------------------+
+//| Tính toán RiskPercent thích ứng                                 |
+//+------------------------------------------------------------------+
+double CRiskOptimizer::CalculateAdaptiveRiskPercent()
+{
+    // Tính toán các hệ số điều chỉnh
+    double performanceMultiplier = CalculatePerformanceBasedRiskAdjustment();
+    double drawdownMultiplier = CalculateDrawdownBasedRiskAdjustment();
+    double volatilityMultiplier = CalculateVolatilityBasedRiskAdjustment();
+    double marketMultiplier = CalculateMarketConditionRiskAdjustment();
+    
+    // V14.0: Tích hợp Broker Health Factor
+    double brokerHealthMultiplier = 1.0;
+    if(m_Context != NULL && m_Context->BrokerHealthMonitor != NULL)
+      {
+       brokerHealthMultiplier = m_Context->BrokerHealthMonitor->GetHealthBasedRiskFactor();
+       if(m_Logger != NULL)
+         {
+          m_Logger->LogDebug("RiskOptimizer: Broker Health Multiplier = " + DoubleToString(brokerHealthMultiplier, 3));
+         }
+      }
+    
+    // V14.0: Tích hợp Parameter Stability Factor
+    double stabilityMultiplier = 1.0;
+    if(m_Context != NULL && !m_Context->IsStrategyUnstable)
+      {
+       stabilityMultiplier = MathMax(0.5, m_Context->ParameterStabilityIndex); // Tối thiểu 50%
+       if(m_Logger != NULL)
+         {
+          m_Logger->LogDebug("RiskOptimizer: Parameter Stability Multiplier = " + DoubleToString(stabilityMultiplier, 3));
+         }
+      }
+    else if(m_Context != NULL && m_Context->IsStrategyUnstable)
+      {
+       stabilityMultiplier = 0.3; // Giảm mạnh risk khi không ổn định
+       if(m_Logger != NULL)
+         {
+          m_Logger->LogWarning("RiskOptimizer: Strategy unstable, reducing risk to 30%");
+         }
+      }
+    
+    // Kết hợp các hệ số (sử dụng trung bình có trọng số với broker health và stability)
+    m_CurrentRiskMultiplier = (performanceMultiplier * 0.25 + 
+                              drawdownMultiplier * 0.3 + 
+                              volatilityMultiplier * 0.15 + 
+                              marketMultiplier * 0.1 +
+                              brokerHealthMultiplier * 0.1 +
+                              stabilityMultiplier * 0.1);
+    
+    // Làm mượt thay đổi để tránh biến động quá mạnh
+    static double lastMultiplier = 1.0;
+    double smoothingFactor = 0.7; // 70% giá trị cũ, 30% giá trị mới
+    m_CurrentRiskMultiplier = lastMultiplier * smoothingFactor + m_CurrentRiskMultiplier * (1.0 - smoothingFactor);
+    lastMultiplier = m_CurrentRiskMultiplier;
+    
+    return m_BaseRiskPercent * m_CurrentRiskMultiplier;
+}
+
+//+------------------------------------------------------------------+
+//| Cập nhật risk dựa trên hiệu suất                                |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::UpdateRiskBasedOnPerformance()
+{
+    if (!m_RiskAdjustmentEnabled) return;
+    
+    // Chỉ cập nhật nếu đã đủ thời gian từ lần điều chỉnh cuối
+    datetime currentTime = TimeCurrent();
+    if (currentTime - m_LastRiskAdjustmentTime < 3600) return; // Tối thiểu 1 giờ
+    
+    UpdatePerformanceMetrics();
+    
+    // Cập nhật RiskPercent trong config
+    double newRiskPercent = GetOptimizedRiskPercent();
+    if (MathAbs(newRiskPercent - m_Config.RiskPercent) > 0.01) { // Thay đổi > 0.01%
+        m_Config.RiskPercent = newRiskPercent;
+        m_LastRiskAdjustmentTime = currentTime;
+        
+        if (m_Logger != NULL) {
+            m_Logger->LogInfo(StringFormat(
+                "RiskOptimizer: Risk điều chỉnh thành %.2f%% (Multiplier: %.2f)",
+                newRiskPercent, m_CurrentRiskMultiplier
+            ));
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra có cần điều chỉnh risk không                           |
+//+------------------------------------------------------------------+
+bool CRiskOptimizer::IsRiskAdjustmentNeeded()
+{
+    if (!m_RiskAdjustmentEnabled) return false;
+    
+    // Kiểm tra thời gian từ lần điều chỉnh cuối
+    datetime currentTime = TimeCurrent();
+    if (currentTime - m_LastRiskAdjustmentTime < 1800) return false; // Tối thiểu 30 phút
+    
+    // Kiểm tra các điều kiện cần điều chỉnh
+    return (ShouldReduceRisk() || ShouldIncreaseRisk());
+}
+
+//+------------------------------------------------------------------+
+//| Lấy hệ số nhân risk hiện tại                                    |
+//+------------------------------------------------------------------+
+double CRiskOptimizer::GetCurrentRiskMultiplier()
+{
+    return m_CurrentRiskMultiplier;
+}
+
+//+------------------------------------------------------------------+
+//| Reset các điều chỉnh risk về mặc định                           |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::ResetRiskAdjustments()
+{
+    m_CurrentRiskMultiplier = 1.0;
+    m_LastEquityPeak = AccountInfoDouble(ACCOUNT_EQUITY);
+    m_MaxDrawdownPercent = 0.0;
+    m_ConsecutiveWins = 0;
+    m_ConsecutiveLossesForRisk = 0;
+    m_WeeklyProfitPercent = 0.0;
+    m_MonthlyProfitPercent = 0.0;
+    m_LastRiskAdjustmentTime = 0;
+    m_VolatilityBasedMultiplier = 1.0;
+    m_MarketConditionMultiplier = 1.0;
+    
+    if (m_Logger != NULL) {
+        m_Logger->LogInfo("RiskOptimizer: Đã reset tất cả điều chỉnh risk về mặc định");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Tính toán điều chỉnh risk dựa trên hiệu suất                    |
+//+------------------------------------------------------------------+
+double CRiskOptimizer::CalculatePerformanceBasedRiskAdjustment()
+{
+    double multiplier = 1.0;
+    
+    // Điều chỉnh dựa trên consecutive wins/losses
+    if (m_ConsecutiveWins >= 3) {
+        // Tăng risk khi thắng liên tiếp (nhưng có giới hạn)
+        multiplier += MathMin(0.2, m_ConsecutiveWins * 0.05);
+    } else if (m_ConsecutiveLossesForRisk >= 2) {
+        // Giảm risk khi thua liên tiếp
+        multiplier -= MathMin(0.4, m_ConsecutiveLossesForRisk * 0.1);
+    }
+    
+    // Điều chỉnh dựa trên lợi nhuận tuần
+    if (m_WeeklyProfitPercent > 5.0) {
+        multiplier += 0.1; // Tăng 10% khi lợi nhuận tuần > 5%
+    } else if (m_WeeklyProfitPercent < -3.0) {
+        multiplier -= 0.15; // Giảm 15% khi lỗ tuần > 3%
+    }
+    
+    // Điều chỉnh dựa trên lợi nhuận tháng
+    if (m_MonthlyProfitPercent > 15.0) {
+        multiplier += 0.05; // Tăng nhẹ khi lợi nhuận tháng tốt
+    } else if (m_MonthlyProfitPercent < -10.0) {
+        multiplier -= 0.2; // Giảm mạnh khi lỗ tháng > 10%
+    }
+    
+    return MathMax(0.3, MathMin(1.5, multiplier));
+}
+
+//+------------------------------------------------------------------+
+//| Tính toán điều chỉnh risk dựa trên drawdown                     |
+//+------------------------------------------------------------------+
+double CRiskOptimizer::CalculateDrawdownBasedRiskAdjustment()
+{
+    double multiplier = 1.0;
+    
+    // Điều chỉnh dựa trên drawdown hiện tại
+    if (m_MaxDrawdownPercent > 15.0) {
+        multiplier = 0.4; // Giảm mạnh khi drawdown > 15%
+    } else if (m_MaxDrawdownPercent > 10.0) {
+        multiplier = 0.6; // Giảm vừa khi drawdown > 10%
+    } else if (m_MaxDrawdownPercent > 5.0) {
+        multiplier = 0.8; // Giảm nhẹ khi drawdown > 5%
+    } else if (m_MaxDrawdownPercent < 2.0) {
+        multiplier = 1.1; // Tăng nhẹ khi drawdown thấp
+    }
+    
+    return MathMax(0.2, MathMin(1.2, multiplier));
+}
+
+//+------------------------------------------------------------------+
+//| Tính toán điều chỉnh risk dựa trên volatility                   |
+//+------------------------------------------------------------------+
+double CRiskOptimizer::CalculateVolatilityBasedRiskAdjustment()
+{
+    // Sử dụng volatility adjustment factor đã có
+    double volatilityFactor = GetVolatilityAdjustmentFactor();
+    
+    // Chuyển đổi thành multiplier cho risk
+    // Volatility cao -> giảm risk, Volatility thấp -> tăng risk
+    double multiplier = 1.0;
+    
+    if (volatilityFactor < 0.8) {
+        multiplier = 0.7; // Volatility rất cao -> giảm risk mạnh
+    } else if (volatilityFactor < 1.0) {
+        multiplier = 0.85; // Volatility cao -> giảm risk vừa
+    } else if (volatilityFactor > 1.2) {
+        multiplier = 1.1; // Volatility thấp -> tăng risk nhẹ
+    }
+    
+    m_VolatilityBasedMultiplier = multiplier;
+    return MathMax(0.5, MathMin(1.2, multiplier));
+}
+
+//+------------------------------------------------------------------+
+//| Tính toán điều chỉnh risk dựa trên điều kiện thị trường         |
+//+------------------------------------------------------------------+
+double CRiskOptimizer::CalculateMarketConditionRiskAdjustment()
+{
+    double multiplier = 1.0;
+    
+    // Kiểm tra spread
+    double currentSpread = SymbolInfoInteger(m_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
+    double normalSpread = SymbolInfoDouble(m_Symbol, SYMBOL_POINT) * 10; // Giả định spread bình thường
+    
+    if (currentSpread > normalSpread * 2.0) {
+        multiplier -= 0.2; // Giảm risk khi spread cao
+    }
+    
+    // Kiểm tra thời gian giao dịch (giảm risk ngoài giờ chính)
+    datetime currentTime = TimeCurrent();
+    MqlDateTime timeStruct;
+    TimeToStruct(currentTime, timeStruct);
+    
+    // Giảm risk ngoài giờ giao dịch chính (22:00 - 06:00 GMT)
+    if (timeStruct.hour >= 22 || timeStruct.hour <= 6) {
+        multiplier -= 0.1;
+    }
+    
+    m_MarketConditionMultiplier = multiplier;
+    return MathMax(0.6, MathMin(1.1, multiplier));
+}
+
+//+------------------------------------------------------------------+
+//| Cập nhật các metrics hiệu suất                                  |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::UpdatePerformanceMetrics()
+{
+    // Cập nhật equity peak và drawdown
+    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    if (currentEquity > m_LastEquityPeak) {
+        m_LastEquityPeak = currentEquity;
+        m_MaxDrawdownPercent = 0.0; // Reset drawdown khi đạt đỉnh mới
+    } else {
+        // Tính drawdown hiện tại
+        double currentDrawdown = (m_LastEquityPeak - currentEquity) / m_LastEquityPeak * 100.0;
+        if (currentDrawdown > m_MaxDrawdownPercent) {
+            m_MaxDrawdownPercent = currentDrawdown;
+        }
+    }
+    
+    // Cập nhật lợi nhuận tuần/tháng (cần implement logic tính toán chi tiết)
+    // Đây là placeholder - cần tích hợp với hệ thống tracking lợi nhuận
+    
+    // Lưu base risk percent nếu chưa có
+    if (m_BaseRiskPercent <= 0) {
+        m_BaseRiskPercent = m_Config.RiskPercent;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra có nên giảm risk không                                 |
+//+------------------------------------------------------------------+
+bool CRiskOptimizer::ShouldReduceRisk()
+{
+    // Giảm risk khi:
+    // 1. Drawdown cao
+    if (m_MaxDrawdownPercent > 8.0) return true;
+    
+    // 2. Thua liên tiếp nhiều
+    if (m_ConsecutiveLossesForRisk >= 3) return true;
+    
+    // 3. Lỗ tuần/tháng cao
+    if (m_WeeklyProfitPercent < -5.0 || m_MonthlyProfitPercent < -12.0) return true;
+    
+    // 4. Volatility quá cao
+    if (m_VolatilityBasedMultiplier < 0.8) return true;
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Kiểm tra có nên tăng risk không                                 |
+//+------------------------------------------------------------------+
+bool CRiskOptimizer::ShouldIncreaseRisk()
+{
+    // Tăng risk khi:
+    // 1. Hiệu suất tốt và drawdown thấp
+    if (m_MaxDrawdownPercent < 3.0 && m_ConsecutiveWins >= 3) return true;
+    
+    // 2. Lợi nhuận ổn định
+    if (m_WeeklyProfitPercent > 3.0 && m_MonthlyProfitPercent > 8.0) return true;
+    
+    // 3. Volatility thấp và điều kiện thị trường tốt
+    if (m_VolatilityBasedMultiplier > 1.05 && m_MarketConditionMultiplier > 0.95) return true;
+    
+    return false;
+}
+
+    // ===== AUTOMATIC RISK ADJUSTMENT METHODS =====
+    // Tự động điều chỉnh RiskPercent dựa trên hiệu suất
+    double GetOptimizedRiskPercent();
+    double CalculateAdaptiveRiskPercent();
+    void UpdateRiskBasedOnPerformance();
+    bool IsRiskAdjustmentNeeded();
+    double GetCurrentRiskMultiplier();
+    void ResetRiskAdjustments();
+    
+    // Các phương thức hỗ trợ cho automatic risk adjustment
+    double CalculatePerformanceBasedRiskAdjustment();
+    double CalculateDrawdownBasedRiskAdjustment();
+    double CalculateVolatilityBasedRiskAdjustment();
+    double CalculateMarketConditionRiskAdjustment();
+    void UpdatePerformanceMetrics();
+    bool ShouldReduceRisk();
+    bool ShouldIncreaseRisk();
+
+}; // đóng class CRiskOptimizer
 
 // Đóng namespace ApexPullback
 } // end namespace ApexPullback

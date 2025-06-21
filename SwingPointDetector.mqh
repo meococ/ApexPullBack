@@ -1,33 +1,29 @@
 //+------------------------------------------------------------------+
-//| SwingPointDetector.mqh                                          |
-//| Phát hiện swing highs/lows để đặt SL/TP chính xác và tối ưu      |
-//| trailing stop dựa trên các đỉnh/đáy thực sự.                     |
+//|                                       SwingPointDetector.mqh |
+//|                         Copyright 2023-2024, ApexPullback EA |
+//|                                     https://www.apexpullback.com |
 //+------------------------------------------------------------------+
 
+#ifndef SWINGPOINTDETECTOR_MQH_
+#define SWINGPOINTDETECTOR_MQH_
+
+//--- Standard Library Includes
+#include <Trade/Trade.mqh>       // Standard MQL5 Trade class
+
+//--- Core Project Includes
+#include "CommonStructs.mqh"      // Core structures, enums, and inputs
+#include "Enums.mqh"              // For ENUM_REGIME_TYPE, ENUM_TRAILING_MODE, ENUM_MARKET_REGIME, ENUM_SWING_POINT_TYPE etc.
+
+#include "Logger.mqh"             // For CLogger (assuming it's part of the project)
+
 //+------------------------------------------------------------------+
-//| Định nghĩa loại chế độ thị trường đơn giản hóa                     |
+//| Namespace: ApexPullback                                          |
+//| Purpose: Encapsulates all custom code for the EA.                |
 //+------------------------------------------------------------------+
-enum ENUM_REGIME_TYPE {
-   REGIME_TYPE_UNKNOWN,   // Chưa xác định
-   REGIME_TYPE_TRENDING,  // Xu hướng
-   REGIME_TYPE_RANGING,   // Đi ngang
-   REGIME_TYPE_VOLATILE   // Biến động mạnh
-};
-
-#ifndef SWING_POINT_DETECTOR_MQH_
-#define SWING_POINT_DETECTOR_MQH_
-
-#include <Trade\Trade.mqh>
-#include "Namespace.mqh"      // Định nghĩa namespace và forward declarations
-#include "Enums.mqh"          // Đảm bảo Enums được include trước
-#include "CommonStructs.mqh"
-#include "Logger.mqh"         // Sử dụng lớp CLogger
-#include "MarketProfile.mqh"  // Sử dụng CMarketProfile để phân tích cấu trúc giá
-
-namespace ApexPullback {  // Bắt đầu namespace ApexPullback
+namespace ApexPullback {
 
 // Forward declarations
-class CAssetProfileManager;
+class CAssetProfileManager;  // Forward declaration cần thiết
 
 // Cấu trúc lưu trữ cấu hình phát hiện Swing - Cải tiến v14
 struct SwingDetectorConfig {
@@ -140,12 +136,12 @@ private:
    CAssetProfileManager*  m_AssetProfiler;  // Tích hợp AssetProfiler
    
    // Danh sách swing points đã phát hiện
-   SwingPoint        m_SwingPoints[];     // Mảng lưu các đỉnh/đáy
+   ApexPullback::SwingPoint        m_SwingPoints[];     // Mảng lưu các đỉnh/đáy
    int               m_SwingPointCount;   // Số lượng đỉnh/đáy đã lưu
    int               m_MaxSwingPoints;    // Số lượng tối đa đỉnh/đáy lưu trữ
    
    // Higher Timeframe swings
-   SwingPoint        m_HTFSwingPoints[];  // Swing points ở timeframe cao hơn
+   ApexPullback::SwingPoint        m_HTFSwingPoints[];  // Swing points ở timeframe cao hơn
    int               m_HTFSwingPointCount; // Số lượng HTF swing points
    
    // Handle indicators
@@ -213,7 +209,7 @@ private:
    double            GetAverageATR();
    double            GetCurrentVolatility();
    double            CalculateStructuralSignificance(double price, ENUM_SWING_POINT_TYPE type, int barIndex);
-   void              LogSwingPointDetails(const SwingPoint &point);
+   void              LogSwingPointDetails(const ApexPullback::SwingPoint &point);
    
    // Phương thức phân tích thị trường - Mới v14 
    void              UpdateMarketRegime();
@@ -221,9 +217,9 @@ private:
    double            CalculateTrendStrength();
    double            CalculateVolatilityScore();
    bool              IsBreakoutDetected(bool isLong);
-   double            CalculateSwingReliability(const SwingPoint &point);
-   double            CalculatePriceToSwingRatio(double price, const SwingPoint &point, double atr);
-   bool              IsValidSwingForTrading(const SwingPoint &point, bool isLong);
+   double            CalculateSwingReliability(const ApexPullback::SwingPoint &point);
+   double            CalculatePriceToSwingRatio(double price, const ApexPullback::SwingPoint &point, double atr);
+   bool              IsValidSwingForTrading(const ApexPullback::SwingPoint &point, bool isLong);
    
    // Phương thức trailing stop nâng cao - Mới v14
    double            CalculateAdaptiveTrailingStop(bool isLong, double currentPrice, double currentSL, const TrailingStopConfig &config);
@@ -234,7 +230,7 @@ private:
    double            CalculateRiskBasedSLDistance(bool isLong, double entryPrice);
    double            GetOptimalRiskRewardRatio(ENUM_MARKET_REGIME regime);
    double            CalculateSwingBreakoutLevel(bool isLong, int swingsBack = 2);
-   bool              ValidateSwingQuality(const SwingPoint &point, double currentPrice, bool isLong);
+   bool              ValidateSwingQuality(const ApexPullback::SwingPoint &point, double currentPrice, bool isLong);
    double            GetOptimalRiskPercentPerTrade(ENUM_MARKET_REGIME regime, double baseRisk = 1.0);
    
    // ZigZag detection - Mới v14
@@ -287,16 +283,16 @@ public:
    double            GetLastSwingLow();
    double            GetSwingHighBeforeBar(int bar);
    double            GetSwingLowBeforeBar(int bar);
-   SwingPoint        GetStrongestSwingHigh(int countBack = 5);
-   SwingPoint        GetStrongestSwingLow(int countBack = 5);
+   ApexPullback::SwingPoint        GetStrongestSwingHigh(int countBack = 5);
+   ApexPullback::SwingPoint        GetStrongestSwingLow(int countBack = 5);
    
    // Truy vấn danh sách đỉnh/đáy
    int               GetSwingPointsCount() const { return m_SwingPointCount; }
-   bool              GetSwingPoint(int index, SwingPoint &point) const;
+   bool              GetSwingPoint(int index, ApexPullback::SwingPoint &point) const;
    
    // Truy vấn swing points nâng cao
-   SwingPoint        GetNearestMajorSwingHigh(double price, int maxBarsBack = 100);
-   SwingPoint        GetNearestMajorSwingLow(double price, int maxBarsBack = 100);
+   ApexPullback::SwingPoint        GetNearestMajorSwingHigh(double price, int maxBarsBack = 100);
+   ApexPullback::SwingPoint        GetNearestMajorSwingLow(double price, int maxBarsBack = 100);
    bool              HasStructuralBreakout(bool isLong);
    bool              IsInVolatilityExpansion();
    
@@ -3208,4 +3204,4 @@ bool CSwingPointDetector::HasValidMarketStructure(bool isLong, int minMajorSwing
 
 } // đóng namespace ApexPullback
 
-#endif // SWING_POINT_DETECTOR_MQH_
+#endif // SWINGPOINTDETECTOR_MQH_

@@ -4,43 +4,24 @@
 //| Version: 14.0                                                     |
 //+------------------------------------------------------------------+
 
-#ifndef INDICATOR_UTILS_MQH
-#define INDICATOR_UTILS_MQH
+#ifndef INDICATORUTILS_MQH_
+#define INDICATORUTILS_MQH_
 
-#include "Enums.mqh"                        // Định nghĩa enums
-#include "CommonStructs.mqh"                // Định nghĩa structs
-#include "Constants.mqh"                    // Định nghĩa constants
-
-// KHÔNG định nghĩa lại IndicatorHandles, đã được định nghĩa trong CommonStructs.mqh
-// struct IndicatorHandles {
-//     int atrHandle;
-//     int maHandle;
-//     int rsiHandle;
-//     int stochHandle;
-//     int bollingerHandle;
-//     int adxHandle;
-//     int macdHandle;
-//     int volumeHandle;
-//     int ichimokuHandle;
-//     
-//     // Hàm khởi tạo
-//     IndicatorHandles() {
-//         atrHandle = INVALID_HANDLE;
-//         maHandle = INVALID_HANDLE;
-//         rsiHandle = INVALID_HANDLE;
-//         stochHandle = INVALID_HANDLE;
-//         bollingerHandle = INVALID_HANDLE;
-//         adxHandle = INVALID_HANDLE;
-//         macdHandle = INVALID_HANDLE;
-//         volumeHandle = INVALID_HANDLE;
-//         ichimokuHandle = INVALID_HANDLE;
-//     }
-// };
+// === CORE INCLUDES (BẮT BUỘC CHO HẦU HẾT CÁC FILE) ===
+#include "CommonStructs.mqh"      // Core structures, enums, and inputs
+#include "Enums.mqh"            // TẤT CẢ các enum
 
 
+// === INCLUDES CỤ THỂ (NẾU CẦN) ===
+#include "Logger.mqh"          // For logging within the class
+// #include "MathHelper.mqh"
 
-// Đưa tất cả vào namespace ApexPullback để tránh xung đột tên
+// BẮT ĐẦU NAMESPACE
 namespace ApexPullback {
+
+// Forward declaration for EAContext if CIndicatorUtils needs it directly
+// struct EAContext; // Likely not needed if EAContext is passed via methods or constructor
+
 
 class CIndicatorUtils {
 private:
@@ -1236,4 +1217,4 @@ bool CIndicatorUtils::IsCrossDown(int indicator1, int indicator2, int shift)
 
 } // Kết thúc namespace
 
-#endif // INDICATOR_UTILS_MQH
+#endif // INDICATORUTILS_MQH_

@@ -3,21 +3,24 @@
 //|                (for ApexPullback EA v14.0)                        |
 //+------------------------------------------------------------------+
 
-#ifndef SAFE_DATA_PROVIDER_MQH_
-#define SAFE_DATA_PROVIDER_MQH_
+#ifndef SAFEDATAPROVIDER_MQH
+#define SAFEDATAPROVIDER_MQH
 
 // Include các module cần thiết
-#include "Namespace.mqh"    // Định nghĩa namespace và forward declarations
-#include "Enums.mqh"
-#include "CommonStructs.mqh"
-#include "Logger.mqh"
+#include "Logger.mqh"         // For CLogger
+#include "Enums.mqh"          // For ENUM_TIMEFRAMES, ENUM_SESSION
+#include "MarketProfile.mqh"  // For CMarketProfile (used in GetSafeATR)
 
 // MQL5 Strict mode
-
-// Sử dụng CLogger từ Logger.mqh
+#property strict
 
 // Sử dụng namespace ApexPullback để tránh xung đột
 namespace ApexPullback {
+
+// Forward declaration for CLogger is not strictly needed if Logger.mqh is included,
+// but kept here as it was explicitly mentioned in comments. Same for CMarketProfile.
+class CLogger; 
+class CMarketProfile;
 
 //+------------------------------------------------------------------+
 //| Class CSafeDataProvider - Cung cấp dữ liệu an toàn               |
@@ -50,33 +53,33 @@ public:
     bool Initialize(string symbol, ENUM_TIMEFRAMES timeframe, ApexPullback::CLogger* logger = NULL);
     
     // Basic data getters
-    double GetBid();
-    double GetAsk();
-    double GetSpread();
-    double GetAverageSpread(int lookback = 20);
-    double GetPoint();
-    double GetPipSize();
-    double GetTickValue();
-    double GetTickSize();
+    double GetBid() const;
+    double GetAsk() const;
+    double GetSpread() const;
+    double GetAverageSpread(int lookback = 20) const;
+    double GetPoint() const;
+    double GetPipSize() const;
+    double GetTickValue() const;
+    double GetTickSize() const;
     
     // Session management
-    ENUM_SESSION GetCurrentSession();
-    bool IsSessionChange();
+    ENUM_SESSION GetCurrentSession() const;
+    bool IsSessionChange() const;
     
     // Time management
-    bool IsNewBar();
-    datetime GetBarTime(int shift = 0);
-    bool IsFridayEvening();
-    bool IsMondayMorning();
+    bool IsNewBar(); // Removed const as it modifies a static variable
+    datetime GetBarTime(int shift = 0) const;
+    bool IsFridayEvening() const;
+    bool IsMondayMorning() const;
     
     // Data validation
-    bool IsValidData();
-    bool HasSufficientHistory(int requiredBars);
+    bool IsValidData() const;
+    bool HasSufficientHistory(int requiredBars) const;
     
     // Additional methods for missing functions
-    datetime GetCurrentBarTime(ENUM_TIMEFRAMES timeframe = PERIOD_CURRENT);
-    double GetSafeATR(ApexPullback::CMarketProfile &profile, ENUM_TIMEFRAMES timeframe = PERIOD_CURRENT);
-    double GetSafeVolatilityRatio();
+    datetime GetCurrentBarTime(ENUM_TIMEFRAMES timeframe = PERIOD_CURRENT) const;
+    double GetSafeATR(ApexPullback::CMarketProfile &profile, ENUM_TIMEFRAMES timeframe = PERIOD_CURRENT) const;
+    double GetSafeVolatilityRatio() const;
 };
 
 //+------------------------------------------------------------------+
@@ -108,14 +111,15 @@ bool CSafeDataProvider::Initialize(string symbol, ENUM_TIMEFRAMES timeframe, Ape
     m_Logger = logger;
     
     if (m_Logger != NULL) {
-        m_Logger.LogInfo("Khởi tạo SafeDataProvider cho " + symbol + " trên khung " + EnumToString(timeframe));
+        m_Logger->LogInfo("Khởi tạo SafeDataProvider cho " + symbol + " trên khung " + EnumToString(timeframe));
     }
     
     // Kiểm tra symbol hợp lệ
     if (!SymbolSelect(symbol, true)) {
         if (m_Logger != NULL) {
-            m_Logger.LogError("Không thể chọn symbol " + symbol + " trong Market Watch");
+            m_Logger->LogError("Không thể chọn symbol " + symbol + " trong Market Watch");
         }
+
         return false;
     }
     
@@ -128,7 +132,7 @@ bool CSafeDataProvider::Initialize(string symbol, ENUM_TIMEFRAMES timeframe, Ape
 //+------------------------------------------------------------------+
 //| Get current market session                                       |
 //+------------------------------------------------------------------+
-ENUM_SESSION CSafeDataProvider::GetCurrentSession() {
+ENUM_SESSION CSafeDataProvider::GetCurrentSession() const {
     // Kiểm tra cache
     if (TimeCurrent() - m_LastSessionCheck > 300) { // Cập nhật 5 phút một lần
         UpdateSessionType();
@@ -179,7 +183,7 @@ void CSafeDataProvider::UpdateSessionType() {
 //+------------------------------------------------------------------+
 //| Check if session has changed                                     |
 //+------------------------------------------------------------------+
-bool CSafeDataProvider::IsSessionChange() {
+bool CSafeDataProvider::IsSessionChange() const {
     ENUM_SESSION previousSession = m_CurrentSession;
     ENUM_SESSION currentSession = GetCurrentSession();
     
@@ -189,28 +193,28 @@ bool CSafeDataProvider::IsSessionChange() {
 //+------------------------------------------------------------------+
 //| Get current bid price                                            |
 //+------------------------------------------------------------------+
-double CSafeDataProvider::GetBid() {
+double CSafeDataProvider::GetBid() const {
     return SymbolInfoDouble(m_Symbol, SYMBOL_BID);
 }
 
 //+------------------------------------------------------------------+
 //| Get current ask price                                            |
 //+------------------------------------------------------------------+
-double CSafeDataProvider::GetAsk() {
+double CSafeDataProvider::GetAsk() const {
     return SymbolInfoDouble(m_Symbol, SYMBOL_ASK);
 }
 
 //+------------------------------------------------------------------+
 //| Get current spread in points                                     |
 //+------------------------------------------------------------------+
-double CSafeDataProvider::GetSpread() {
+double CSafeDataProvider::GetSpread() const {
     return (double)SymbolInfoInteger(m_Symbol, SYMBOL_SPREAD);
 }
 
 //+------------------------------------------------------------------+
 //| Get average spread over lookback period                          |
 //+------------------------------------------------------------------+
-double CSafeDataProvider::GetAverageSpread(int lookback = 20) {
+double CSafeDataProvider::GetAverageSpread(int lookback = 20) const {
     // Implementation would require tracking spread over time
     // Simplified version returns current spread
     return GetSpread();
@@ -267,14 +271,14 @@ bool CSafeDataProvider::IsNewBar() {
 //+------------------------------------------------------------------+
 //| Get bar time for specified shift                                 |
 //+------------------------------------------------------------------+
-datetime CSafeDataProvider::GetBarTime(int shift = 0) {
+datetime CSafeDataProvider::GetBarTime(int shift = 0) const {
     return iTime(m_Symbol, m_Timeframe, shift);
 }
 
 //+------------------------------------------------------------------+
 //| Check if current time is Friday evening                          |
 //+------------------------------------------------------------------+
-bool CSafeDataProvider::IsFridayEvening() {
+bool CSafeDataProvider::IsFridayEvening() const {
     datetime time = TimeCurrent();
     MqlDateTime dt;
     TimeToStruct(time, dt);
@@ -285,7 +289,7 @@ bool CSafeDataProvider::IsFridayEvening() {
 //+------------------------------------------------------------------+
 //| Check if current time is Monday morning                          |
 //+------------------------------------------------------------------+
-bool CSafeDataProvider::IsMondayMorning() {
+bool CSafeDataProvider::IsMondayMorning() const {
     datetime time = TimeCurrent();
     MqlDateTime dt;
     TimeToStruct(time, dt);
@@ -296,7 +300,7 @@ bool CSafeDataProvider::IsMondayMorning() {
 //+------------------------------------------------------------------+
 //| Check if data is valid (no errors in price data)                 |
 //+------------------------------------------------------------------+
-bool CSafeDataProvider::IsValidData() {
+bool CSafeDataProvider::IsValidData() const {
     // Check for zero prices or other invalid data
     double bid = GetBid();
     double ask = GetAsk();
@@ -307,7 +311,7 @@ bool CSafeDataProvider::IsValidData() {
 //+------------------------------------------------------------------+
 //| Check if there's sufficient price history                        |
 //+------------------------------------------------------------------+
-bool CSafeDataProvider::HasSufficientHistory(int requiredBars) {
+bool CSafeDataProvider::HasSufficientHistory(int requiredBars) const {
     int available = Bars(m_Symbol, m_Timeframe);
     return (available >= requiredBars);
 }
@@ -315,14 +319,14 @@ bool CSafeDataProvider::HasSufficientHistory(int requiredBars) {
 //+------------------------------------------------------------------+
 //| Lấy thời gian nến hiện tại cho timeframe được chỉ định        |
 //+------------------------------------------------------------------+
-datetime CSafeDataProvider::GetCurrentBarTime(ENUM_TIMEFRAMES timeframe = PERIOD_CURRENT) {
+datetime CSafeDataProvider::GetCurrentBarTime(ENUM_TIMEFRAMES timeframe = PERIOD_CURRENT) const {
     return iTime(m_Symbol, timeframe, 0);
 }
 
 //+------------------------------------------------------------------+
 //| Lấy giá trị ATR một cách an toàn                              |
 //+------------------------------------------------------------------+
-double CSafeDataProvider::GetSafeATR(CMarketProfile &profile, ENUM_TIMEFRAMES timeframe = PERIOD_CURRENT) {
+double CSafeDataProvider::GetSafeATR(ApexPullback::CMarketProfile &profile, ENUM_TIMEFRAMES timeframe = PERIOD_CURRENT) const {
     // Tính toán giá trị ATR từ thị trường trực tiếp
     double atr = 0.0;
     int handle = iATR(m_Symbol, timeframe, 14);
@@ -355,7 +359,7 @@ double CSafeDataProvider::GetSafeATR(CMarketProfile &profile, ENUM_TIMEFRAMES ti
 //+------------------------------------------------------------------+
 //| Lấy tỷ lệ biến động                                       |
 //+------------------------------------------------------------------+
-double CSafeDataProvider::GetSafeVolatilityRatio() {
+double CSafeDataProvider::GetSafeVolatilityRatio() const {
     // Mặc định trả về tỷ lệ volatility trung bình = 1.0
     return 1.0;
 }

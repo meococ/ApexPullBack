@@ -3,15 +3,15 @@
 //|                        Copyright 2022, MetaQuotes Software Corp. |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
-#ifndef _APEX_NAMESPACE_H_
-#define _APEX_NAMESPACE_H_
+#ifndef NAMESPACE_MQH
+#define NAMESPACE_MQH
 
 #include "Enums.mqh"
 #include "CommonStructs.mqh"
 
 
 // Sử dụng các giá trị mặc định từ Constants.mqh
-#include "Constants.mqh"
+#include "CommonStructs.mqh"      // Core structures, enums, and inputs
 
 // Định nghĩa namespace ApexPullback
 namespace ApexPullback {
@@ -92,4 +92,4 @@ namespace ApexPullback {
     
 } // end namespace ApexPullback
 
-#endif // _APEX_NAMESPACE_H_
+#endif // NAMESPACE_MQH

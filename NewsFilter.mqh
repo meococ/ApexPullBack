@@ -3,15 +3,19 @@
 //| Module quản lý và lọc tin tức kinh tế                            |
 //+------------------------------------------------------------------+
 
-#ifndef NEWS_FILTER_MQH_
-#define NEWS_FILTER_MQH_
+#ifndef NEWSFILTER_MQH_
+#define NEWSFILTER_MQH_
 
-// Khai báo thư viện cần thiết
-#include <Arrays/ArrayObj.mqh>
-#include "Enums.mqh"
-#include "CommonStructs.mqh"
-#include "Logger.mqh"  // Thêm include cho Logger.mqh
+// === CORE INCLUDES (BẮT BUỘC CHO HẦU HẾT CÁC FILE) ===
+#include "CommonStructs.mqh"      // Core structures, enums, and inputs
+#include "Enums.mqh"            // TẤT CẢ các enum
 
+
+// === INCLUDES CỤ THỂ (NẾU CẦN) ===
+#include "Logger.mqh"          // For CLogger
+// #include "MathHelper.mqh"
+
+// BẮT ĐẦU NAMESPACE
 namespace ApexPullback {
 
 // Forward declarations
@@ -81,6 +85,9 @@ public:
     
     // Kiểm tra có tin tức sắp diễn ra
     bool HasUpcomingNews(int minutesAhead = 120, int minimumImpact = 2);
+    
+    // Kiểm tra có tin tức tác động cao trong khoảng thời gian
+    bool IsHighImpactNewsTime(int minutesBefore = 30);
 };
 
 //+------------------------------------------------------------------+
@@ -136,7 +143,7 @@ bool CNewsFilter::Initialize(string symbol, ENUM_NEWS_FILTER filter_level, int n
         m_currenciesToMonitor[1] = StringSubstr(symbol, 3, 3);
         
         if (m_logger != NULL) {
-            m_logger.LogDebug(StringFormat("NewsFilter: Theo dõi các đồng tiền %s và %s", 
+            m_logger->LogDebug(StringFormat("NewsFilter: Theo dõi các đồng tiền %s và %s", 
                            m_currenciesToMonitor[0], m_currenciesToMonitor[1]));
         }
     } else {
@@ -150,7 +157,7 @@ bool CNewsFilter::Initialize(string symbol, ENUM_NEWS_FILTER filter_level, int n
         } else {
             // Cặp không xác định, chỉ lọc tin tác động cao
             if (m_logger != NULL) {
-                m_logger.LogWarning(StringFormat("NewsFilter: Không thể xác định đồng tiền từ symbol (%s), sẽ chỉ lọc tin tác động cao", symbol));
+                m_logger->LogWarning(StringFormat("NewsFilter: Không thể xác định đồng tiền từ symbol (%s), sẽ chỉ lọc tin tác động cao", symbol));
             }
             m_newsImportance = 3;  // Chỉ lọc tin tác động cao
         }
@@ -160,7 +167,7 @@ bool CNewsFilter::Initialize(string symbol, ENUM_NEWS_FILTER filter_level, int n
     bool success = UpdateNews();
     
     if (!success && m_logger != NULL) {
-        m_logger.LogWarning(StringFormat("NewsFilter: Không thể cập nhật tin tức từ file %s, bộ lọc tin tức có thể không hoạt động chính xác", m_dataFileName));
+        m_logger->LogWarning(StringFormat("NewsFilter: Không thể cập nhật tin tức từ file %s, bộ lọc tin tức có thể không hoạt động chính xác", m_dataFileName));
     }
     
     return true;
@@ -175,7 +182,7 @@ void CNewsFilter::Configure(int minutes_before, int minutes_after, int importanc
     m_newsImportance = importance;
     
     if (m_logger != NULL) {
-        m_logger.LogInfo(StringFormat("NewsFilter: Cấu hình lại - %d phút trước, %d phút sau, tác động >= %d", 
+        m_logger->LogInfo(StringFormat("NewsFilter: Cấu hình lại - %d phút trước, %d phút sau, tác động >= %d", 
                        minutes_before, minutes_after, importance));
     }
 }
@@ -197,7 +204,7 @@ bool CNewsFilter::UpdateNews() {
     // Kiểm tra file tồn tại
     if (!FileIsExist(m_dataFileName, FILE_COMMON)) {
         if (m_logger != NULL) {
-            m_logger.LogWarning(StringFormat("NewsFilter: Không tìm thấy file tin tức %s", m_dataFileName));
+            m_logger->LogWarning(StringFormat("NewsFilter: Không tìm thấy file tin tức %s", m_dataFileName));
         }
         return false;
     }
@@ -206,7 +213,7 @@ bool CNewsFilter::UpdateNews() {
     int fileHandle = FileOpen(m_dataFileName, FILE_READ | FILE_CSV | FILE_COMMON, ",");
     if (fileHandle == INVALID_HANDLE) {
         if (m_logger != NULL) {
-            m_logger.LogError(StringFormat("NewsFilter: Không thể mở file tin tức: %d", GetLastError()));
+            m_logger->LogError(StringFormat("NewsFilter: Không thể mở file tin tức: %d", GetLastError()));
         }
         return false;
     }
@@ -256,7 +263,7 @@ bool CNewsFilter::UpdateNews() {
         // Nếu vẫn không phân tích được, bỏ qua tin này
         if (newsTime == 0) {
             if (m_logger != NULL) {
-                m_logger.LogWarning(StringFormat("NewsFilter: Không thể phân tích thời gian tin tức: %s %s", dateStr, timeStr));
+                m_logger->LogWarning(StringFormat("NewsFilter: Không thể phân tích thời gian tin tức: %s %s", dateStr, timeStr));
             }
             continue;
         }
@@ -314,7 +321,7 @@ bool CNewsFilter::UpdateNews() {
     m_lastUpdate = currentTime;
     
     if (m_logger != NULL) {
-        m_logger.LogInfo(StringFormat("NewsFilter: Đã cập nhật tin tức, tìm thấy %d tin liên quan", m_newsCount));
+        m_logger->LogInfo(StringFormat("NewsFilter: Đã cập nhật tin tức, tìm thấy %d tin liên quan", m_newsCount));
     }
     
     return true;
@@ -376,7 +383,7 @@ bool CNewsFilter::HasNewsEvent(int minutesBefore, int minutesAfter, int minimumI
     
     // Log thông tin nếu tìm thấy tin tức
     if (foundNews && m_logger != NULL && newsInfo != "") {
-        m_logger.LogInfo(StringFormat("NewsFilter: %s", newsInfo));
+        m_logger->LogInfo(StringFormat("NewsFilter: %s", newsInfo));
     }
     
     return foundNews;
@@ -622,7 +629,7 @@ bool CNewsFilter::HasUpcomingNews(int minutesAhead, int minimumImpact) {
                                m_newsEvents[i].currency,
                                m_newsEvents[i].name,
                                minutesRemaining);
-                    m_logger.LogInfo(infoMsg);
+                    m_logger->LogInfo(infoMsg);
                 }
                 
                 return true;
@@ -633,6 +640,49 @@ bool CNewsFilter::HasUpcomingNews(int minutesAhead, int minimumImpact) {
     return false;
 }
 
+//+------------------------------------------------------------------+
+//| Kiểm tra có tin tức tác động cao trong khoảng thời gian          |
+//+------------------------------------------------------------------+
+bool CNewsFilter::IsHighImpactNewsTime(int minutesBefore = 30)
+{
+    if (m_newsCount == 0) {
+        return false; // Không có tin tức nào được tải
+    }
+    
+    datetime currentTime = TimeCurrent();
+    
+    // Duyệt qua tất cả tin tức
+    for (int i = 0; i < m_newsCount; i++) {
+        // Chỉ kiểm tra tin tức tác động cao (impact >= 3)
+        if (m_newsEvents[i].impact >= 3) {
+            // Tính khoảng cách thời gian
+            int minutesToNews = (int)((m_newsEvents[i].time - currentTime) / 60);
+            
+            // Kiểm tra nếu tin tức sắp diễn ra trong khoảng thời gian chỉ định
+            if (minutesToNews >= 0 && minutesToNews <= minutesBefore) {
+                if (m_logger != NULL) {
+                    string impactStars = "";
+                    if (m_newsEvents[i].impact >= 3) impactStars = "***";
+                    else if (m_newsEvents[i].impact >= 2) impactStars = "**";
+                    else impactStars = "*";
+                    
+                    string warningMsg = StringFormat(
+                        "IsHighImpactNewsTime: Tin tức tác động cao %s %s: %s (còn %d phút)",
+                        impactStars,
+                        m_newsEvents[i].currency,
+                        m_newsEvents[i].name,
+                        minutesToNews
+                    );
+                    m_logger->LogWarning(warningMsg);
+                }
+                return true;
+            }
+        }
+    }
+    
+    return false; // Không có tin tức tác động cao sắp diễn ra
+}
+
 } // end namespace ApexPullback
 
-#endif // NEWS_FILTER_MQH_
+#endif // NEWSFILTER_MQH_

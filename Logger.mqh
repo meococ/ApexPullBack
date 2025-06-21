@@ -3,12 +3,19 @@
 //|              APEX Pullback EA v14.0 - Hệ thống ghi nhật ký      |
 //+------------------------------------------------------------------+
 
-#ifndef LOGGER_MQH
-#define LOGGER_MQH
+#ifndef LOGGER_MQH_
+#define LOGGER_MQH_
 
-#include <Files\FileTxt.mqh>
-#include "Enums.mqh"
 
+
+// === CORE INCLUDES (BẮT BUỘC CHO HẦU HẾT CÁC FILE) ===
+#include "Enums.mqh"            // TẤT CẢ các enum
+#include "CommonStructs.mqh"      // Core structures, enums, and inputs
+
+// === INCLUDES CỤ THỂ (NẾU CẦN) ===
+// #include "MathHelper.mqh"
+
+// BẮT ĐẦU NAMESPACE
 namespace ApexPullback {
 //+------------------------------------------------------------------+
 //| Enum và cấu trúc hỗ trợ                                          |
@@ -22,12 +29,9 @@ enum ENUM_LOG_OUTPUT
    LOG_OUTPUT_BOTH = 2      // Hiển thị trên màn hình và ghi vào file
 };
 
-// Sử dụng ENUM_LOG_LEVEL từ Enums.mqh
-// Bảng tương ứng giữa LOG_LEVEL cũ và mới (các hằng để tương thích ngược)
-#define LOG_LEVEL_ERROR   LOG_ERROR
-#define LOG_LEVEL_WARNING LOG_WARNING
-#define LOG_LEVEL_INFO    LOG_INFO
-#define LOG_LEVEL_DEBUG   LOG_DEBUG
+// ENUM_LOG_LEVEL is now directly used from Enums.mqh
+// Removed redundant #define statements for LOG_LEVEL_ERROR, LOG_LEVEL_WARNING, etc.
+// as they are now directly available via ENUM_LOG_LEVEL from Enums.mqh
 
 //+------------------------------------------------------------------+
 //| Lớp CLogger - Quản lý ghi log chuyên nghiệp cho EA              |
@@ -35,6 +39,7 @@ enum ENUM_LOG_OUTPUT
 class CLogger {
 private:
    // Biến thành viên 
+   EAContext*     m_context;          // Con trỏ đến context của EA để truy cập các module khác
    string         m_symbol;           // Cặp tiền tệ hiện tại
    string         m_prefix;           // Tiền tố nhận dạng EA trong log
    int            m_log_level;        // Cấp độ log (xem ENUM_LOG_LEVEL)
@@ -48,13 +53,13 @@ private:
    bool           m_important_only;   // Chỉ gửi thông báo quan trọng đến Telegram
    
    // Phương thức private
-   void           FormatLogMessage(string &formatted_message, string level, string message);
-   void           WriteToFile(string message);
-   bool           SendTelegramMessage(string message, bool important = false);
+   void           FormatLogMessage(string &formatted_message, const string level, const string message, const string tags) const;
+   void           WriteToFile(const string message) const;
+   bool           SendTelegramMessage(const string message, bool important = false) const;
 
 public:
    // Constructor và Destructor
-   CLogger();
+   CLogger(EAContext* context = NULL);
    ~CLogger();
    
    // Phương thức khởi tạo
@@ -65,28 +70,30 @@ public:
    void           Deinitialize();
    
    // Phương thức ghi log theo cấp độ
-   void           LogDebug(string message);   // Thông tin gỡ lỗi chi tiết
-   void           LogInfo(string message);    // Thông tin hoạt động bình thường
-   void           LogWarning(string message); // Cảnh báo, có thể cần chú ý
-   void           LogError(string message);   // Lỗi nghiêm trọng
+   void           LogDebug(const string message, const string tags = "") const;   // Thông tin gỡ lỗi chi tiết
+   void           LogInfo(const string message, const string tags = "") const;    // Thông tin hoạt động bình thường
+   void           LogWarning(const string message, const string tags = "") const; // Cảnh báo, có thể cần chú ý
+   void           LogError(const string message, const string tags = "") const;
+   void           LogError(const string message, bool include_stack_trace, const string tags = "") const; // Lỗi nghiêm trọng với stack trace
    
    // Phương thức tiện ích
-   bool           IsInitialized() { return m_is_initialized; }
-   string         GetPrefix() { return m_prefix; }
-   string         GetLogFileName() { return m_log_file_name; }
+   bool           IsInitialized() const { return m_is_initialized; }
+   string         GetPrefix() const { return m_prefix; }
+   string         GetLogFileName() const { return m_log_file_name; }
+   void           GenerateDailySummary();
    
    // Phương thức truy vấn và thiết lập cấu hình
-   void           SetLogLevel(ENUM_LOG_LEVEL log_level);
-   ENUM_LOG_LEVEL GetLogLevel() { return (ENUM_LOG_LEVEL)m_log_level; }
-   void           SetLogOutput(ENUM_LOG_OUTPUT log_output);
-   ENUM_LOG_OUTPUT GetLogOutput() { return m_log_output; }
+   void           SetLogLevel(const ENUM_LOG_LEVEL log_level);
+   ENUM_LOG_LEVEL GetLogLevel() const { return (ENUM_LOG_LEVEL)m_log_level; }
+   void           SetLogOutput(const ENUM_LOG_OUTPUT log_output);
+   ENUM_LOG_OUTPUT GetLogOutput() const { return m_log_output; }
    
    // Phương thức kiểm tra cấp độ log
-   bool           IsDebugEnabled() { return m_log_level >= LOG_DEBUG; }
-   bool           IsInfoEnabled() { return m_log_level >= LOG_INFO; }
-   bool           IsWarningEnabled() { return m_log_level >= LOG_WARNING; }
-   bool           IsErrorEnabled() { return m_log_level >= LOG_ERROR; }
-   bool           IsVerboseEnabled() { return m_log_level >= LOG_VERBOSE; }
+   bool           IsDebugEnabled() const { return m_log_level >= LOG_DEBUG; }
+   bool           IsInfoEnabled() const { return m_log_level >= LOG_INFO; }
+   bool           IsWarningEnabled() const { return m_log_level >= LOG_WARNING; }
+   bool           IsErrorEnabled() const { return m_log_level >= LOG_ERROR; }
+   bool           IsVerboseEnabled() const { return m_log_level >= LOG_VERBOSE; }
    
    // Phương thức thông báo Telegram
    bool           EnableTelegram(string token, string chatId, bool importantOnly = true);
@@ -96,7 +103,8 @@ public:
 //+------------------------------------------------------------------+
 //| Constructor - Khởi tạo giá trị mặc định                          |
 //+------------------------------------------------------------------+
-CLogger::CLogger() {
+CLogger::CLogger(EAContext* context = NULL) {
+    m_context = context;
     m_symbol = Symbol();
     m_prefix = "ApexPullback";
     m_log_level = LOG_INFO;     // Mặc định: Chỉ log thông tin bình thường
@@ -200,11 +208,11 @@ void CLogger::Deinitialize() {
 //+------------------------------------------------------------------+
 //| Ghi log ở cấp độ DEBUG - Thông tin chi tiết cho gỡ lỗi           |
 //+------------------------------------------------------------------+
-void CLogger::LogDebug(string message) {
+void CLogger::LogDebug(const string message, const string tags = "") const {
    // Chỉ ghi log nếu cấp độ log hiện tại cho phép
    if(m_log_level >= LOG_DEBUG && m_is_initialized) {
       string formatted_message;
-      FormatLogMessage(formatted_message, "DEBUG", message);
+      FormatLogMessage(formatted_message, "DEBUG", message, tags);
       
       // Hiển thị trong cửa sổ "Experts"
       if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH)
@@ -219,11 +227,11 @@ void CLogger::LogDebug(string message) {
 //+------------------------------------------------------------------+
 //| Ghi log ở cấp độ INFO - Thông tin chung                         |
 //+------------------------------------------------------------------+
-void CLogger::LogInfo(string message) {
+void CLogger::LogInfo(const string message, const string tags = "") const {
    // Chỉ ghi log nếu cấp độ log hiện tại cho phép
    if(m_log_level >= LOG_INFO && m_is_initialized) {
       string formatted_message;
-      FormatLogMessage(formatted_message, "INFO", message);
+      FormatLogMessage(formatted_message, "INFO", message, tags);
       
       // Hiển thị trong cửa sổ "Experts"
       if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH)
@@ -242,11 +250,11 @@ void CLogger::LogInfo(string message) {
 //+------------------------------------------------------------------+
 //| Ghi log ở cấp độ WARNING - Cảnh báo                             |
 //+------------------------------------------------------------------+
-void CLogger::LogWarning(string message) {
+void CLogger::LogWarning(const string message, const string tags = "") const {
    // Chỉ ghi log nếu cấp độ log hiện tại cho phép
    if(m_log_level >= LOG_WARNING && m_is_initialized) {
       string formatted_message;
-      FormatLogMessage(formatted_message, "WARNING", message);
+      FormatLogMessage(formatted_message, "WARNING", message, tags);
       
       // Hiển thị trong cửa sổ "Experts"
       if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH)
@@ -258,18 +266,42 @@ void CLogger::LogWarning(string message) {
          
       // Gửi thông báo qua Telegram nếu được cấu hình (cảnh báo luôn được coi là quan trọng)
       if(m_enable_telegram)
-         SendTelegramMessage(formatted_message);
+         SendTelegramMessage(formatted_message, true);
    }
 }
 
 //+------------------------------------------------------------------+
 //| Ghi log ở cấp độ ERROR - Lỗi nghiêm trọng                       |
 //+------------------------------------------------------------------+
-void CLogger::LogError(string message) {
+void CLogger::LogError(const string message, const string tags = "") const {
+   // Gọi phiên bản đầy đủ với include_stack_trace = false
+   LogError(message, false, tags);
+}
+
+//+------------------------------------------------------------------+
+//| Ghi log ở cấp độ ERROR với tùy chọn Stack Trace                 |
+//+------------------------------------------------------------------+
+void CLogger::LogError(const string message, bool include_stack_trace, const string tags = "") const {
    // Lỗi luôn được ghi log bất kể cấp độ log nếu đã khởi tạo
    if(m_is_initialized) {
+      string final_message = message;
+
+      // Thêm stack trace nếu được yêu cầu và context hợp lệ
+      if (include_stack_trace && m_context != NULL) {
+         // Tạo một biến con trỏ trung gian để làm rõ kiểu dữ liệu cho trình biên dịch
+         // Vì hàm này là const, m_context là const, nên con trỏ lấy ra cũng phải là const
+         const ApexPullback::CFunctionStack* functionStackPtr = m_context->FunctionStack;
+         if(functionStackPtr != NULL)
+         {
+            const string stack_trace = functionStackPtr->GetTraceAsString();
+            if (stack_trace != "") { // MQL5 không có .empty(), dùng so sánh chuỗi
+               final_message += "\n--- STACK TRACE ---\n" + stack_trace;
+            }
+         }
+      }
+
       string formatted_message;
-      FormatLogMessage(formatted_message, "ERROR", message);
+      FormatLogMessage(formatted_message, "ERROR", final_message, tags);
       
       // Hiển thị trong cửa sổ "Experts"
       if(m_log_output == LOG_OUTPUT_PRINT || m_log_output == LOG_OUTPUT_BOTH)
@@ -281,28 +313,31 @@ void CLogger::LogError(string message) {
          
       // Gửi thông báo qua Telegram nếu được cấu hình (lỗi luôn được coi là quan trọng)
       if(m_enable_telegram)
-         SendTelegramMessage(formatted_message);
+         SendTelegramMessage(formatted_message, true);
    } else {
       // Nếu logger chưa khởi tạo, vẫn hiển thị lỗi trên màn hình
-      Print("[ERROR] " + message);
+      Print("[ERROR] [" + m_symbol + "] " + message);
    }
 }
 
 //+------------------------------------------------------------------+
 //| Định dạng thông điệp log với thời gian và các thông tin khác     |
 //+------------------------------------------------------------------+
-void CLogger::FormatLogMessage(string &formatted_message, string level, string message) {
-   // Định dạng: [YYYY.MM.DD HH:MM:SS] [SYMBOL] [LEVEL] Message
+void CLogger::FormatLogMessage(string &formatted_message, const string level, const string message, const string tags) const {
+   // Định dạng: [YYYY.MM.DD HH:MM:SS] [SYMBOL] [LEVEL] [TAGS] Message
    formatted_message = "[" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "] ";
    formatted_message += "[" + m_symbol + "] ";
-   formatted_message += "[" + level + "] ";
-   formatted_message += message;
+   formatted_message += "[" + level + "]";
+   if(tags != "") {
+      formatted_message += " [" + tags + "]";
+   }
+   formatted_message += " " + message;
 }
 
 //+------------------------------------------------------------------+
 //| Ghi log vào file                                                 |
 //+------------------------------------------------------------------+
-void CLogger::WriteToFile(string message) {
+void CLogger::WriteToFile(const string message) const {
    // Nếu handle file hợp lệ thì ghi vào file
    if(m_log_file_handle != INVALID_HANDLE) {
       // Thêm ký tự xuống dòng và ghi vào file
@@ -314,7 +349,7 @@ void CLogger::WriteToFile(string message) {
 //+------------------------------------------------------------------+
 //| Gửi thông báo qua Telegram                                       |
 //+------------------------------------------------------------------+
-bool CLogger::SendTelegramMessage(string message, bool important = false) {
+bool CLogger::SendTelegramMessage(const string message, bool important = false) const {
    // Chỉ gửi nếu Telegram được kích hoạt
    if(!m_enable_telegram || m_telegram_token == "" || m_telegram_chat_id == "")
       return false;
@@ -376,7 +411,7 @@ void CLogger::DisableTelegram() {
 //+------------------------------------------------------------------+
 //| Thiết lập cấp độ log                                             |
 //+------------------------------------------------------------------+
-void CLogger::SetLogLevel(ENUM_LOG_LEVEL log_level) {
+void CLogger::SetLogLevel(const ENUM_LOG_LEVEL log_level) {
    m_log_level = log_level;
    if(m_is_initialized) {
       LogInfo("Đã thay đổi cấp độ log thành: " + EnumToString(log_level));
@@ -386,12 +421,99 @@ void CLogger::SetLogLevel(ENUM_LOG_LEVEL log_level) {
 //+------------------------------------------------------------------+
 //| Thiết lập đầu ra log                                             |
 //+------------------------------------------------------------------+
-void CLogger::SetLogOutput(ENUM_LOG_OUTPUT log_output) {
+void CLogger::SetLogOutput(const ENUM_LOG_OUTPUT log_output) {
    m_log_output = log_output;
    if(m_is_initialized) {
       LogInfo("Đã thay đổi đầu ra log thành: " + EnumToString(log_output));
    }
 }
 
+//+------------------------------------------------------------------+
+//| Cấu trúc để lưu trữ số liệu thống kê tóm tắt từ log              |
+//+------------------------------------------------------------------+
+struct LogSummaryStats {
+   int total_errors;
+   int total_warnings;
+   // Thêm các số liệu khác nếu cần, ví dụ: số lượng giao dịch, P/L...
+
+   void Initialize() {
+      total_errors = 0;
+      total_warnings = 0;
+   }
+};
+
+// Prototype for the helper function to be defined later
+bool ParseLogFileForSummary(const string file_path, LogSummaryStats &stats, CLogger* logger_instance);
+
+//+------------------------------------------------------------------+
+//| Tạo và gửi báo cáo tóm tắt hàng ngày qua Telegram               |
+//+------------------------------------------------------------------+
+void CLogger::GenerateDailySummary() {
+   if(!m_is_initialized || !m_enable_telegram) {
+      // LogInfo("Không thể tạo báo cáo tóm tắt: Logger chưa được khởi tạo hoặc Telegram bị vô hiệu hóa.", "Logger,Summary");
+      return;
+   }
+
+   string log_path = GetLogFileName();
+   LogSummaryStats stats;
+
+   // The method is no longer const, so 'this' is a non-const pointer.
+   CLogger* non_const_this = this;
+
+   if(ParseLogFileForSummary(log_path, stats, non_const_this)) {
+      // Tạo thông điệp tóm tắt
+      string summary_message = "\n--- BÁO CÁO HÀNG NGÀY ---";
+      summary_message += "\nEA: " + m_prefix;
+      summary_message += "\nSymbol: " + m_symbol;
+      summary_message += "\nNgày: " + TimeToString(TimeCurrent(), TIME_DATE);
+      summary_message += "\n--------------------------";
+      summary_message += "\n- Tổng số Lỗi: " + (string)stats.total_errors;
+      summary_message += "\n- Tổng số Cảnh báo: " + (string)stats.total_warnings;
+      summary_message += "\n--------------------------";
+      summary_message += "\nChúc một ngày giao dịch tốt lành!";
+
+      // Gửi qua Telegram. Báo cáo luôn được coi là quan trọng.
+      SendTelegramMessage(summary_message, true);
+      LogInfo("Đã gửi báo cáo tóm tắt hàng ngày qua Telegram.", "Logger,Summary");
+   } else {
+      LogError("Không thể tạo báo cáo tóm tắt hàng ngày do không đọc được file log.", "Logger,Summary,Critical");
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Phân tích file log của ngày để thu thập số liệu thống kê         |
+//+------------------------------------------------------------------+
+bool ParseLogFileForSummary(const string file_path, LogSummaryStats &stats, CLogger* logger_instance) {
+   stats.Initialize();
+   
+   // Reset lỗi cuối cùng
+   ResetLastError();
+   
+   // Mở file để đọc
+   int file_handle = FileOpen(file_path, FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_COMMON);
+   if(file_handle == INVALID_HANDLE) {
+      // Không thể LogError ở đây vì sẽ tạo vòng lặp vô hạn nếu file log có vấn đề
+      PrintFormat("ParseLogFileForSummary - Không thể mở file log '%s'. Lỗi: %d", file_path, GetLastError());
+      return false;
+   }
+
+   // Đọc từng dòng
+   while(!FileIsEnding(file_handle)) {
+      string line = FileReadString(file_handle);
+      
+      // Đếm lỗi và cảnh báo
+      if(StringFind(line, "[ERROR]") != -1) {
+         stats.total_errors++;
+      }
+      if(StringFind(line, "[WARNING]") != -1) {
+         stats.total_warnings++;
+      }
+      // TODO: Thêm logic để phân tích các thông tin khác như giao dịch, P/L từ các thẻ (tags)
+   }
+
+   FileClose(file_handle);
+   return true;
+}
+
 } // end namespace ApexPullback
-#endif // LOGGER_MQH
+#endif // LOGGER_MQH_

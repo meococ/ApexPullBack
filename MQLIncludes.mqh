@@ -3,8 +3,8 @@
 //|                          Copyright 2023, Apex Pullback EA Team |
 //|                                https://www.apexpullbackea.com |
 //+------------------------------------------------------------------+
-#ifndef _MQL_INCLUDES_MQH_
-#define _MQL_INCLUDES_MQH_
+#ifndef MQLINCLUDES_MQH
+#define MQLINCLUDES_MQH
 
 // Định nghĩa các macro để tránh include lặp thư viện chuẩn MQL5
 #ifndef _TRADE_MQH_INCLUDED_
@@ -80,4 +80,4 @@
 #define OBJPROP_POINT2  305
 #endif
 
-#endif // _MQL_INCLUDES_MQH_
+#endif // MQLINCLUDES_MQH

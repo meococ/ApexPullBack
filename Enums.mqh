@@ -1,10 +1,15 @@
 //+------------------------------------------------------------------+
 //|                      Enums.mqh - APEX Pullback EA v14.0          |
-//|                           Copyright 2023-2024, APEX Forex        |
-//|                             https://www.apexpullback.com         |
 //+------------------------------------------------------------------+
-#ifndef ENUMS_MQH
-#define ENUMS_MQH
+#ifndef ENUMS_MQH_
+#define ENUMS_MQH_
+
+// === CORE INCLUDES (KHÔNG BẮT BUỘC CHO FILE NÀY VÌ CHỈ CHỨA ENUMS) ===
+// #include "GlobalParameters.mqh" // Global parameters and constants (if enum needs to reference a constant)
+// #include "CommonStructs.mqh"    // TẤT CẢ các struct (nếu enum cần tham chiếu struct)
+
+// BẮT ĐẦU NAMESPACE
+namespace ApexPullback {
 
 //+------------------------------------------------------------------+
 //| Định nghĩa các loại cluster cho chiến lược                       |
@@ -25,19 +30,21 @@ enum ENUM_CLUSTER_TYPE {
     CLUSTER_CUSTOM               // Chiến lược tùy chỉnh
 };
 
-// Hằng số cho việc tương thích ngược
-#define CLUSTER_TYPE_TREND CLUSTER_1_TREND_FOLLOWING
-#define CLUSTER_TREND_FOLLOWING CLUSTER_1_TREND_FOLLOWING
-#define CLUSTER_COUNTER_TREND CLUSTER_2_COUNTERTREND
-#define CLUSTER_TYPE_COUNTER CLUSTER_2_COUNTERTREND
-#define CLUSTER_TYPE_BREAKOUT CLUSTER_3_BREAKOUT
-#define CLUSTER_TYPE_RANGE CLUSTER_4_RANGE_TRADING
-#define CLUSTER_TYPE_VOLATILITY CLUSTER_5_VOLATILITY
-#define CLUSTER_3_SCALING CLUSTER_CUSTOM    // Scaling strategy mapped to custom
 
-// Log constants are now defined in Logger.mqh as enums
-// Removed conflicting #define statements to avoid identifier conflicts
 
+
+//+------------------------------------------------------------------+
+//| Cấp độ ghi log (Log Level)                                       |
+//+------------------------------------------------------------------+
+/// @brief Mức độ chi tiết của thông tin log
+enum ENUM_LOG_LEVEL {
+    LOG_NONE = 0,       // Không ghi log
+    LOG_ERROR = 1,      // Chỉ ghi lỗi nghiêm trọng
+    LOG_WARNING = 2,    // Ghi lỗi và cảnh báo
+    LOG_INFO = 3,       // Ghi lỗi, cảnh báo và thông tin hoạt động (mặc định)
+    LOG_DEBUG = 4,      // Ghi tất cả, bao gồm thông tin gỡ lỗi chi tiết
+    LOG_VERBOSE = 5     // Ghi tất cả, bao gồm cả thông tin rất chi tiết (thường dùng cho phát triển)
+};
 
 //===== TRẠNG THÁI EA =====
 /// @brief Trạng thái hoạt động của EA
@@ -49,8 +56,21 @@ enum ENUM_EA_STATE {
     STATE_STOPPED       // EA đã dừng hoạt động
 };
 
-// Legacy compatibility
-#define STATE_ERROR STATE_STOPPED
+
+
+//===== LOẠI SWING POINT =====
+/// @brief Định nghĩa các loại swing point
+enum ENUM_SWING_TYPE {
+    SWING_TYPE_UNDEFINED = 0,     // Chưa xác định
+    SWING_TYPE_HIGH = 1,          // Swing High
+    SWING_TYPE_LOW = 2,           // Swing Low
+    SWING_TYPE_DOUBLE_TOP = 3,    // Double Top
+    SWING_TYPE_DOUBLE_BOTTOM = 4, // Double Bottom
+    SWING_TYPE_HIGHER_HIGH = 5,   // Higher High
+    SWING_TYPE_LOWER_LOW = 6,     // Lower Low
+    SWING_TYPE_HIGHER_LOW = 7,    // Higher Low
+    SWING_TYPE_LOWER_HIGH = 8     // Lower High
+};
 
 //===== XU HƯỚNG THỊ TRƯỜNG =====
 /// @brief Định nghĩa chi tiết các loại xu hướng thị trường
@@ -64,18 +84,13 @@ enum ENUM_MARKET_TREND {
     TREND_DOWN_PULLBACK   // Pullback trong xu hướng giảm (cơ hội SELL)
 };
 
-/// @brief Loại xu hướng đơn giản hóa
-enum ENUM_TREND_TYPE {
-    TREND_NONE = 0,            // Không có xu hướng
-    TREND_UP = TREND_UP_STRONG,        // Chỉ giao dịch theo xu hướng tăng
-    TREND_DOWN = TREND_DOWN_STRONG,    // Chỉ giao dịch theo xu hướng giảm
-    TREND_BIDIRECTIONAL      // Giao dịch cả 2 chiều
-};
+
 
 //===== CHẾ ĐỘ THỊ TRƯỜNG (REGIME) =====
 /// @brief Định nghĩa các chế độ thị trường chi tiết
 enum ENUM_MARKET_REGIME {
-    REGIME_UNKNOWN = 0,           // Chế độ chưa xác định
+    MARKET_REGIME_UNDEFINED = 0,  // Chế độ chưa xác định
+    REGIME_UNKNOWN = 0,           // Chế độ chưa xác định (alias)
     REGIME_TRENDING = 1,          // Chế độ xu hướng tổng quát
     REGIME_TRENDING_BULL = 2,     // Xu hướng tăng mạnh
     REGIME_TRENDING_BEAR = 3,     // Xu hướng giảm mạnh
@@ -89,16 +104,7 @@ enum ENUM_MARKET_REGIME {
     REGIME_COUNT // Tổng số lượng regime
 };
 
-// Định nghĩa các constant cho chế độ thị trường chi tiết để tương thích ngược
-// Định nghĩa các constant cho chế độ thị trường chi tiết để tương thích ngược
-#define REGIME_DETAILED_UNKNOWN           REGIME_UNKNOWN
-#define REGIME_DETAILED_TRENDING          REGIME_TRENDING
-#define REGIME_DETAILED_TRENDING_BULL     REGIME_TRENDING_BULL
-#define REGIME_DETAILED_TRENDING_BEAR     REGIME_TRENDING_BEAR
-#define REGIME_DETAILED_RANGING           REGIME_RANGING
-#define REGIME_DETAILED_RANGING_STABLE    REGIME_RANGING_STABLE
-#define REGIME_DETAILED_RANGING_VOLATILE  REGIME_RANGING_VOLATILE
-#define REGIME_DETAILED_VOLATILE          REGIME_VOLATILE
+
 
 //===== LOẠI DRAWDOWN =====
 /// @brief Định nghĩa các loại drawdown
@@ -106,23 +112,99 @@ enum ENUM_DRAWDOWN_TYPE {
     DRAWDOWN_BALANCE_BASED,   // Drawdown dựa trên Balance
     DRAWDOWN_EQUITY_BASED     // Drawdown dựa trên Equity (trailing)
 };
-#define REGIME_DETAILED_VOLATILE_EXPANSION REGIME_VOLATILE_EXPANSION
-#define REGIME_DETAILED_VOLATILE_CONTRACTION REGIME_VOLATILE_CONTRACTION
-#define REGIME_DETAILED_LOW_VOLATILITY    REGIME_RANGING_STABLE  // Map to stable ranging
 
-// ENUM_REGIME_SIMPLIFIED đã được hợp nhất vào ENUM_MARKET_REGIME để tránh trùng lập
+//===== TRẠNG THÁI SỨC KHỎE BROKER =====
+/// @brief Định nghĩa các mức độ sức khỏe của broker
+enum ENUM_HEALTH_STATUS {
+    HEALTH_EXCELLENT = 0,     // Sức khỏe xuất sắc (90-100 điểm)
+    HEALTH_GOOD = 1,          // Sức khỏe tốt (75-89 điểm)
+    HEALTH_WARNING = 2,       // Cảnh báo (60-74 điểm)
+    HEALTH_CRITICAL = 3       // Nguy hiểm (dưới 60 điểm)
+};
+
 
 /// @brief Preset cấu hình cho từng loại thị trường
 enum ENUM_MARKET_PRESET {
+    // === PRESET TỔNG QUÁT ===
     PRESET_AUTO,        // Tự động nhận diện và điều chỉnh
     PRESET_CONSERVATIVE, // Cấu hình bảo thủ (ít tín hiệu, chất lượng cao)
     PRESET_BALANCED,    // Cấu hình cân bằng
     PRESET_AGGRESSIVE,  // Cấu hình tích cực (nhiều tín hiệu hơn)
+    
+    // === PRESET THEO LOẠI TÀI SẢN ===
     PRESET_FOREX,       // Cấu hình cho Forex chính
     PRESET_EXOTICS,     // Cấu hình cho Forex ngoại lai
     PRESET_INDICES,     // Cấu hình cho chỉ số
     PRESET_METALS,      // Cấu hình cho kim loại (gold, silver)
     PRESET_CRYPTO,      // Cấu hình cho tiền điện tử
+    
+    // === PRESET CỤ THỂ CHO CÁC CẶP TIỀN CHÍNH ===
+    // EURUSD Presets
+    PRESET_EURUSD_H1_CONSERVATIVE,    // EURUSD H1 - Bảo thủ
+    PRESET_EURUSD_H1_STANDARD,        // EURUSD H1 - Chuẩn
+    PRESET_EURUSD_H1_AGGRESSIVE,      // EURUSD H1 - Tích cực
+    PRESET_EURUSD_H4_CONSERVATIVE,    // EURUSD H4 - Bảo thủ
+    PRESET_EURUSD_H4_STANDARD,        // EURUSD H4 - Chuẩn
+    PRESET_EURUSD_H4_AGGRESSIVE,      // EURUSD H4 - Tích cực
+    
+    // GBPUSD Presets
+    PRESET_GBPUSD_H1_CONSERVATIVE,    // GBPUSD H1 - Bảo thủ
+    PRESET_GBPUSD_H1_STANDARD,        // GBPUSD H1 - Chuẩn
+    PRESET_GBPUSD_H1_AGGRESSIVE,      // GBPUSD H1 - Tích cực
+    PRESET_GBPUSD_H4_CONSERVATIVE,    // GBPUSD H4 - Bảo thủ
+    PRESET_GBPUSD_H4_STANDARD,        // GBPUSD H4 - Chuẩn
+    PRESET_GBPUSD_H4_AGGRESSIVE,      // GBPUSD H4 - Tích cực
+    
+    // USDJPY Presets
+    PRESET_USDJPY_H1_CONSERVATIVE,    // USDJPY H1 - Bảo thủ
+    PRESET_USDJPY_H1_STANDARD,        // USDJPY H1 - Chuẩn
+    PRESET_USDJPY_H1_AGGRESSIVE,      // USDJPY H1 - Tích cực
+    PRESET_USDJPY_H4_CONSERVATIVE,    // USDJPY H4 - Bảo thủ
+    PRESET_USDJPY_H4_STANDARD,        // USDJPY H4 - Chuẩn
+    PRESET_USDJPY_H4_AGGRESSIVE,      // USDJPY H4 - Tích cực
+    
+    // XAUUSD (Gold) Presets
+    PRESET_XAUUSD_M15_CONSERVATIVE,   // XAUUSD M15 - Bảo thủ
+    PRESET_XAUUSD_M15_STANDARD,       // XAUUSD M15 - Chuẩn
+    PRESET_XAUUSD_M15_AGGRESSIVE,     // XAUUSD M15 - Tích cực
+    PRESET_XAUUSD_H1_CONSERVATIVE,    // XAUUSD H1 - Bảo thủ
+    PRESET_XAUUSD_H1_STANDARD,        // XAUUSD H1 - Chuẩn
+    PRESET_XAUUSD_H1_AGGRESSIVE,      // XAUUSD H1 - Tích cực
+    
+    // USDCAD Presets
+    PRESET_USDCAD_H1_CONSERVATIVE,    // USDCAD H1 - Bảo thủ
+    PRESET_USDCAD_H1_STANDARD,        // USDCAD H1 - Chuẩn
+    PRESET_USDCAD_H1_AGGRESSIVE,      // USDCAD H1 - Tích cực
+    
+    // AUDUSD Presets
+    PRESET_AUDUSD_H1_CONSERVATIVE,    // AUDUSD H1 - Bảo thủ
+    PRESET_AUDUSD_H1_STANDARD,        // AUDUSD H1 - Chuẩn
+    PRESET_AUDUSD_H1_AGGRESSIVE,      // AUDUSD H1 - Tích cực
+    
+    // NZDUSD Presets
+    PRESET_NZDUSD_H1_CONSERVATIVE,    // NZDUSD H1 - Bảo thủ
+    PRESET_NZDUSD_H1_STANDARD,        // NZDUSD H1 - Chuẩn
+    PRESET_NZDUSD_H1_AGGRESSIVE,      // NZDUSD H1 - Tích cực
+    
+    // USDCHF Presets
+    PRESET_USDCHF_H1_CONSERVATIVE,    // USDCHF H1 - Bảo thủ
+    PRESET_USDCHF_H1_STANDARD,        // USDCHF H1 - Chuẩn
+    PRESET_USDCHF_H1_AGGRESSIVE,      // USDCHF H1 - Tích cực
+    
+    // === PRESET CHO CÁC CẶP CROSS ===
+    PRESET_EURJPY_H1_STANDARD,        // EURJPY H1 - Chuẩn
+    PRESET_GBPJPY_H1_STANDARD,        // GBPJPY H1 - Chuẩn
+    PRESET_EURGBP_H1_STANDARD,        // EURGBP H1 - Chuẩn
+    
+    // === PRESET CHO CHỈ SỐ ===
+    PRESET_US30_H1_STANDARD,          // US30 (Dow Jones) H1
+    PRESET_SPX500_H1_STANDARD,        // SPX500 (S&P 500) H1
+    PRESET_NAS100_H1_STANDARD,        // NAS100 (Nasdaq) H1
+    PRESET_GER40_H1_STANDARD,         // GER40 (DAX) H1
+    
+    // === PRESET CHO KIM LOẠI KHÁC ===
+    PRESET_XAGUSD_H1_STANDARD,        // XAGUSD (Silver) H1
+    
     PRESET_CUSTOM       // Cấu hình tùy chỉnh
 };
 
@@ -140,11 +222,7 @@ enum ENUM_SESSION {
     SESSION_CLOSING            // Phiên đóng cửa (ít thanh khoản)
 };
 
-// ENUM_SESSION đã được sử dụng trực tiếp với các giá trị SESSION_*
-// Không cần alias vì enum đã được cập nhật
 
-// Define SESSION_FILTER_ALL constant for session filter
-#define SESSION_FILTER_ALL FILTER_ALL_SESSIONS
 
 /// @brief Bộ lọc phiên giao dịch
 enum ENUM_SESSION_FILTER {
@@ -182,8 +260,7 @@ enum ENUM_ENTRY_SCENARIO {
     SCENARIO_SCALING    // Nhồi lệnh (thêm một lệnh vào vị thế có sẵn)
 };
 
-// Legacy compatibility
-#define SCENARIO_UNKNOWN ((ENUM_ENTRY_SCENARIO)SCENARIO_NONE)
+
 
 //+------------------------------------------------------------------+
 //| Định danh (ID) cho các chiến lược giao dịch                     |
@@ -204,15 +281,14 @@ enum ENUM_STRATEGY_ID {
 
 /// @brief Chế độ vào lệnh
 enum ENUM_ENTRY_MODE {
-    MODE_MARKET,      // Lệnh thị trường (vào ngay lập tức)
-    MODE_LIMIT,       // Lệnh giới hạn (đợi pullback thêm)
-    MODE_SMART        // Thông minh (dựa trên chất lượng tín hiệu)
+    MODE_MARKET,         // Lệnh thị trường (vào ngay lập tức)
+    MODE_LIMIT,          // Lệnh giới hạn (đợi pullback thêm)
+    MODE_SMART,          // Thông minh (dựa trên chất lượng tín hiệu)
+    ENTRY_MODE_PULLBACK, // Chế độ vào lệnh pullback
+    ENTRY_DEFAULT        // Chế độ mặc định
 };
 
-// Legacy compatibility for session types
-#define SESSION_TYPE_ASIAN SESSION_ASIAN
-#define SESSION_NONE SESSION_UNKNOWN
-#define SESSION_OVERLAP SESSION_SYDNEY
+
 
 //===== QUẢN LÝ RỦI RO =====
 /// @brief Trạng thái rủi ro hệ thống
@@ -248,17 +324,12 @@ enum ENUM_TRAILING_MODE {
     TRAILING_SWING_POINTS, // Trailing dựa trên swing points
     TRAILING_EMA,          // Sử dụng đường EMA
     TRAILING_PSAR,         // Sử dụng Parabolic SAR
-    TRAILING_ADAPTIVE      // Thích ứng theo Regime
+    TRAILING_ADAPTIVE,     // Thích ứng theo Regime
+    TRAILING_MODE_ATR,     // Trailing dựa trên ATR (alias)
+    TRAILING_DEFAULT       // Chế độ trailing mặc định
 };
 
-// Legacy compatibility
-#define TRAILING_FIXED TRAILING_NONE
-#define TRAILING_PERCENT TRAILING_NONE
-#define TRAILING_VOLATILITY TRAILING_ATR
-#define TRAILING_SWING_BASED TRAILING_SWING_POINTS
-#define TRAILING_STRUCTURAL TRAILING_ADAPTIVE
-#define TRAILING_HYBRID TRAILING_ADAPTIVE
-#define TRAILING_FIBONACCI TRAILING_NONE
+
 
 //===== MULTI-TIMEFRAME =====
 /// @brief Sự đồng thuận của đa khung thời gian
@@ -270,6 +341,15 @@ enum ENUM_MTF_ALIGNMENT {
 };
 
 //===== BỘ LỌC TIN TỨC =====
+
+/// @brief Chế độ phản ứng với tin tức
+enum ENUM_NEWS_FILTER_MODE {
+    NEWS_FILTER_OFF,                    // Tắt bộ lọc tin tức
+    NEWS_FILTER_PAUSE_EA,               // Tạm dừng mở lệnh mới trong thời gian tin tức
+    NEWS_FILTER_CLOSE_TRADES,      // Đóng tất cả các lệnh đang mở trước khi tin ra
+    NEWS_FILTER_REDUCE_RISK        // Giảm rủi ro cho các lệnh mới (nếu có)
+};
+
 /// @brief Mức độ lọc tin tức
 enum ENUM_NEWS_FILTER {
     NEWS_NONE,   // Không lọc tin tức
@@ -280,27 +360,50 @@ enum ENUM_NEWS_FILTER {
     NEWS_CUSTOM  // Lọc tin tức tùy chỉnh theo mức độ quan trọng
 };
 
+/// @brief Mức độ quan trọng của tin tức
+enum ENUM_NEWS_FILTER_LEVEL {
+    NEWS_FILTER_LOW,           // Tin tức tác động thấp
+    NEWS_FILTER_MEDIUM,        // Tin tức tác động trung bình
+    NEWS_FILTER_HIGH,          // Tin tức tác động cao
+    NEWS_FILTER_LEVEL_CRITICAL // Tin tức tác động nghiêm trọng
+};
+
+
+
+//===== ENTRY MODE (already defined as ENUM_ENTRY_MODE) =====
+// enum ENUM_ENTRY_MODE is already defined with MODE_MARKET, MODE_LIMIT, MODE_SMART
+// We need to ensure ENTRY_MODE_PULLBACK is part of it or aliased.
+// For now, let's assume ENTRY_MODE_PULLBACK is a specific type of smart entry or needs to be added.
+// Adding it here if it's a distinct mode:
+/*
+enum ENUM_ENTRY_MODE {
+    MODE_MARKET,      // Lệnh thị trường (vào ngay lập tức)
+    MODE_LIMIT,       // Lệnh giới hạn (đợi pullback thêm)
+    MODE_SMART,       // Thông minh (dựa trên chất lượng tín hiệu)
+    ENTRY_MODE_PULLBACK // Specific for pullback entries if different from general smart mode
+};
+*/
+// Re-checking ENUM_ENTRY_MODE, it has MODE_MARKET, MODE_LIMIT, MODE_SMART.
+// ENTRY_MODE_PULLBACK seems to be a conceptual mode rather than a direct enum value for execution type.
+// It's likely used in logic to decide which conditions to check for entry.
+// If it's meant to be a distinct execution mode, it should be added to ENUM_ENTRY_MODE.
+// For now, I will assume it's a logical constant used elsewhere or should be mapped to an existing mode.
+
+//===== TRAILING STOP (already defined as ENUM_TRAILING_MODE) =====
+// ENUM_TRAILING_MODE already includes TRAILING_ATR.
+
+
+
+
+
 //===== THÔNG BÁO VÀ CẢNH BÁO =====
 // Cấp độ cảnh báo
 enum ENUM_ALERT_LEVEL {
-    ALERT_LEVEL_NORMAL,    // Thông báo bình thường (auto-assigns 0)
-    ALERT_LEVEL_INFO,      // Thông tin (auto-assigns 1)
-    ALERT_LEVEL_WARNING,   // Cảnh báo (auto-assigns 2)
-    ALERT_LEVEL_CRITICAL   // Cảnh báo quan trọng (auto-assigns 3)
+    EAL_NORMAL,    // Renamed from ALERT_LEVEL_NORMAL to avoid macro conflict
+    EAL_INFO,      // Renamed from ALERT_LEVEL_INFO for consistency
+    EAL_WARNING,   // Renamed from ALERT_LEVEL_WARNING to avoid macro conflict
+    EAL_CRITICAL   // Renamed from ALERT_LEVEL_CRITICAL to avoid macro conflict
 };
-/// @brief Cấp độ log
-enum ENUM_LOG_LEVEL {
-    LOG_CRITICAL, // Lỗi nghiêm trọng, EA không thể tiếp tục (auto-assigns 0)
-    LOG_ERROR,    // Lỗi nhưng EA vẫn có thể tiếp tục (auto-assigns 1)
-    LOG_WARNING,  // Cảnh báo, có thể ảnh hưởng đến hiệu suất (auto-assigns 2)
-    LOG_INFO,     // Thông tin quan trọng (auto-assigns 3)
-    LOG_DEBUG,    // Thông tin gỡ lỗi (chỉ khi debug) (auto-assigns 4)
-    LOG_VERBOSE   // Thông tin chi tiết (dành cho nhà phát triển) (auto-assigns 5)
-};
-
-// Log level constants are now defined as enums in Logger.mqh
-// Removed conflicting #define statements to prevent identifier conflicts
-
 
 //===== HIỆU SUẤT EA =====
 /// @brief Trạng thái hiệu suất
@@ -338,6 +441,7 @@ enum ENUM_PATTERN_TYPE {
     SCENARIO_STRONG_PULLBACK,      // Pullback mạnh
     SCENARIO_MOMENTUM_SHIFT,       // Chuyển động lượng
     SCENARIO_HARMONIC_PATTERN,     // Mẫu hình harmonic (Gartley, Butterfly, Crab)
+    PATTERN_MEAN_REVERSION,        // Mẫu hình Mean Reversion cho thị trường đi ngang
     SCENARIO_CUSTOM                // Mẫu hình tùy chỉnh
 };
 
@@ -390,7 +494,9 @@ enum ENUM_WEEKDAYS {
 enum ENUM_TREND_DIRECTION {
     TREND_BOTH,        // Cả hai chiều (buy và sell)
     TREND_BUY_ONLY,    // Chỉ giao dịch mua (buy only)
-    TREND_SELL_ONLY    // Chỉ giao dịch bán (sell only)
+    TREND_SELL_ONLY,   // Chỉ giao dịch bán (sell only)
+    TREND_BULLISH,     // Xu hướng tăng
+    TREND_BEARISH      // Xu hướng giảm
 };
 
 /// @brief Độ thanh khoản của tài sản
@@ -417,12 +523,19 @@ enum ENUM_OPTIMIZATION_TYPE {
 //===== THIẾT LẬP HỆ THỐNG =====
 /// @brief Chủ đề hiển thị dashboard
 enum ENUM_DASHBOARD_THEME {
-    DASHBOARD_DARK,        // Chủ đề tối
-    DASHBOARD_LIGHT,       // Chủ đề sáng
-    DASHBOARD_BLUE,        // Chủ đề xanh da trời
-    DASHBOARD_GREEN,       // Chủ đề xanh lá
-    DASHBOARD_CUSTOM       // Chủ đề tùy chỉnh
+    THEME_DARK,            // Chủ đề tối
+    THEME_LIGHT,           // Chủ đề sáng
+    THEME_BLUE,            // Chủ đề xanh da trời
+    THEME_GREEN,           // Chủ đề xanh lá
+    THEME_CUSTOM           // Chủ đề tùy chỉnh
 };
+
+// Compatibility aliases
+#define DASHBOARD_DARK THEME_DARK
+#define DASHBOARD_LIGHT THEME_LIGHT
+#define DASHBOARD_BLUE THEME_BLUE
+#define DASHBOARD_GREEN THEME_GREEN
+#define DASHBOARD_CUSTOM THEME_CUSTOM
 
 /// @brief Chế độ hiển thị dashboard
 enum ENUM_DASHBOARD_MODE {
@@ -479,10 +592,15 @@ enum ENUM_ASSET_VOLATILITY {
 
 // Enum cho chế độ Take Profit (Ưu tiên #2)
 enum ENUM_TP_MODE {
-    TP_MODE_RR_FIXED,    // Chốt lời theo tỷ lệ R:R cố định
+    TP_MODE_RR,          // Chốt lời theo tỷ lệ R:R cố định
+    TP_MODE_RR_FIXED,    // Chốt lời theo tỷ lệ R:R cố định (alias)
     TP_MODE_STRUCTURE,   // Chốt lời theo cấu trúc (đỉnh/đáy cũ)
-    TP_MODE_VOLATILITY   // Chốt lời theo biến động (ADX)
+    TP_MODE_VOLATILITY,  // Chốt lời theo biến động (ADX)
+    TP_DEFAULT           // Chế độ mặc định
 };
+
+// Compatibility aliases
+#define TP_MODE_DEFAULT TP_DEFAULT
 
 //===== CHIẾN LƯỢC GIAO DỊCH =====
 /// @brief Các chiến lược giao dịch được hỗ trợ
@@ -493,7 +611,9 @@ enum ENUM_TRADING_STRATEGY {
     STRATEGY_MOMENTUM_BREAKOUT,   // Breakout theo momentum cho crypto
     STRATEGY_MEAN_REVERSION,      // Giao dịch đảo chiều theo mean reversion
     STRATEGY_RANGE_TRADING,       // Giao dịch trong biên độ sideway
-    STRATEGY_CUSTOM               // Chiến lược tùy chỉnh
+    STRATEGY_CUSTOM,              // Chiến lược tùy chỉnh
+    // --- Helper for array sizing ---
+    ENUM_TRADING_STRATEGY_COUNT   // Total number of defined strategies (excluding UNDEFINED)
 };
 
 //===== CHẾ ĐỘ ĐIỀU CHỈNH THAM SỐ =====
@@ -510,9 +630,14 @@ enum ENUM_PARAMETER_ADJUSTMENT {
 //===== CHẾ ĐỘ THÍCH NGHI (ADAPTIVE MODE) =====
 /// @brief Xác định cách EA sử dụng các tham số từ Inputs và AssetProfiler
 enum ENUM_ADAPTIVE_MODE {
-    MODE_MANUAL,    // EA 100% tuân theo tham số trong Inputs
-    MODE_LOG_ONLY,  // EA chạy theo Inputs, AssetProfiler ghi log đề xuất
-    MODE_HYBRID     // EA kết hợp tham số Inputs và đề xuất từ AssetProfiler
+    ADAPTIVE_MODE_OFF = 0,    // Tắt chế độ thích nghi
+    MODE_MANUAL,              // EA 100% tuân theo tham số trong Inputs
+    MODE_LOG_ONLY,            // EA chạy theo Inputs, AssetProfiler ghi log đề xuất
+    MODE_HYBRID               // EA kết hợp tham số Inputs và đề xuất từ AssetProfiler
 };
 
-#endif // ENUMS_MQH
+//===== CHỦ ĐỀ DASHBOARD =====
+// ENUM_DASHBOARD_THEME đã được khai báo ở dòng 573
+
+} // end namespace ApexPullback
+#endif // ENUMS_MQH_

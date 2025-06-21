@@ -4,16 +4,18 @@
 //|               Copyright 2023-2024, APEX Trading Systems           |
 //+------------------------------------------------------------------+
 
-#ifndef PORTFOLIO_MANAGER_MQH
-#define PORTFOLIO_MANAGER_MQH
+#ifndef PORTFOLIOMANAGER_MQH
+#define PORTFOLIOMANAGER_MQH
 
-#include "Logger.mqh"
-#include "CommonStructs.mqh" // Sẽ cần cho TradeProposal và các cấu trúc khác
-#include "NewsFilter.mqh"
-#include "Enums.mqh"
-#include "PositionManager.mqh" // Thêm PositionManager
-#include "RiskManager.mqh"     // Thêm RiskManager
-// Thêm các include cần thiết khác sau này
+#include "CommonStructs.mqh" // For TradeProposal and EAContext
+#include "Enums.mqh"           // For ENUM_PORTFOLIO_DECISION
+#include "Logger.mqh"          // For CLogger
+#include "NewsFilter.mqh"      // For CNewsFilter
+#include "PositionManager.mqh" // For CPositionManager
+#include "RiskManager.mqh"     // For CRiskManager
+// #include <Arrays/ArrayObj.mqh> // Already included in MQLIncludes.mqh
+
+
 
 namespace ApexPullback {
 
@@ -478,66 +480,45 @@ ENUM_PORTFOLIO_DECISION CPortfolioManager::DecideOnProposal(TradeProposal &propo
 //+------------------------------------------------------------------+
 //| WriteDecisionToGVs                                               |
 //+------------------------------------------------------------------+
-void CPortfolioManager::WriteDecisionToGVs(const TradeProposal &proposal, ENUM_PORTFOLIO_DECISION decision, double adjustedLotFactor = 1.0)
+void CPortfolioManager::WriteDecisionToGVs(const TradeProposal &proposal_const, ENUM_PORTFOLIO_DECISION decision_val, double adjustedLotFactor = 1.0) // Ghi quyết định vào Global Variables
 {
     if(m_Logger == NULL) {
         printf("CPortfolioManager Error: Logger is NULL in WriteDecisionToGVs.");
         return;
     }
 
-    string decisionGvName = proposal.GVDecisionName; // This should be pre-filled by LoadProposals
-    if(decisionGvName == "")
+    TradeProposal proposal_to_write = proposal_const; // Create a mutable copy
+    proposal_to_write.decision = decision_val;        // Set the decision in the mutable copy
+    // If 'adjustedLotFactor' needs to be part of the JSON, add a field to TradeProposal struct and set it here.
+    // proposal_to_write.adjustedLotFactor = adjustedLotFactor; // Example if field exists
+
+    if(proposal_to_write.GVDecisionName == "")
     {
-        // Fallback if GVDecisionName was not set (should not happen with new LoadProposals)
-        decisionGvName = m_EAContext.Input.PortfolioManagement.GVDecisionPrefix + 
-                         proposal.Symbol + "_" + 
-                         IntegerToString(proposal.MagicNumber) + 
-                         m_EAContext.Input.PortfolioManagement.GVDecisionSuffix;
-        m_Logger.LogWarningFormat("CPortfolioManager: proposal.GVDecisionName was empty for %s. Using fallback: %s", proposal.Symbol, decisionGvName);
+        m_Logger.LogErrorFormat("CPortfolioManager: Cannot write decision for proposal on %s, GVDecisionName is empty.", proposal_to_write.Symbol);
+        return;
     }
 
-    string decisionGvValue;
-    string decisionStr;
+    string decision_json_str = proposal_to_write.ToString(); // This now serializes the proposal (including decision) to JSON
 
-    switch(decision)
+    if(GlobalVariableSet(proposal_to_write.GVDecisionName, decision_json_str))
     {
-        case DECISION_APPROVED:
-            decisionStr = "APPROVE";
-            decisionGvValue = decisionStr + ";" + DoubleToString(adjustedLotFactor, 2); // e.g., APPROVE;1.0 or APPROVE;0.5
-            break;
-        case DECISION_REJECTED:
-            decisionStr = "REJECT";
-            decisionGvValue = decisionStr + ";0.0"; // Factor is irrelevant for reject
-            break;
-        // DECISION_ADJUST_LOT is now handled by passing adjustedLotFactor to an APPROVE decision.
-        // If DecideOnProposal returns DECISION_ADJUST_LOT, ProcessTradeProposals should set the factor and then call this with DECISION_APPROVED.
-        // For clarity, we can remove DECISION_ADJUST_LOT from this switch if it's always converted to APPROVE + factor before calling this.
-        // However, if a slave needs to explicitly see "ADJUST_LOT", then it should be kept.
-        // For now, assuming ProcessTradeProposals converts it.
-        case DECISION_POSTPONE: // Added for future use
-            decisionStr = "POSTPONE";
-            decisionGvValue = decisionStr + ";0.0";
-            break;
-        default:
-            decisionStr = "UNKNOWN";
-            decisionGvValue = decisionStr + ";0.0";
-            m_Logger.LogWarningFormat("CPortfolioManager: Unknown decision type (%d) for %s.", (int)decision, proposal.Symbol);
-            break;
-    }
-
-    // Set the GV with a timestamp to allow slaves to detect new decisions
-    string finalGvValue = decisionGvValue + ";" + TimeToString(TimeCurrent(), TIME_SECONDS);
-
-    if(GlobalVariableSet(decisionGvName, finalGvValue))
-    {
-        m_Logger.LogInfoFormat("CPortfolioManager: ==> Decision for %s (%s) written to GV '%s': %s",
-                               proposal.Symbol, EnumToString(proposal.OrderType), decisionGvName, finalGvValue);
+        m_Logger.LogInfoFormat("CPortfolioManager: JSON Decision '%s' for %s (Magic: %d) written to GV '%s'. AdjustedLotFactor: %.2f. JSON: %s", 
+                                EnumToString(decision_val), proposal_to_write.Symbol, proposal_to_write.MagicNumber, proposal_to_write.GVDecisionName, adjustedLotFactor, decision_json_str);
     }
     else
-    {
-        m_Logger.LogErrorFormat("CPortfolioManager: ==> FAILED to write decision for %s to GV '%s'. Error: %d", 
-                                proposal.Symbol, decisionGvName, GetLastError());
+    {                            
+        m_Logger.LogErrorFormat("CPortfolioManager: Failed to write JSON decision to GV '%s' for proposal on %s. Error: %d", proposal_to_write.GVDecisionName, proposal_to_write.Symbol, GetLastError());
     }
+
+    // The original proposal GV (proposal_to_write.GVProposalName) is deleted in LoadProposals after successful parsing.
+    // However, to be absolutely sure it's cleaned up after a decision is made, we can add a deletion here too.
+    // This also handles cases where a proposal might not be fully processed by LoadProposals but a decision is still made (less likely).
+    if(GlobalVariableCheck(proposal_to_write.GVProposalName)) {
+        GlobalVariableDel(proposal_to_write.GVProposalName);
+        if(m_Logger != NULL) m_Logger.LogDebugFormat("CPortfolioManager: Cleaned up proposal GV: %s after writing decision.", proposal_to_write.GVProposalName);
+    }
+    // If there's a specific need to clean up proposal_to_write.GVProposalName here, the logic would need careful review
+    // to ensure it doesn't conflict with LoadProposals.
 }
 
 //+------------------------------------------------------------------+
