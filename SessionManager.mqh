@@ -4,81 +4,80 @@
 //|                                       Copyright 2023-2024, APEX   |
 //+------------------------------------------------------------------+
 
-#pragma once
+#ifndef SESSIONMANAGER_MQH_
+#define SESSIONMANAGER_MQH_
 
-
+#include "CommonStructs.mqh" // Include for EAContext and enums
 
 namespace ApexPullback {
 
 // Định nghĩa các phiên giao dịch cho Filter đã được đưa vào Enums.mqh
 // Sử dụng các giá trị: FILTER_ALL_SESSIONS, FILTER_ASIAN_ONLY, v.v.
 
-// Forward declarations
-class CLogger;
-
 //+------------------------------------------------------------------+
 //| Class CSessionManager - Quản lý các phiên giao dịch              |
 //+------------------------------------------------------------------+
 class CSessionManager {
 private:
-   // Cờ bật/tắt lọc phiên
-   bool              m_FilterBySession;
-   
-   // Điều chỉnh múi giờ GMT
-   int               m_GmtOffset;
-   
-   // Lựa chọn phiên giao dịch
-   ENUM_SESSION_FILTER m_SessionFilter;
-   
-   // Cờ bật/tắt giao dịch tại các thời điểm mở cửa
-   bool              m_TradeLondonOpen;
-   bool              m_TradeNewYorkOpen;
-   
-   // Thời gian bắt đầu và kết thúc của các phiên (giờ GMT chuẩn)
-   int               m_AsianStart;        // Giờ bắt đầu phiên Á (thường là 0)
-   int               m_AsianEnd;          // Giờ kết thúc phiên Á (thường là 8)
-   int               m_LondonStart;       // Giờ bắt đầu phiên London (thường là 8)
-   int               m_LondonEnd;         // Giờ kết thúc phiên London (thường là 16)
-   int               m_NewYorkStart;      // Giờ bắt đầu phiên New York (thường là 13)
-   int               m_NewYorkEnd;        // Giờ kết thúc phiên New York (thường là 21)
-   int               m_OverlapStart;      // Giờ bắt đầu phiên giao nhau (thường là 13)
-   int               m_OverlapEnd;        // Giờ kết thúc phiên giao nhau (thường là 16)
-   
-   // Biến theo dõi phiên giao dịch hiện tại
-   ENUM_SESSION      m_CurrentSession;
-   
-   // Biến theo dõi thời gian mở cửa London/New York
-   datetime          m_LondonOpenTime;
-   datetime          m_NewYorkOpenTime;
-   
-   // Buffer để xác định London Open và New York Open (phút)
-   int               m_OpenWindowMinutes;
-   
-   // Bộ nhớ đệm ngày hiện tại để tối ưu tính toán
-   int               m_CurrentDay;
-   int               m_CurrentMonth;
-   int               m_CurrentYear;
-   
-   // Theo dõi nếu hôm nay là ngày cuối tuần
-   bool              m_IsWeekend;
-   
-   // Theo dõi DST (Daylight Saving Time - Giờ mùa hè)
-   bool              m_IsDST;
-   bool              m_AutoAdjustDST;
-   
-   // Flag logging chi tiết
-   bool              m_VerboseLogging;
+    EAContext*        m_context;           // Pointer đến EAContext
+
+    // Cờ bật/tắt lọc phiên
+    bool              m_FilterBySession;
+    
+    // Điều chỉnh múi giờ GMT
+    int               m_GmtOffset;
+    
+    // Lựa chọn phiên giao dịch
+    ENUM_SESSION_FILTER m_SessionFilter;
+    
+    // Cờ bật/tắt giao dịch tại các thời điểm mở cửa
+    bool              m_TradeLondonOpen;
+    bool              m_TradeNewYorkOpen;
+    
+    // Thời gian bắt đầu và kết thúc của các phiên (giờ GMT chuẩn)
+    int               m_AsianStart;        // Giờ bắt đầu phiên Á (thường là 0)
+    int               m_AsianEnd;          // Giờ kết thúc phiên Á (thường là 8)
+    int               m_LondonStart;       // Giờ bắt đầu phiên London (thường là 8)
+    int               m_LondonEnd;         // Giờ kết thúc phiên London (thường là 16)
+    int               m_NewYorkStart;      // Giờ bắt đầu phiên New York (thường là 13)
+    int               m_NewYorkEnd;        // Giờ kết thúc phiên New York (thường là 21)
+    int               m_OverlapStart;      // Giờ bắt đầu phiên giao nhau (thường là 13)
+    int               m_OverlapEnd;        // Giờ kết thúc phiên giao nhau (thường là 16)
+    
+    // Biến theo dõi phiên giao dịch hiện tại
+    ENUM_SESSION      m_CurrentSession;
+    
+    // Biến theo dõi thời gian mở cửa London/New York
+    datetime          m_LondonOpenTime;
+    datetime          m_NewYorkOpenTime;
+    
+    // Buffer để xác định London Open và New York Open (phút)
+    int               m_OpenWindowMinutes;
+    
+    // Bộ nhớ đệm ngày hiện tại để tối ưu tính toán
+    int               m_CurrentDay;
+    int               m_CurrentMonth;
+    int               m_CurrentYear;
+    
+    // Theo dõi nếu hôm nay là ngày cuối tuần
+    bool              m_IsWeekend;
+    
+    // Theo dõi DST (Daylight Saving Time - Giờ mùa hè)
+    bool              m_IsDST;
+    bool              m_AutoAdjustDST;
+    
+    // Flag logging chi tiết
+    bool              m_VerboseLogging;
 
 public:
-   // Constructor
-   CSessionManager();
-   
-   // Destructor
-   ~CSessionManager();
-   
-   // Phương thức khởi tạo
-   bool Initialize(bool filterBySession, int gmtOffset, int sessionFilter, 
-                 bool tradeLondonOpen, bool tradeNewYorkOpen, bool verboseLogging = false);
+    // Constructor
+    CSessionManager(EAContext* context);
+    
+    // Destructor
+    ~CSessionManager();
+    
+    // Phương thức khởi tạo
+    bool Initialize();
    
    // Cấu hình thời gian phiên
    void ConfigureSessionTimes(int asianStart, int asianEnd, int londonStart, int londonEnd, 
@@ -158,7 +157,7 @@ private:
 //+------------------------------------------------------------------+
 //| Constructor                                                       |
 //+------------------------------------------------------------------+
-CSessionManager::CSessionManager() {
+CSessionManager::CSessionManager(EAContext* context) : m_context(context) {
    // Khởi tạo giá trị mặc định
    m_FilterBySession = false;
    m_GmtOffset = 0;
@@ -212,17 +211,17 @@ CSessionManager::~CSessionManager() {
 //+------------------------------------------------------------------+
 //| Khởi tạo SessionManager                                          |
 //+------------------------------------------------------------------+
-bool CSessionManager::Initialize(bool filterBySession, int gmtOffset, 
-                             int sessionFilter, bool tradeLondonOpen, 
-                             bool tradeNewYorkOpen, bool verboseLogging = false) {
-   // Lưu các tham số
-   m_FilterBySession = filterBySession;
-   m_GmtOffset = gmtOffset;
-   m_SessionFilter = (ENUM_SESSION_FILTER)sessionFilter;
-   m_TradeLondonOpen = tradeLondonOpen;
-   m_TradeNewYorkOpen = tradeNewYorkOpen;
-   m_VerboseLogging = verboseLogging;
-   
+bool CSessionManager::Initialize() {
+    // Lấy các cài đặt từ context
+    m_FilterBySession = m_context->FilterBySession;
+    m_SessionFilter = m_context->SessionFilter;
+    m_TradeLondonOpen = m_context->TradeLondonOpen;
+    m_TradeNewYorkOpen = m_context->TradeNewYorkOpen;
+    m_GmtOffset = m_context->GmtOffset;
+    m_AutoAdjustDST = m_context->AutoAdjustDST;
+    m_OpenWindowMinutes = m_context->OpenWindowMinutes;
+    m_VerboseLogging = m_context->EnableSessionLogging;
+
    // Cập nhật thông tin ngày hiện tại
    UpdateCurrentDate();
    
@@ -496,6 +495,10 @@ bool CSessionManager::IsMarketOpen() {
    if (m_CurrentSession == SESSION_CLOSING) {
       return false;
    }
+   return true;
+}
+
+} // end namespace ApexPullback
    
    return true;
 }
@@ -680,12 +683,15 @@ bool CSessionManager::IsMarketOpeningTime(datetime time, int hour, int window) {
 //| Ghi log                                                           |
 //+------------------------------------------------------------------+
 void CSessionManager::LogMessage(string message, bool important = false) {
-   // Chỉ log nếu verbose hoặc important
-   if (m_VerboseLogging || important) {
-      Print("[SessionManager] ", message);
-   }
+    if (m_context.Logger != NULL) {
+        if (important) {
+            m_context.Logger->LogInfo(message);
+        } else if (m_VerboseLogging) {
+            m_context.Logger->LogDebug(message);
+        }
+    }
 }
 
 } // đóng namespace ApexPullback
 
-#endif // _SESSION_MANAGER_MQH_
+#endif // SESSIONMANAGER_MQH_

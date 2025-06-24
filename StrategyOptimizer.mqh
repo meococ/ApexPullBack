@@ -7,8 +7,6 @@
 #define STRATEGY_OPTIMIZER_MQH
 
 #include "CommonStructs.mqh"
-#include "Enums.mqh"
-#include "Logger.mqh"
 
 namespace ApexPullback {
 

@@ -11,10 +11,7 @@
 #include <Trade/Trade.mqh>       // Standard MQL5 Trade class
 
 //--- Core Project Includes
-#include "CommonStructs.mqh"      // Core structures, enums, and inputs
-#include "Enums.mqh"              // For ENUM_REGIME_TYPE, ENUM_TRAILING_MODE, ENUM_MARKET_REGIME, ENUM_SWING_POINT_TYPE etc.
-
-#include "Logger.mqh"             // For CLogger (assuming it's part of the project)
+#include "CommonStructs.mqh"      // Contains all necessary structs, enums, and forward declarations
 
 //+------------------------------------------------------------------+
 //| Namespace: ApexPullback                                          |
@@ -22,8 +19,7 @@
 //+------------------------------------------------------------------+
 namespace ApexPullback {
 
-// Forward declarations
-class CAssetProfileManager;  // Forward declaration cần thiết
+
 
 // Cấu trúc lưu trữ cấu hình phát hiện Swing - Cải tiến v14
 struct SwingDetectorConfig {
@@ -41,23 +37,26 @@ struct SwingDetectorConfig {
    double minSwingHeight;       // Chiều cao tối thiểu của swing
    bool highLowConfirmation;    // Xác nhận bằng High/Low
    
-   // Constructor với giá trị mặc định
-   SwingDetectorConfig() {
-      lookbackBars = 300;
-      requiredBars = 2;
-      confirmationBars = 2;
-      atrFactor = 0.75;
-      majorSwingMultiplier = 1.5;
-      criticalSwingMultiplier = 2.5;
-      swingFilterThreshold = 0.3;
-      useFractals = true;
-      useZigZag = false;
-      zigZagDepth = 12;
-      atrPeriod = 14;
-      minSwingHeight = 0.0;
-      highLowConfirmation = true;
-   }
+   // Constructor
+   SwingDetectorConfig();
 };
+
+// Constructor implementation
+SwingDetectorConfig::SwingDetectorConfig() {
+   lookbackBars = 300;
+   requiredBars = 2;
+   confirmationBars = 2;
+   atrFactor = 0.75;
+   majorSwingMultiplier = 1.5;
+   criticalSwingMultiplier = 2.5;
+   swingFilterThreshold = 0.3;
+   useFractals = true;
+   useZigZag = false;
+   zigZagDepth = 12;
+   atrPeriod = 14;
+   minSwingHeight = 0.0;
+   highLowConfirmation = true;
+}
 
 // Cấu trúc lưu trữ cấu hình trailing stop - Mới v14
 struct TrailingStopConfig {
@@ -72,20 +71,23 @@ struct TrailingStopConfig {
    double breakEvenAfterR;           // Chuyển BE sau R-multiple
    double breakEvenBuffer;           // Buffer cho breakeven
    
-   // Constructor với giá trị mặc định
-   TrailingStopConfig() {
-      strategy = TRAILING_ADAPTIVE;
-      atrMultiplier = 2.0;
-      chandelierPeriod = 20;
-      chandelierMultiplier = 3.0;
-      swingTrailingBuffer = 0.5;
-      minSwingStrength = 5;
-      useOnlyMajorSwings = false;
-      breakEvenEnabled = true;
-      breakEvenAfterR = 1.0;
-      breakEvenBuffer = 5.0;
-   }
+   // Constructor
+   TrailingStopConfig();
 };
+
+// Constructor implementation
+TrailingStopConfig::TrailingStopConfig() {
+   strategy = TRAILING_ADAPTIVE;
+   atrMultiplier = 2.0;
+   chandelierPeriod = 20;
+   chandelierMultiplier = 3.0;
+   swingTrailingBuffer = 0.5;
+   minSwingStrength = 5;
+   useOnlyMajorSwings = false;
+   breakEvenEnabled = true;
+   breakEvenAfterR = 1.0;
+   breakEvenBuffer = 5.0;
+}
 
 // Cấu trúc thông tin trạng thái thị trường - Mới v14
 struct MarketRegimeInfo {
@@ -97,17 +99,20 @@ struct MarketRegimeInfo {
    bool isTrendChanging;             // Đang đảo chiều
    bool isLowLiquidity;              // Thanh khoản thấp
    
-   // Constructor với giá trị mặc định
-   MarketRegimeInfo() {
-      regime = REGIME_UNKNOWN;
-      volatilityRatio = 1.0;
-      trendStrength = 0.0;
-      isRangebound = false;
-      isVolatile = false;
-      isTrendChanging = false;
-      isLowLiquidity = false;
-   }
+   // Constructor
+   MarketRegimeInfo();
 };
+
+// Constructor implementation
+MarketRegimeInfo::MarketRegimeInfo() {
+   regime = REGIME_UNKNOWN;
+   volatilityRatio = 1.0;
+   trendStrength = 0.0;
+   isRangebound = false;
+   isVolatile = false;
+   isTrendChanging = false;
+   isLowLiquidity = false;
+}
 
 //+------------------------------------------------------------------+
 //| Lớp CSwingPointDetector - Phát hiện đỉnh/đáy                     |
@@ -119,6 +124,7 @@ public:
     bool HasLowerHighsAndLowerLows(int minSwings = 2);
     bool HasValidMarketStructure(bool isLong, int minMajorSwings = 1);
 private:
+   EAContext*        m_context;           // Con trỏ tới EA context
    string            m_Symbol;            // Symbol để phân tích
    ENUM_TIMEFRAMES   m_Timeframe;         // Khung thời gian chính
    ENUM_TIMEFRAMES   m_HigherTimeframe;   // Khung thời gian cao hơn
@@ -161,8 +167,8 @@ private:
    double            m_PrevHigh[];        // Giá cao gần nhất - cache
    double            m_PrevLow[];         // Giá thấp gần nhất - cache
    
-   // Logger
-   CLogger*          m_Logger;
+   // Logger được truy cập qua m_context->Logger
+   // CLogger*          m_Logger;
    
    // Tham số nâng cao - Cải tiến v14
    bool              m_EnableSmartSwingFilter; // Bật lọc swing thông minh

@@ -6,7 +6,7 @@
 #ifndef RECOVERYMANAGER_MQH_
 #define RECOVERYMANAGER_MQH_
 
-#include "Logger.mqh"
+#include "CommonStructs.mqh"
 
 // BẮT ĐẦU NAMESPACE
 namespace ApexPullback {

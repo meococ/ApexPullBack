@@ -8,12 +8,6 @@
 #define PORTFOLIOMANAGER_MQH
 
 #include "CommonStructs.mqh" // For TradeProposal and EAContext
-#include "Enums.mqh"           // For ENUM_PORTFOLIO_DECISION
-#include "Logger.mqh"          // For CLogger
-#include "NewsFilter.mqh"      // For CNewsFilter
-#include "PositionManager.mqh" // For CPositionManager
-#include "RiskManager.mqh"     // For CRiskManager
-// #include <Arrays/ArrayObj.mqh> // Already included in MQLIncludes.mqh
 
 
 

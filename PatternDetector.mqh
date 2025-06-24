@@ -6,16 +6,7 @@
 #ifndef PATTERNDETECTOR_MQH_
 #define PATTERNDETECTOR_MQH_
 
-// === CORE INCLUDES (BẮT BUỘC CHO HẦU HẾT CÁC FILE) ===
-#include "CommonStructs.mqh"      // Core structures, enums, and inputs
-#include "Enums.mqh"            // TẤT CẢ các enum
-
-
-// === INCLUDES CỤ THỂ (NẾU CẦN) ===
-#include "Logger.mqh"           // For CLogger (if not accessed via context)
-#include "MarketProfile.mqh"    // For CMarketProfile (if not accessed via context)
-#include "SwingPointDetector.mqh" // For CSwingPointDetector (if not accessed via context)
-// #include "MathHelper.mqh"
+#include "CommonStructs.mqh"
 
 // BẮT ĐẦU NAMESPACE
 namespace ApexPullback {

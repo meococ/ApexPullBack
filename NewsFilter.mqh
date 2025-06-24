@@ -6,14 +6,7 @@
 #ifndef NEWSFILTER_MQH_
 #define NEWSFILTER_MQH_
 
-// === CORE INCLUDES (BẮT BUỘC CHO HẦU HẾT CÁC FILE) ===
-#include "CommonStructs.mqh"      // Core structures, enums, and inputs
-#include "Enums.mqh"            // TẤT CẢ các enum
-
-
-// === INCLUDES CỤ THỂ (NẾU CẦN) ===
-#include "Logger.mqh"          // For CLogger
-// #include "MathHelper.mqh"
+#include "CommonStructs.mqh"
 
 // BẮT ĐẦU NAMESPACE
 namespace ApexPullback {
@@ -25,6 +18,7 @@ namespace ApexPullback {
 //+------------------------------------------------------------------+
 class CNewsFilter {
 private:
+    EAContext* m_context;                  // Con trỏ đến context chính của EA
     datetime m_lastUpdate;                 // Thời gian cập nhật cuối
     int m_updateIntervalHours;             // Số giờ giữa các lần cập nhật
     
@@ -43,10 +37,7 @@ private:
     
     // File dữ liệu tin tức
     string m_dataFileName;                 // Tên file CSV tin tức
-    
-    // Logger
-    CLogger* m_logger;                     // Con trỏ đến logger
-    
+        
     // Hàm hỗ trợ tách chuỗi
     int SplitString(string str, string separator, string& result[]);
     
@@ -56,8 +47,7 @@ public:
     ~CNewsFilter();
     
     // Khởi tạo và cấu hình
-    bool Initialize(string symbol, ENUM_NEWS_FILTER filter_level, int news_importance, 
-                   int minutes_before, int minutes_after, string data_file_name, CLogger* logger);
+    bool Initialize(EAContext* context);
     
     // Cấu hình tham số
     void Configure(int minutes_before, int minutes_after, int importance);
@@ -114,7 +104,7 @@ CNewsFilter::CNewsFilter() {
         m_newsEvents[i].isProcessed = false;
     }
     
-    m_logger = NULL;
+    m_context = NULL;
 }
 
 //+------------------------------------------------------------------+
@@ -127,23 +117,26 @@ CNewsFilter::~CNewsFilter() {
 //+------------------------------------------------------------------+
 //| Khởi tạo và cấu hình                                            |
 //+------------------------------------------------------------------+
-bool CNewsFilter::Initialize(string symbol, ENUM_NEWS_FILTER filter_level, int news_importance, 
-                           int minutes_before, int minutes_after, string data_file_name, CLogger* logger) {
-    // Lưu tham số
-    m_filterLevel = filter_level;
-    m_newsImportance = news_importance;
-    m_minutesBeforeNews = minutes_before;
-    m_minutesAfterNews = minutes_after;
-    m_dataFileName = data_file_name;
-    m_logger = logger;
+bool CNewsFilter::Initialize(EAContext* context) {
+    if(context == NULL) return false;
+    m_context = context;
+
+    // Lưu tham số từ context
+    m_filterLevel = m_context->inp_NewsFilter_FilterLevel;
+    m_newsImportance = m_context->inp_NewsFilter_MinImportance;
+    m_minutesBeforeNews = m_context->inp_NewsFilter_MinutesBefore;
+    m_minutesAfterNews = m_context->inp_NewsFilter_MinutesAfter;
+    m_dataFileName = m_context->inp_NewsFilter_DataFileName;
     
+    string symbol = m_context->inp_Symbol;
+
     // Khởi tạo các tiền tệ cần giám sát từ cặp tiền tệ
     if (StringLen(symbol) >= 6) {
         m_currenciesToMonitor[0] = StringSubstr(symbol, 0, 3);
         m_currenciesToMonitor[1] = StringSubstr(symbol, 3, 3);
         
-        if (m_logger != NULL) {
-            m_logger->LogDebug(StringFormat("NewsFilter: Theo dõi các đồng tiền %s và %s", 
+        if (m_context->Logger != NULL) {
+            m_context->Logger->LogDebug(StringFormat("NewsFilter: Theo dõi các đồng tiền %s và %s", 
                            m_currenciesToMonitor[0], m_currenciesToMonitor[1]));
         }
     } else {
@@ -156,8 +149,8 @@ bool CNewsFilter::Initialize(string symbol, ENUM_NEWS_FILTER filter_level, int n
             m_currenciesToMonitor[1] = "USD";
         } else {
             // Cặp không xác định, chỉ lọc tin tác động cao
-            if (m_logger != NULL) {
-                m_logger->LogWarning(StringFormat("NewsFilter: Không thể xác định đồng tiền từ symbol (%s), sẽ chỉ lọc tin tác động cao", symbol));
+            if (m_context->Logger != NULL) {
+                m_context->Logger->LogWarning(StringFormat("NewsFilter: Không thể xác định đồng tiền từ symbol (%s), sẽ chỉ lọc tin tác động cao", symbol));
             }
             m_newsImportance = 3;  // Chỉ lọc tin tác động cao
         }
@@ -166,8 +159,8 @@ bool CNewsFilter::Initialize(string symbol, ENUM_NEWS_FILTER filter_level, int n
     // Đầu tiên, cập nhật tin tức
     bool success = UpdateNews();
     
-    if (!success && m_logger != NULL) {
-        m_logger->LogWarning(StringFormat("NewsFilter: Không thể cập nhật tin tức từ file %s, bộ lọc tin tức có thể không hoạt động chính xác", m_dataFileName));
+    if (!success && m_context->Logger != NULL) {
+        m_context->Logger->LogWarning(StringFormat("NewsFilter: Không thể cập nhật tin tức từ file %s, bộ lọc tin tức có thể không hoạt động chính xác", m_dataFileName));
     }
     
     return true;
@@ -181,8 +174,8 @@ void CNewsFilter::Configure(int minutes_before, int minutes_after, int importanc
     m_minutesAfterNews = minutes_after;
     m_newsImportance = importance;
     
-    if (m_logger != NULL) {
-        m_logger->LogInfo(StringFormat("NewsFilter: Cấu hình lại - %d phút trước, %d phút sau, tác động >= %d", 
+    if (m_context != NULL && m_context->Logger != NULL) {
+        m_context->Logger->LogInfo(StringFormat("NewsFilter: Cấu hình lại - %d phút trước, %d phút sau, tác động >= %d", 
                        minutes_before, minutes_after, importance));
     }
 }
@@ -203,17 +196,17 @@ bool CNewsFilter::UpdateNews() {
     
     // Kiểm tra file tồn tại
     if (!FileIsExist(m_dataFileName, FILE_COMMON)) {
-        if (m_logger != NULL) {
-            m_logger->LogWarning(StringFormat("NewsFilter: Không tìm thấy file tin tức %s", m_dataFileName));
+        if (m_context != NULL && m_context->Logger != NULL) {
+            m_context->Logger->LogWarning(StringFormat("NewsFilter: Không tìm thấy file tin tức %s", m_dataFileName));
         }
         return false;
     }
     
     // Mở file tin tức
-    int fileHandle = FileOpen(m_dataFileName, FILE_READ | FILE_CSV | FILE_COMMON, ",");
+    int fileHandle = FileOpen(m_dataFileName, FILE_READ | FILE_CSV | FILE_COMMON, ',');
     if (fileHandle == INVALID_HANDLE) {
-        if (m_logger != NULL) {
-            m_logger->LogError(StringFormat("NewsFilter: Không thể mở file tin tức: %d", GetLastError()));
+        if (m_context != NULL && m_context->Logger != NULL) {
+            m_context->Logger->LogError(StringFormat("NewsFilter: Không thể mở file tin tức: %d", GetLastError()));
         }
         return false;
     }
@@ -262,8 +255,8 @@ bool CNewsFilter::UpdateNews() {
         
         // Nếu vẫn không phân tích được, bỏ qua tin này
         if (newsTime == 0) {
-            if (m_logger != NULL) {
-                m_logger->LogWarning(StringFormat("NewsFilter: Không thể phân tích thời gian tin tức: %s %s", dateStr, timeStr));
+            if (m_context != NULL && m_context->Logger != NULL) {
+                m_context->Logger->LogWarning(StringFormat("NewsFilter: Không thể phân tích thời gian tin tức: %s %s", dateStr, timeStr));
             }
             continue;
         }
@@ -320,8 +313,8 @@ bool CNewsFilter::UpdateNews() {
     // Cập nhật thời gian
     m_lastUpdate = currentTime;
     
-    if (m_logger != NULL) {
-        m_logger->LogInfo(StringFormat("NewsFilter: Đã cập nhật tin tức, tìm thấy %d tin liên quan", m_newsCount));
+    if (m_context != NULL && m_context->Logger != NULL) {
+        m_context->Logger->LogInfo(StringFormat("NewsFilter: Đã cập nhật tin tức, tìm thấy %d tin liên quan", m_newsCount));
     }
     
     return true;
@@ -357,7 +350,7 @@ bool CNewsFilter::HasNewsEvent(int minutesBefore, int minutesAfter, int minimumI
                 foundNews = true;
                 
                 // Chuẩn bị thông tin để log
-                if (m_logger != NULL) {
+                if (m_context != NULL && m_context->Logger != NULL) {
                     string impactStars = "";
                     for (int j = 0; j < m_newsEvents[i].impact; j++) {
                         impactStars += "*";
@@ -382,8 +375,8 @@ bool CNewsFilter::HasNewsEvent(int minutesBefore, int minutesAfter, int minimumI
     }
     
     // Log thông tin nếu tìm thấy tin tức
-    if (foundNews && m_logger != NULL && newsInfo != "") {
-        m_logger->LogInfo(StringFormat("NewsFilter: %s", newsInfo));
+    if (foundNews && m_context != NULL && m_context->Logger != NULL && newsInfo != "") {
+        m_context->Logger->LogInfo(StringFormat("NewsFilter: %s", newsInfo));
     }
     
     return foundNews;
@@ -484,6 +477,9 @@ string CNewsFilter::GetUpcomingNewsInfo(int hoursAhead = 24) {
     }
     
     // Cập nhật tin tức nếu chưa có
+}
+
+} // END NAMESPACE ApexPullback
     if (m_newsCount == 0) {
         UpdateNews();
     }

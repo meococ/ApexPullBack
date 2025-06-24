@@ -7,9 +7,7 @@
 #define SAFEDATAPROVIDER_MQH
 
 // Include các module cần thiết
-#include "Logger.mqh"         // For CLogger
-#include "Enums.mqh"          // For ENUM_TIMEFRAMES, ENUM_SESSION
-#include "MarketProfile.mqh"  // For CMarketProfile (used in GetSafeATR)
+#include "CommonStructs.mqh"  // For EAContext, Enums, etc.
 
 // MQL5 Strict mode
 #property strict
@@ -38,8 +36,8 @@ private:
     ENUM_SESSION m_CurrentSession;   // Phiên giao dịch hiện tại
     datetime     m_LastSessionCheck; // Lần kiểm tra phiên gần nhất
     
-    // Logger
-    ApexPullback::CLogger* m_Logger;              // Đối tượng logger (con trỏ)
+    // Context
+    EAContext* m_context;             // Con trỏ đến context của EA
     
     // Private methods
     void UpdateSessionType();        // Cập nhật loại phiên giao dịch
@@ -50,7 +48,7 @@ public:
     ~CSafeDataProvider();
     
     // Initialization
-    bool Initialize(string symbol, ENUM_TIMEFRAMES timeframe, ApexPullback::CLogger* logger = NULL);
+    bool Initialize(EAContext* context);
     
     // Basic data getters
     double GetBid() const;
@@ -105,19 +103,21 @@ CSafeDataProvider::~CSafeDataProvider() {
 //+------------------------------------------------------------------+
 //| Initialize with required parameters                              |
 //+------------------------------------------------------------------+
-bool CSafeDataProvider::Initialize(string symbol, ENUM_TIMEFRAMES timeframe, ApexPullback::CLogger* logger = NULL) {
-    m_Symbol = symbol;
-    m_Timeframe = timeframe;
-    m_Logger = logger;
+bool CSafeDataProvider::Initialize(EAContext* context) {
+    m_context = context;
+    if (!m_context) return false;
+
+    m_Symbol = m_context->Symbol;
+    m_Timeframe = m_context->Timeframe;
     
-    if (m_Logger != NULL) {
-        m_Logger->LogInfo("Khởi tạo SafeDataProvider cho " + symbol + " trên khung " + EnumToString(timeframe));
+    if (m_context->Logger) {
+        m_context->Logger->LogInfo("Khởi tạo SafeDataProvider cho " + m_Symbol + " trên khung " + EnumToString(m_Timeframe));
     }
     
     // Kiểm tra symbol hợp lệ
-    if (!SymbolSelect(symbol, true)) {
-        if (m_Logger != NULL) {
-            m_Logger->LogError("Không thể chọn symbol " + symbol + " trong Market Watch");
+    if (!SymbolSelect(m_Symbol, true)) {
+        if (m_context->Logger) {
+            m_context->Logger->LogError("Không thể chọn symbol " + m_Symbol + " trong Market Watch");
         }
 
         return false;
@@ -366,4 +366,4 @@ double CSafeDataProvider::GetSafeVolatilityRatio() const {
 
 } // namespace ApexPullback
 
-#endif // SAFE_DATA_PROVIDER_MQH_
+#endif // SAFEDATAPROVIDER_MQH__

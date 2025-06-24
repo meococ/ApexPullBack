@@ -11,7 +11,6 @@
 #define CHARTOBJECTWRAPPER_MQH_
 
 #include "CommonStructs.mqh"
-#include "Logger.mqh"
 
 namespace ApexPullback
 {

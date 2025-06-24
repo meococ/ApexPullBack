@@ -6,9 +6,7 @@
 #ifndef PERFORMANCETRACKER_MQH
 #define PERFORMANCETRACKER_MQH
 
-#include "Logger.mqh" // For CLogger
 #include "CommonStructs.mqh" // For EAContext
-#include "Enums.mqh" // For enums
 #include <Arrays/ArrayDouble.mqh>
 #include <Math/Stat/Math.mqh>
 
@@ -1299,4 +1297,4 @@ double CPerformanceTracker::GetDataQualityScore() {
 
 } // End namespace ApexPullback
 
-#endif // PERFORMANCETRACKER_MQH
+#endif // PERFORMANCETRACKER_MQH_

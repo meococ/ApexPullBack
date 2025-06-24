@@ -5,7 +5,6 @@
 #ifndef PERFORMANCE_DASHBOARD_MQH
 #define PERFORMANCE_DASHBOARD_MQH
 
-#include "Enums.mqh"
 #include "CommonStructs.mqh"      // Core structures, enums, and inputs
 #include <ChartObjects/ChartObjectsLines.mqh>
 #include <ChartObjects/ChartObjectsShapes.mqh>

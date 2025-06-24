@@ -6,10 +6,7 @@
 #ifndef JSONPARSER_MQH_
 #define JSONPARSER_MQH_
 
-// === CORE INCLUDES ===
-#include "CommonStructs.mqh"      // Core structures, enums, and inputs
-#include "Enums.mqh"
-// #include "CommonStructs.mqh" // Đã xóa để phá vỡ vòng lặp include (circular dependency)
+#include "CommonStructs.mqh"
 
 // BẮT ĐẦU NAMESPACE
 namespace ApexPullback {

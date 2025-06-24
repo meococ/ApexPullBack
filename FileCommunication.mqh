@@ -4,14 +4,7 @@
 #ifndef FILE_COMMUNICATION_MQH_
 #define FILE_COMMUNICATION_MQH_
 
-// === CORE INCLUDES (BẮT BUỘC CHO HẦU HẾT CÁC FILE) ===
-#include "CommonStructs.mqh"      // Core structures, enums, and inputs
-#include "Enums.mqh"            // TẤT CẢ các enum
-
-
-// === INCLUDES CỤ THỂ (NẾU CẦN) ===
-#include "Logger.mqh"
-// #include "MathHelper.mqh"
+#include "CommonStructs.mqh"
 
 // BẮT ĐẦU NAMESPACE
 namespace ApexPullback {

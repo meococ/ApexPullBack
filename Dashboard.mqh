@@ -5,14 +5,7 @@
 #ifndef DASHBOARD_MQH_
 #define DASHBOARD_MQH_
 
-// === CORE INCLUDES (BẮT BUỘC CHO HẦU HẾT CÁC FILE) ===
-#include "CommonStructs.mqh"      // Core structures, enums, and inputs
-#include "Enums.mqh"            // TẤT CẢ các enum
-
-
-// === INCLUDES CỤ THỂ (NẾU CẦN) ===
-// #include "Logger.mqh"
-// #include "MathHelper.mqh"
+// #include "CommonStructs.mqh" // Included via ApexPullback.mqh
 
 // BẮT ĐẦU NAMESPACE
 namespace ApexPullback
@@ -50,15 +43,15 @@ string GetAdaptiveModeString(ENUM_ADAPTIVE_MODE mode)
 //| Lớp Dashboard                                                     |
 //+------------------------------------------------------------------+
 
-class CDashboard : public CObject
+class CDashboard
 {
 public:
    // --- Constructor / Destructor ---
-                     CDashboard(void);
+                     CDashboard(EAContext* context);
                     ~CDashboard(void);
 
    // --- Initialization & Deinitialization ---
-   bool              Initialize(EAContext* context);
+   void              Initialize(void); // Added for clarity
    void              Deinitialize(void);
 
    // --- Core Update & Event Handling ---
@@ -66,29 +59,10 @@ public:
    void              OnClick(const string& object_name);
 
    // --- UI Component Creation ---
-   void              CreateAllComponents(void)
-   {
-      if (!m_context->ShowDashboard) return;
-
-      CreateBackground();
-      CreateHeader();
-      CreateMarketPanel();
-      CreateRiskPanel();
-      CreatePerformancePanel();
-      CreateInteractiveControls();
-   }
+   void              CreateAllComponents(void);
 
    // --- UI Component Updates ---
-   void              UpdateAllComponents(void)
-   {
-      if (!m_context->ShowDashboard) return;
-
-      UpdateHeader();
-      UpdateMarketPanel();
-      UpdateRiskPanel();
-      UpdatePerformancePanel();
-      UpdateInteractiveControls();
-   }
+   void              UpdateAllComponents(void);
    void              UpdateInteractiveControls(void);
 
    // --- Helper Methods ---
@@ -97,8 +71,7 @@ public:
 
 private:
    // --- Core References ---
-   EAContext         *m_context;           // Pointer to the main EA context
-   CLogger           *m_logger;            // Pointer to the logger
+   EAContext*        m_context;           // Pointer to the main EA context
    long              m_chart_id;
 
    // --- UI Management ---
@@ -231,312 +204,6 @@ private:
    string            GetTrendString(ENUM_MARKET_TREND trend);
    string            GetRegimeString(ENUM_MARKET_REGIME regime);
    string GetSessionString(ENUM_SESSION session);
-
-//+------------------------------------------------------------------+
-//| Constructor                                                      |
-//+------------------------------------------------------------------+
-CDashboard::CDashboard(void) : m_context(NULL),
-                               m_logger(NULL),
-                               m_chart_id(0),
-                               m_chart_objects(NULL),
-                               m_dash_x(5),
-                               m_dash_y(5),
-                               m_width(350),
-                               m_height(500),
-                               m_theme(THEME_DARK),
-                               m_show_detailed_profile(false),
-                               m_show_news(true),
-                               m_show_performance(true),
-                               m_is_risk_dropdown_open(false),
-                               m_last_performance_update(0),
-                               m_performance_update_interval(5),
-                               m_current_equity(0),
-                               m_current_drawdown(0),
-                               m_current_sharpe(0),
-                               m_current_sortino(0),
-                               m_current_calmar(0),
-                               m_daily_pnl(0),
-                               m_weekly_pnl(0),
-                               m_monthly_pnl(0),
-                               m_total_trades(0),
-                               m_win_rate(0),
-                               m_profit_factor(0)
-{
-   // Initialize mini-chart data structures
-   m_equity_chart.Init();
-   m_drawdown_chart.Init();
-   m_sharpe_chart.Init();
-   m_profit_chart.Init();
-}
-
-//+------------------------------------------------------------------+
-//| Destructor                                                       |
-//+------------------------------------------------------------------+
-CDashboard::~CDashboard(void)
-{
-   Deinitialize();
-}
-
-//+------------------------------------------------------------------+
-//| Initialize                                                       |
-//+------------------------------------------------------------------+
-bool CDashboard::Initialize(EAContext* context)
-{
-   m_context = context;
-   if(!m_context)
-   {
-      printf("Dashboard Error: EAContext is null.");
-      return false;
-   }
-
-   m_logger = m_context->Logger;
-   if(!m_logger)
-   {
-       printf("Dashboard Error: Logger is null.");
-       return false;
-   }
-
-   m_chart_id = m_context->ChartID;
-   m_symbol = m_context->Symbol;
-   m_ea_version = m_context->EA_Version;
-   m_order_comment = m_context->OrderComment;
-   m_theme = m_context->DashboardTheme;
-
-   m_obj_prefix = StringFormat("DASH_%s_%d_", m_symbol, m_chart_id);
-
-   m_chart_objects = new CArrayObj();
-   if(!m_chart_objects)
-   {
-      m_logger.LogError("Failed to create chart objects array for dashboard.");
-      return false;
-   }
-
-   ApplyTheme();
-   CreateAllComponents();
-   UpdateAllComponents();
-
-   ChartRedraw(m_chart_id);
-   return true;
-}
-
-//+------------------------------------------------------------------+
-//| Deinitialize                                                     |
-//+------------------------------------------------------------------+
-void CDashboard::Deinitialize(void)
-{
-   // Delete all chart objects created by this dashboard instance
-   DeleteObjectsByPrefix(m_obj_prefix);
-
-   // Delete the management array
-   if(CheckPointer(m_chart_objects) == POINTER_DYNAMIC)
-   {
-      delete m_chart_objects;
-      m_chart_objects = NULL;
-   }
-
-   ChartRedraw(m_chart_id);
-}
-
-//+------------------------------------------------------------------+
-//| OnClick                                                          |
-//+------------------------------------------------------------------+
-void CDashboard::OnClick(const string& object_name)
-{
-   if(!m_context || !StringStartsWith(object_name, m_obj_prefix)) return;
-
-   string id = StringSubstr(object_name, StringLen(m_obj_prefix));
-
-   // --- Handle Button Clicks ---
-   if(id == m_btn_pause_id)
-   {
-      m_context->IsTradingPaused = !m_context->IsTradingPaused;
-      m_logger.LogInfo(StringFormat("Trading paused state changed to: %s", m_context->IsTradingPaused ? "Paused" : "Active"));
-      UpdateHeader(); // Update the status text
-      ChartRedraw(m_chart_id);
-      return;
-   }
-
-   if(id == m_btn_close_all_id)
-   {
-      m_logger.LogInfo("Close All button clicked. Initiating close all procedure.");
-      // This should trigger a flag that the main EA logic will pick up
-      m_context->CloseAllSignal = true; 
-      return;
-   }
-
-   // --- Handle Dropdown Main Button ---
-   if(id == m_dd_risk_mode_id)
-   {
-      m_is_risk_dropdown_open = !m_is_risk_dropdown_open;
-      if(m_is_risk_dropdown_open)
-      {
-         CreateRiskModeDropdownOptions();
-      }
-      else
-      {
-         DeleteRiskModeDropdownOptions();
-      }
-      ChartRedraw(m_chart_id);
-      return;
-   }
-
-   // --- Handle Dropdown Option Clicks ---
-   ENUM_ADAPTIVE_MODE new_mode = m_context->AdaptiveMode;
-   bool mode_changed = false;
-
-   if(id == m_dd_risk_option_conservative_id)
-   {
-      new_mode = MODE_CONSERVATIVE;
-      mode_changed = true;
-   }
-   else if(id == m_dd_risk_option_balanced_id)
-   {
-      new_mode = MODE_BALANCED;
-      mode_changed = true;
-   }
-   else if(id == m_dd_risk_option_aggressive_id)
-   {
-      new_mode = MODE_AGGRESSIVE;
-      mode_changed = true;
-   }
-
-   if(mode_changed)
-   {
-      m_context->AdaptiveMode = new_mode;
-      m_logger.LogInfo(StringFormat("Risk mode changed to: %s", GetAdaptiveModeString(new_mode)));
-      m_is_risk_dropdown_open = false;
-      DeleteRiskModeDropdownOptions();
-      UpdateRiskPanel(); // Update the displayed risk mode
-      ChartRedraw(m_chart_id);
-      return;
-   }
-}
-
-//+------------------------------------------------------------------+
-//| CreateAllComponents                                              |
-//+------------------------------------------------------------------+
-void CDashboard::CreateAllComponents(void)
-{
-   CreateBackground();
-   CreateHeader();
-   CreateMarketPanel();
-   CreateRiskPanel();
-   CreateNewsPanel();
-   CreatePerformancePanel();
-   CreateInteractiveControls();
-}
-
-//+------------------------------------------------------------------+
-//| UpdateAllComponents                                              |
-//+------------------------------------------------------------------+
-void CDashboard::UpdateAllComponents(void)
-{
-   // Check if it's time to update performance metrics
-   if(TimeCurrent() - m_last_performance_update >= m_performance_update_interval)
-   {
-      UpdatePerformanceMetrics();
-      m_last_performance_update = TimeCurrent();
-   }
-
-   UpdateHeader();
-   UpdateMarketPanel();
-   UpdateRiskPanel();
-   UpdateNewsPanel();
-   UpdatePerformancePanel();
-   UpdateInteractiveControls();
-}
-
-//+------------------------------------------------------------------+
-//| ApplyTheme                                                       |
-//+------------------------------------------------------------------+
-void CDashboard::ApplyTheme(void)
-{
-   if(m_theme == THEME_DARK)
-   {
-      m_bg_color = C'26,26,26';
-      m_title_color = clrWhite;
-      m_text_color = clrSilver;
-      m_value_color = clrWhite;
-      m_alert_color = C'255,82,82';
-      m_success_color = C'0,200,83';
-      m_border_color = C'60,60,60';
-   }
-   else // THEME_LIGHT
-   {
-      m_bg_color = clrWhiteSmoke;
-      m_title_color = clrBlack;
-      m_text_color = C'50,50,50';
-      m_value_color = clrBlack;
-      m_alert_color = clrRed;
-      m_success_color = clrGreen;
-      m_border_color = clrLightGray;
-   }
-}
-
-//+------------------------------------------------------------------+
-//| CreateBackground                                                 |
-//+------------------------------------------------------------------+
-void CDashboard::CreateBackground(void)
-{
-   string name = m_obj_prefix + "BG";
-   if(ObjectFind(m_chart_id, name) < 0)
-   {
-      if(!ObjectCreate(m_chart_id, name, OBJ_RECTANGLE_LABEL, 0, 0, 0))
-      {
-         if(m_logger) m_logger.LogError(StringFormat("Failed to create dashboard background. Error: %d", GetLastError()));
-         return;
-      }
-   }
-
-   ObjectSetInteger(m_chart_id, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(m_chart_id, name, OBJPROP_XDISTANCE, m_dash_x);
-   ObjectSetInteger(m_chart_id, name, OBJPROP_YDISTANCE, m_dash_y);
-   ObjectSetInteger(m_chart_id, name, OBJPROP_XSIZE, m_width);
-   ObjectSetInteger(m_chart_id, name, OBJPROP_YSIZE, m_height);
-   ObjectSetInteger(m_chart_id, name, OBJPROP_BGCOLOR, m_bg_color);
-   ObjectSetInteger(m_chart_id, name, OBJPROP_BORDER_COLOR, m_border_color);
-   ObjectSetInteger(m_chart_id, name, OBJPROP_BACK, true);
-   ObjectSetInteger(m_chart_id, name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(m_chart_id, name, OBJPROP_HIDDEN, !m_context->ShowDashboard);
-}
-
-//+------------------------------------------------------------------+
-//| CreateHeader                                                     |
-//+------------------------------------------------------------------+
-void CDashboard::CreateHeader(void)
-{
-   int y_pos = m_dash_y + 10;
-   int x_pos = m_dash_x + 10;
-
-   // EA Title
-   string title_name = m_obj_prefix + "Title";
-   string title_text = StringFormat("APEX PULLBACK EA v%s", m_ea_version);
-   CChartLabel* title_label = CreateLabel(title_name, x_pos, y_pos, title_text, m_title_color, 10, "Arial Bold");
-
-   // Trading Status
-   string status_name = m_obj_prefix + "Status";
-   int status_x_pos = m_dash_x + m_width - 100; // Align right
-   CChartLabel* status_label = CreateLabel(status_name, status_x_pos, y_pos, "", m_value_color, 8);
-   if(CheckPointer(status_label) == POINTER_DYNAMIC) ObjectSetInteger(m_chart_id, status_name, OBJPROP_ANCHOR, ANCHOR_TOP_RIGHT);
-
-   // Add to object manager
-   if(CheckPointer(title_label) == POINTER_DYNAMIC) m_chart_objects.Add(title_label);
-   if(CheckPointer(status_label) == POINTER_DYNAMIC) m_chart_objects.Add(status_label);
-}
-
-//+------------------------------------------------------------------+
-//| UpdateHeader                                                     |
-//+------------------------------------------------------------------+
-void CDashboard::UpdateHeader(void)
-{
-   string status_name = m_obj_prefix + "Status";
-   string status_text;
-   color status_color;
-
-   if(m_context->IsTradingPaused)
-   {
-      status_text = "TRADING PAUSED";
-      status_color = m_alert_color;
    }
    else
    {
@@ -578,6 +245,10 @@ void CDashboard::CreateMarketPanel(void)
    CreateLabel(m_obj_prefix + "TrendValue", x_pos + 50, y_pos, "-", m_value_color);
    y_pos += 15;
    CreateLabel(m_obj_prefix + "RegimeLabel", x_pos, y_pos, "Regime:", m_text_color);
+
+} // END NAMESPACE ApexPullback
+
+#endif // DASHBOARD_MQH_
    CreateLabel(m_obj_prefix + "RegimeValue", x_pos + 50, y_pos, "-", m_value_color);
    y_pos += 15;
    CreateLabel(m_obj_prefix + "SessionLabel", x_pos, y_pos, "Session:", m_text_color);
@@ -2339,5 +2010,3 @@ void CDashboard::DrawMiniChart(string name, int x, int y, int width, int height,
 }
 
 } // END namespace ApexPullback
-
-#endif // DASHBOARD_MQH_

@@ -3,8 +3,8 @@
 //| Module for risk and money management optimization              |
 //+------------------------------------------------------------------+
 
-#ifndef RISKOPTIMIZER_MQH
-#define RISKOPTIMIZER_MQH
+#ifndef RISKOPTIMIZER_MQH_
+#define RISKOPTIMIZER_MQH_
 
 // --- Standard MQL5 Libraries ---
 // #include <Trade/Trade.mqh>       // Uncomment if CTrade or related trade functions are used directly
@@ -15,354 +15,11 @@
 
 // --- ApexPullback EA Includes ---
 #include "CommonStructs.mqh"      // For EAContext and other common structures
-#include "Enums.mqh"              // For various ENUM definitions
-#include "Logger.mqh"             // For CLogger
-#include "MarketProfile.mqh"      // For CMarketProfile
-#include "SwingPointDetector.mqh" // For CSwingPointDetector
-#include "NewsFilter.mqh"         // For CNewsFilter
-#include "SafeDataProvider.mqh"   // For CSafeDataProvider
-
-// Đảm bảo các constant được xác định (This might belong in Enums.mqh or a constants file if CLUSTER_TYPE_COUNTER is an enum)
-#ifndef CLUSTER_2_COUNTERTREND
-#define CLUSTER_2_COUNTERTREND CLUSTER_TYPE_COUNTER // Assuming CLUSTER_TYPE_COUNTER is defined elsewhere (e.g. Enums.mqh)
-#endif
 
 // Bắt đầu namespace ApexPullback - chứa tất cả các lớp và cấu trúc của EA
 namespace ApexPullback {
 
-// Forward declarations are generally not needed if headers are included above.
-// However, keeping them if they resolve potential circular dependencies not immediately obvious.
-// class CMarketProfile; // Already included via MarketProfile.mqh
-// class CSwingPointDetector; // Already included via SwingPointDetector.mqh
-// class CLogger; // Already included via Logger.mqh
-// class CAssetProfiler; // Already included via AssetProfiler.mqh
-// class CNewsFilter; // Already included via NewsFilter.mqh
-// class CSafeDataProvider; // Already included via SafeDataProvider.mqh
 
-
-// Định nghĩa ENUM_TRAILING_PHASE
-enum ENUM_TRAILING_PHASE {
-    TRAILING_NONE,         // Chưa đến ngưỡng trailing
-    TRAILING_BREAKEVEN,    // Đã đến ngưỡng hòa vốn
-    TRAILING_FIRST_LOCK,   // Đã đến ngưỡng khóa lần 1
-    TRAILING_SECOND_LOCK,  // Đã đến ngưỡng khóa lần 2
-    TRAILING_THIRD_LOCK    // Đã đến ngưỡng khóa lần 3
-};
-
-// Định nghĩa ENUM_MARKET_STRATEGY
-enum ENUM_MARKET_STRATEGY {
-    STRATEGY_DEFAULT,       // Chiến lược mặc định
-    STRATEGY_AGGRESSIVE,    // Chiến lược tích cực
-    STRATEGY_CONSERVATIVE,  // Chiến lược bảo thủ
-    STRATEGY_ADAPTIVE,      // Chiến lược thích ứng
-    STRATEGY_SCALPING,      // Chiến lược scalping
-    STRATEGY_SWING,         // Chiến lược swing
-    STRATEGY_COUNTER_TREND  // Chiến lược đảo chiều xu hướng
-};
-
-// Các hằng số cho giai đoạn trailing
-#define TRAILING_PHASE_1 TRAILING_FIRST_LOCK
-#define TRAILING_PHASE_2 TRAILING_SECOND_LOCK
-#define TRAILING_PHASE_3 TRAILING_THIRD_LOCK
-#define TRAILING_LOCKED TRAILING_FIRST_LOCK  // Tương thích với đã khóa lợi nhuận
-
-//====================================================
-// Struct Config cho Risk Optimizer v14.0
-//====================================================
-struct SRiskOptimizerConfig {
-    // Cấu hình cơ bản
-    double RiskPercent;                  // Risk % gốc
-    double SL_ATR_Multiplier;            // Hệ số SL theo ATR
-    double TP_RR_Ratio;                  // Tỷ lệ Risk:Reward cho TP
-    double MaxAllowedDrawdown;           // Drawdown tối đa cho phép (%)
-    
-    // Cấu hình pullback chất lượng cao (v14.0)
-    double MinPullbackPercent;           // % Pullback tối thiểu (20%)
-    double MaxPullbackPercent;           // % Pullback tối đa (70%)
-    bool   RequirePriceAction;           // Yêu cầu xác nhận Price Action
-    bool   RequireMomentum;              // Yêu cầu xác nhận Momentum  
-    bool   RequireVolume;                // Yêu cầu xác nhận Volume
-    
-    // Cấu hình giảm risk theo drawdown
-    double DrawdownReduceThreshold;      // Ngưỡng DD bắt đầu giảm risk
-    bool   EnableTaperedRisk;            // Chế độ giảm risk từ từ
-    double MinRiskMultiplier;            // Hệ số risk tối thiểu khi DD cao
-    
-    // Giới hạn risk tối đa
-    bool   UseFixedMaxRiskUSD;           // Dùng giới hạn USD cố định
-    double MaxRiskUSD;                   // Giới hạn risk tối đa mỗi lệnh ($)
-    double MaxRiskPercent;               // Giới hạn risk tối đa (% tài khoản)
-    
-    // Cấu hình Scaling (nhồi lệnh) - v14.0 cải tiến
-    bool   EnableScaling;                // Cho phép scaling (nhồi lệnh)
-    int    MaxScalingCount;              // Số lần scaling tối đa (giảm từ 2 xuống 1)
-    double ScalingRiskPercent;           // % risk cho scaling (giảm từ 0.4 xuống 0.3)
-    bool   RequireBreakEvenForScaling;   // Yêu cầu BE trước khi scaling
-    bool   ScalingRequiresClearTrend;    // Yêu cầu xu hướng rõ ràng để scaling
-    double MinRMultipleForScaling;       // R-multiple tối thiểu để scaling (1.0R)
-    
-    // Cấu hình Chandelier Exit
-    bool   UseChandelierExit;            // Kích hoạt Chandelier Exit
-    int    ChandelierLookback;           // Số nến lookback
-    double ChandelierATRMultiplier;      // Hệ số ATR cho chandelier
-    
-    // Hệ số điều chỉnh trailing
-    double TrailingFactorTrend;          // Hệ số trailing trong xu hướng
-    double TrailingFactorRanging;        // Hệ số trailing trong sideway
-    double TrailingFactorVolatile;       // Hệ số trailing khi biến động cao
-    
-    // Cấu hình Partial Close - v14.0 cải tiến
-    struct PartialCloseConfig {
-        bool   UsePartialClose;           // Sử dụng đóng từng phần
-        double FirstRMultiple;            // R-multiple cho đóng phần 1 (1.0R)
-        double SecondRMultiple;           // R-multiple cho đóng phần 2 (2.0R)
-        double FirstClosePercent;         // % đóng ở mức R1 (35%)
-        double SecondClosePercent;        // % đóng ở mức R2 (35%)
-        bool   MoveToBreakEven;           // Chuyển SL về BE sau khi đóng phần đầu
-        double BreakEvenBuffer;           // Buffer cho breakeven (points)
-    };
-    
-    PartialCloseConfig PartialClose;
-    
-    // Cấu hình News Filter - v14.0
-    struct NewsFilterConfig {
-        bool   EnableNewsFilter;          // Bật lọc tin tức
-        int    HighImpactMinutesBefore;   // Phút trước tin tức tác động cao (30)
-        int    HighImpactMinutesAfter;    // Phút sau tin tức tác động cao (15)
-        int    MediumImpactMinutesBefore; // Phút trước tin tức tác động trung bình (15)
-        int    MediumImpactMinutesAfter;  // Phút sau tin tức tác động trung bình (10)
-        string NewsDataFile;              // File dữ liệu tin tức (CSV)
-        int    UpdateIntervalHours;       // Thời gian cập nhật tin tức (giờ)
-    };
-    
-    NewsFilterConfig NewsFilter;
-    
-    // Cấu hình cache
-    int    CacheTimeSeconds;             // Thời gian cache theo giây
-    bool   UseBartimeCache;              // Sử dụng bar time để cache
-    
-    // Smart trailing
-    struct TrailingConfig {
-        bool   EnableSmartTrailing;      // Kích hoạt SmartTrailing
-        bool   EnableRMultipleTrailing;  // Kích hoạt trailing theo R-multiple
-        double BreakEvenRMultiple;       // R-multiple để đặt BE (1.0R)
-        double FirstLockRMultiple;       // R-multiple để khóa lần đầu (1.5R)
-        double SecondLockRMultiple;      // R-multiple để khóa lần hai (2.5R)
-        double ThirdLockRMultiple;       // R-multiple để khóa lần ba (3.5R)
-        double LockPercentageFirst;      // % khóa lần đầu (thường 33%)
-        double LockPercentageSecond;     // % khóa lần hai (thường 50%)
-        double LockPercentageThird;      // % khóa lần ba (thường 75%)
-        double TrailingSensitivity;      // Độ nhạy của trailing (1.0 = tiêu chuẩn)
-    };
-    
-    TrailingConfig Trailing;
-    
-    // AutoPause - v14.0 cải tiến
-    struct AutoPauseConfig {
-        bool   EnableAutoPause;           // Kích hoạt tự động dừng
-        bool   EnableAutoResume;          // Kích hoạt tự động tiếp tục
-        int    ConsecutiveLossesLimit;    // Số lỗ liên tiếp tối đa trước khi dừng
-        double DailyLossPercentLimit;     // % lỗ trong ngày tối đa trước khi dừng
-        double VolatilitySpikeFactor;     // Hệ số tăng đột biến để pause (3.0 = 300%)
-        int    PauseMinutes;              // Số phút dừng
-        bool   SkipTradeOnExtremeVolatility; // Bỏ qua trade khi volatility quá cao
-        bool   ResumeOnSessionChange;     // Tiếp tục khi chuyển phiên
-        bool   ResumeOnNewDay;            // Tiếp tục khi sang ngày mới
-    };
-    
-    AutoPauseConfig AutoPause;
-    
-    // Tham số ngôn ngữ và log
-    bool   EnableDetailedLogs;
-    
-    // Tham số bảo vệ drawdown và biến động
-    bool   EnableDrawdownProtection;    // Bật bảo vệ drawdown
-    bool   EnableVolatilityFiltering;   // Bật lọc theo biến động
-    
-    // Cấu hình chu kỳ risk
-    bool   EnableWeeklyCycle;            // Bật chu kỳ tuần
-    bool   EnableMonthlyCycle;           // Bật chu kỳ tháng
-    double WeeklyLossReduceFactor;       // Hệ số giảm risk nếu tuần lỗ
-    double MonthlyProfitBoostFactor;     // Hệ số tăng risk nếu tháng lời
-    int    ConsecutiveProfitDaysBoost;   // Số ngày lời liên tiếp để tăng
-    double MaxCycleRiskBoost;            // Giới hạn tăng risk tối đa
-    double MaxCycleRiskReduction;        // Giới hạn giảm risk tối đa
-    
-    // Cấu hình thêm v14.0
-    bool   PropFirmMode;                 // Chế độ Prop Firm (bảo thủ hơn)
-    bool   ApplyVolatilityAdjustment;    // Áp dụng điều chỉnh theo biến động
-    double SpreadFactorLimit;            // Giới hạn spread (hệ số so với trung bình)
-    
-    // Constructor với giá trị mặc định
-    SRiskOptimizerConfig() {
-        RiskPercent = 1.0;
-        SL_ATR_Multiplier = 1.5;
-        TP_RR_Ratio = 2.0;
-        MaxAllowedDrawdown = 10.0;
-        
-        // Cấu hình pullback mới (v14.0)
-        MinPullbackPercent = 20.0;
-        MaxPullbackPercent = 70.0;
-        RequirePriceAction = true;
-        RequireMomentum = false;  // Không bắt buộc, chỉ cần 1 trong 2
-        RequireVolume = false;    // Không bắt buộc, chỉ cần 1 trong 2
-        
-        DrawdownReduceThreshold = 5.0;
-        EnableTaperedRisk = true;
-        MinRiskMultiplier = 0.3;
-        
-        UseFixedMaxRiskUSD = false;
-        MaxRiskUSD = 500.0;
-        MaxRiskPercent = 2.0;
-        
-        // Cấu hình scaling v14.0
-        EnableScaling = true;
-        MaxScalingCount = 1;             // Giảm từ 2 xuống 1
-        ScalingRiskPercent = 0.3;        // Giảm từ 0.4 xuống 0.3
-        RequireBreakEvenForScaling = true;
-        ScalingRequiresClearTrend = true; // Thêm mới v14.0
-        MinRMultipleForScaling = 1.0;     // Thêm mới v14.0
-        
-        UseChandelierExit = true;
-        ChandelierLookback = 20;
-        ChandelierATRMultiplier = 3.0;
-        
-        TrailingFactorTrend = 1.2;
-        TrailingFactorRanging = 0.8;
-        TrailingFactorVolatile = 1.5;
-        
-        CacheTimeSeconds = 10;
-        UseBartimeCache = true;
-        
-        // Cấu hình đóng từng phần v14.0
-        PartialClose.UsePartialClose = true;
-        PartialClose.FirstRMultiple = 1.0;
-        PartialClose.SecondRMultiple = 2.0;
-        PartialClose.FirstClosePercent = 35.0;
-        PartialClose.SecondClosePercent = 35.0;
-        PartialClose.MoveToBreakEven = true;
-        PartialClose.BreakEvenBuffer = 5.0;
-        
-        // Cấu hình lọc tin tức v14.0
-        NewsFilter.EnableNewsFilter = true;
-        NewsFilter.HighImpactMinutesBefore = 30;
-        NewsFilter.HighImpactMinutesAfter = 15;
-        NewsFilter.MediumImpactMinutesBefore = 15;
-        NewsFilter.MediumImpactMinutesAfter = 10;
-        NewsFilter.NewsDataFile = "news_calendar.csv";
-        NewsFilter.UpdateIntervalHours = 12;
-        
-        // Smart trailing mặc định
-        Trailing.EnableSmartTrailing = true;
-        Trailing.EnableRMultipleTrailing = true;
-        Trailing.BreakEvenRMultiple = 1.0;
-        Trailing.FirstLockRMultiple = 1.5;
-        Trailing.SecondLockRMultiple = 2.5;
-        Trailing.ThirdLockRMultiple = 3.5;
-        Trailing.LockPercentageFirst = 33.0;
-        Trailing.LockPercentageSecond = 50.0;
-        Trailing.LockPercentageThird = 75.0;
-        Trailing.TrailingSensitivity = 1.0;
-        
-        // AutoPause mặc định
-        AutoPause.EnableAutoPause = true;
-        AutoPause.EnableAutoResume = true;
-        AutoPause.ConsecutiveLossesLimit = 4;
-        AutoPause.DailyLossPercentLimit = 3.0;
-        AutoPause.VolatilitySpikeFactor = 3.0;
-        AutoPause.PauseMinutes = 120;
-        AutoPause.SkipTradeOnExtremeVolatility = true;
-        AutoPause.ResumeOnSessionChange = true;
-        AutoPause.ResumeOnNewDay = true;
-        
-        // Chu kỳ risk mặc định
-        EnableWeeklyCycle = true;
-        EnableMonthlyCycle = true;
-        WeeklyLossReduceFactor = 0.8;    // Giảm 20% nếu tuần lỗ
-        MonthlyProfitBoostFactor = 1.1;  // Tăng 10% nếu tháng lời
-        ConsecutiveProfitDaysBoost = 3;  // Sau 3 ngày lời liên tiếp
-        MaxCycleRiskBoost = 1.3;         // Tối đa tăng 30%
-        MaxCycleRiskReduction = 0.6;     // Tối thiểu còn 60%
-        
-        // Cấu hình mới v14.0
-        PropFirmMode = false;            // Mặc định tắt
-        ApplyVolatilityAdjustment = true;
-        SpreadFactorLimit = 2.0;         // Giới hạn spread gấp 2 lần trung bình
-        
-        // Thiết lập log mặc định
-        EnableDetailedLogs = false;      // Mặc định tắt log chi tiết
-    }
-};
-
-// Enum cho nguyên nhân pause
-enum ENUM_PAUSE_REASON {
-    PAUSE_NONE,                // Không pause
-    PAUSE_CONSECUTIVE_LOSSES,  // Lỗ liên tiếp
-    PAUSE_DAILY_LOSS_LIMIT,    // Lỗ trong ngày
-    PAUSE_VOLATILITY_SPIKE,    // Biến động cao
-    PAUSE_NEWS_FILTER,         // Tin tức quan trọng (v14.0)
-    PAUSE_MANUAL               // Dừng thủ công
-};
-
-// ENUM_TRADING_STRATEGY đã được định nghĩa trong Enums.mqh
-// Xóa định nghĩa trùng lặp để tránh xung đột
-
-// Struct cho trạng thái pause
-struct PauseState {
-    bool       ShouldPause;             // Có nên pause không
-    ENUM_PAUSE_REASON Reason;           // Lý do pause
-    int        PauseMinutes;            // Số phút pause
-    string     Message;                 // Thông báo
-};
-
-// Cập nhật cấu trúc TrailingAction để lưu thông tin trailing
-struct TrailingAction {
-    bool   ShouldTrail;       // Có nên trailing không
-    double NewStopLoss;       // Mức SL mới nếu trailing
-    double LockPercentage;    // % lợi nhuận cần khóa
-    double RMultiple;         // R-multiple hiện tại
-    ENUM_TRAILING_PHASE Phase; // Giai đoạn trailing
-};
-
-// Helper class cho CSafeDataProvider trong namespace ApexPullback
-class CRiskDataProvider {
-private:
-    CMarketProfile* m_MarketProfile;
-    CSwingPointDetector* m_SwingDetector;
-    CLogger* m_Logger;
-                
-public:
-    // Constructor
-    CRiskDataProvider(CMarketProfile* marketProfile, CSwingPointDetector* swingDetector, CLogger* logger) :
-        m_MarketProfile(marketProfile),
-        m_SwingDetector(swingDetector),
-        m_Logger(logger) {}
-                    
-    // Calculate risk multiplier based on signal quality
-    double CalculateQualityBasedRiskMultiplier(double signalQuality) {
-        // Ensure signal quality is in valid range
-        signalQuality = MathMax(0.0, MathMin(1.0, signalQuality));
-                    
-        // Scale risk based on quality - higher quality means higher risk allowed
-        // Quality 0.0-0.3: 0.5x risk
-        // Quality 0.3-0.7: linear scaling from 0.5x to 1.0x
-        // Quality 0.7-1.0: linear scaling from 1.0x to 1.2x
-        if (signalQuality < 0.3) return 0.5;
-        if (signalQuality < 0.7) return 0.5 + (signalQuality - 0.3) * (0.5 / 0.4);
-        return 1.0 + (signalQuality - 0.7) * (0.2 / 0.3);
-    }
-        
-    // Safe current session getter
-    ENUM_SESSION GetSafeCurrentSession(string symbol) {
-        if (m_MarketProfile == NULL) {
-            if (m_Logger != NULL)
-                m_Logger.LogError("SafeDataProvider: MarketProfile chưa được khởi tạo!");
-            return SESSION_UNKNOWN;
-        }
-
-        return m_MarketProfile.GetCurrentSession();
-    }
-};
 
 //====================================================
 //+------------------------------------------------------------------+
@@ -370,19 +27,680 @@ public:
 //+------------------------------------------------------------------+
 class CRiskOptimizer {
 private:
-    string m_Symbol;
-    ENUM_TIMEFRAMES m_MainTimeframe;
+    // --- Core Dependencies ---
+    EAContext* m_context;           // Pointer to the central EA context
+    // SRiskOptimizerConfig is now accessed via m_context.RiskOptimizerConfig
+
+    // --- State & Cache Variables ---
+    double   m_AverageATR;
+    datetime m_LastCalculationTime;
+    datetime m_LastBarTime;
+    bool     m_IsNewBar;
+
+    // --- Performance & Cycle Tracking ---
+    double   m_WeeklyProfit;
+    double   m_MonthlyProfit;
+    int      m_ConsecutiveProfitDays;
+    int      m_ConsecutiveLosses;
+    datetime m_LastWeekMonday;
+    int      m_CurrentMonth;
+    double   m_DayStartBalance;
+    double   m_CurrentDailyLossPercent;
+
+    // --- Pause & Trading State ---
+    bool     m_IsPaused;
+    datetime m_PauseUntil;
+    ENUM_PAUSE_REASON m_PauseReason;
+    ENUM_SESSION m_LastSession;
+    int      m_ScalingCount;
+
+    // --- Risk Adjustment Factors ---
+    double   m_CurrentRiskMultiplier;     // The final risk multiplier applied to trades
+    double   m_LastEquityPeak;
+    double   m_MaxDrawdownPercent;
+    double   m_VolatilityBasedMultiplier;
+    double   m_MarketConditionMultiplier;
     
-    // Các module liên kết - không cần tiền tố vì đã ở trong namespace ApexPullback
-    CMarketProfile* m_Profile;
-    CSwingPointDetector* m_SwingDetector;
-    CLogger* m_Logger;
-    CSafeDataProvider* m_SafeData;
-    CAssetProfiler* m_AssetProfiler;   // Mới v14.0
-    CNewsFilter* m_NewsFilter;      // Mới v14.0
-    
-    // Các biến trạng thái
-    SRiskOptimizerConfig m_Config;
+    // --- Market Strategy ---
+    ENUM_MARKET_STRATEGY m_CurrentStrategy;
+    datetime m_LastStrategyUpdateTime;
+
+public:
+    // --- Constructor & Destructor ---
+    CRiskOptimizer(EAContext* context);
+    ~CRiskOptimizer();
+
+    // --- Main Event Handlers ---
+    void OnTick();
+    void OnNewBar();
+    void OnTradeClosed(double profit);
+
+    // --- Core Calculation & Checks ---
+    bool CalculateTradeParameters(double entryPrice, double initialStopLoss, ENUM_ORDER_TYPE orderType, double& lotSize, double& slPrice, double& tpPrice);
+    PauseState CheckAutoPause();
+    TrailingAction CheckTrailingStop(long positionTicket, double currentAsk, double currentBid);
+    bool ShouldScaleIn(long originalTicket);
+
+    // --- Getters & State Management ---
+    ENUM_MARKET_STRATEGY GetCurrentMarketStrategy();
+    void Reset();
+
+private:
+    // --- Private Helper Methods ---
+    void UpdatePerformanceMetrics();
+    void AdjustRiskBasedOnPerformance();
+    void UpdateVolatilityAndMarketCondition();
+    double GetCurrentRiskMultiplier();
+    void UpdateCycleStats();
+    void UpdateATR();
+    void UpdateMarketStrategy();
+};
+
+//+------------------------------------------------------------------+
+//| Constructor                                                      |
+//+------------------------------------------------------------------+
+CRiskOptimizer::CRiskOptimizer(EAContext* context) :
+    m_context(context)
+{
+    Reset();
+    m_context.Logger.LogInfo("CRiskOptimizer initialized successfully.");
+}
+
+//+------------------------------------------------------------------+
+//| Destructor                                                       |
+//+------------------------------------------------------------------+
+CRiskOptimizer::~CRiskOptimizer()
+{
+    // Destructor logic if needed (e.g., freeing resources)
+}
+
+//+------------------------------------------------------------------+
+//| Reset State                                                      |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::Reset()
+{
+    m_AverageATR = 0.0;
+    m_LastCalculationTime = 0;
+    m_LastBarTime = 0;
+    m_IsNewBar = false;
+
+    m_WeeklyProfit = 0.0;
+    m_MonthlyProfit = 0.0;
+    m_ConsecutiveProfitDays = 0;
+    m_ConsecutiveLosses = 0;
+    m_LastWeekMonday = 0;
+    m_CurrentMonth = 0;
+    m_DayStartBalance = m_context.Account.Balance();
+    m_CurrentDailyLossPercent = 0.0;
+
+    m_IsPaused = false;
+    m_PauseUntil = 0;
+    m_PauseReason = PAUSE_NONE;
+    m_LastSession = SESSION_UNKNOWN;
+    m_ScalingCount = 0;
+
+    m_CurrentRiskMultiplier = 1.0;
+    m_LastEquityPeak = m_context.Account.Equity();
+    m_MaxDrawdownPercent = 0.0;
+    m_VolatilityBasedMultiplier = 1.0;
+    m_MarketConditionMultiplier = 1.0;
+
+    m_CurrentStrategy = STRATEGY_DEFAULT;
+    m_LastStrategyUpdateTime = 0;
+
+    UpdateATR(); // Initial ATR calculation
+    UpdateMarketStrategy(); // Initial strategy determination
+    m_context.Logger.LogInfo("CRiskOptimizer state has been reset.");
+}
+
+
+//+------------------------------------------------------------------+
+//| OnTick Event Handler                                             |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::OnTick()
+{
+    // Check if the EA is currently paused
+    if (m_IsPaused && TimeCurrent() < m_PauseUntil) {
+        return; // Still in pause period
+    }
+    if (m_IsPaused && m_context.RiskOptimizerConfig.AutoPause.EnableAutoResume) {
+        // Logic to auto-resume if conditions are met
+        bool shouldResume = false;
+        if (m_context.RiskOptimizerConfig.AutoPause.ResumeOnNewDay && MQL5InfoInteger(MQL5_DAY) != TimeToStruct(m_PauseUntil).day) {
+            shouldResume = true;
+        }
+        if (m_context.RiskOptimizerConfig.AutoPause.ResumeOnSessionChange && m_context.MarketProfile.GetCurrentSession() != m_LastSession) {
+            shouldResume = true;
+        }
+
+        if (shouldResume) {
+            m_IsPaused = false;
+            m_PauseUntil = 0;
+            m_PauseReason = PAUSE_NONE;
+            m_context.Logger.LogInfo("Auto-resumed trading.");
+        }
+    }
+
+    // Perform periodic updates (not on every single tick to save CPU)
+    if (TimeCurrent() - m_LastCalculationTime > m_context.RiskOptimizerConfig.CacheTimeSeconds) {
+        UpdatePerformanceMetrics();
+        AdjustRiskBasedOnPerformance();
+        m_LastCalculationTime = TimeCurrent();
+    }
+}
+
+//+------------------------------------------------------------------+
+//| OnNewBar Event Handler                                           |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::OnNewBar()
+{
+    m_IsNewBar = true;
+    m_LastBarTime = TimeCurrent();
+
+    // Update daily/weekly/monthly stats
+    UpdateCycleStats();
+
+    // Update indicators and market state
+    UpdateATR();
+    UpdateMarketStrategy();
+    UpdateVolatilityAndMarketCondition();
+
+    // Reset scaling count for the new bar
+    m_ScalingCount = 0;
+}
+
+//+------------------------------------------------------------------+
+//| OnTradeClosed Event Handler                                      |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::OnTradeClosed(double profit)
+{
+    if (profit > 0) {
+        m_ConsecutiveLosses = 0;
+        m_ConsecutiveProfitDays++; // This might need more logic to be accurate
+    } else if (profit < 0) {
+        m_ConsecutiveLosses++;
+        m_ConsecutiveProfitDays = 0;
+    }
+
+    // Update performance metrics immediately after a trade closes
+    UpdatePerformanceMetrics();
+    AdjustRiskBasedOnPerformance();
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Trade Parameters                                       |
+//+------------------------------------------------------------------+
+bool CRiskOptimizer::CalculateTradeParameters(double entryPrice, double initialStopLoss, ENUM_ORDER_TYPE orderType, double& lotSize, double& slPrice, double& tpPrice)
+{
+    // 1. Get Final Risk Multiplier
+    double finalRiskMultiplier = GetCurrentRiskMultiplier();
+    if (finalRiskMultiplier <= 0) {
+        m_context.Logger.LogWarning("Risk multiplier is zero or negative. No trade will be placed.");
+        return false;
+    }
+
+    // 2. Calculate Stop Loss in points and price
+    double slPoints = initialStopLoss * m_context.RiskOptimizerConfig.SL_ATR_Multiplier * m_AverageATR;
+    if (orderType == ORDER_TYPE_BUY) {
+        slPrice = entryPrice - slPoints * m_context.Symbol.Point();
+    } else {
+        slPrice = entryPrice + slPoints * m_context.Symbol.Point();
+    }
+
+    // 3. Calculate Lot Size
+    double riskAmount = m_context.Account.Balance() * (m_context.RiskOptimizerConfig.RiskPercent / 100.0) * finalRiskMultiplier;
+    if (m_context.RiskOptimizerConfig.UseFixedMaxRiskUSD && riskAmount > m_context.RiskOptimizerConfig.MaxRiskUSD) {
+        riskAmount = m_context.RiskOptimizerConfig.MaxRiskUSD;
+    }
+    if (riskAmount > m_context.Account.Balance() * (m_context.RiskOptimizerConfig.MaxRiskPercent / 100.0)) {
+        riskAmount = m_context.Account.Balance() * (m_context.RiskOptimizerConfig.MaxRiskPercent / 100.0);
+    }
+
+    double tickValue = m_context.Symbol.TickValue();
+    double tickSize = m_context.Symbol.TickSize();
+    if (slPoints <= 0 || tickValue <= 0) {
+        m_context.Logger.LogError("Invalid SL points or tick value for lot size calculation.");
+        return false;
+    }
+    lotSize = riskAmount / (slPoints * tickValue / tickSize);
+    lotSize = m_context.Trade.NormalizeLot(lotSize);
+
+    if (lotSize < m_context.Symbol.LotsMin()) {
+        m_context.Logger.LogWarning("Calculated lot size is too small. No trade placed.");
+        return false;
+    }
+
+    // 4. Calculate Take Profit
+    double tpPoints = slPoints * m_context.RiskOptimizerConfig.TP_RR_Ratio;
+    if (orderType == ORDER_TYPE_BUY) {
+        tpPrice = entryPrice + tpPoints * m_context.Symbol.Point();
+    } else {
+        tpPrice = entryPrice - tpPoints * m_context.Symbol.Point();
+    }
+
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Check Auto Pause Conditions                                      |
+//+------------------------------------------------------------------+
+PauseState CRiskOptimizer::CheckAutoPause()
+{
+    PauseState state = {false, PAUSE_NONE, 0, ""};
+    if (!m_context.RiskOptimizerConfig.AutoPause.EnableAutoPause || m_IsPaused) {
+        return state;
+    }
+
+    // Check for consecutive losses
+    if (m_ConsecutiveLosses >= m_context.RiskOptimizerConfig.AutoPause.ConsecutiveLossesLimit) {
+        state.ShouldPause = true;
+        state.Reason = PAUSE_CONSECUTIVE_LOSSES;
+        state.PauseMinutes = m_context.RiskOptimizerConfig.AutoPause.PauseMinutes;
+        state.Message = "Paused due to consecutive losses.";
+        m_IsPaused = true;
+        m_PauseUntil = TimeCurrent() + state.PauseMinutes * 60;
+        m_PauseReason = state.Reason;
+        return state;
+    }
+
+    // Check for daily loss limit
+    if (m_CurrentDailyLossPercent >= m_context.RiskOptimizerConfig.AutoPause.DailyLossPercentLimit) {
+        state.ShouldPause = true;
+        state.Reason = PAUSE_DAILY_LOSS_LIMIT;
+        state.PauseMinutes = 1440; // Pause for the rest of the day
+        state.Message = "Paused due to daily loss limit.";
+        m_IsPaused = true;
+        m_PauseUntil = TimeCurrent() + state.PauseMinutes * 60;
+        m_PauseReason = state.Reason;
+        return state;
+    }
+
+    // Check for volatility spike
+    if (m_context.RiskOptimizerConfig.AutoPause.SkipTradeOnExtremeVolatility) {
+        double currentVolatility = m_context.Indicators.iATR(m_context.Symbol.Name(), m_context.Timeframe, 1, 0) / m_AverageATR;
+        if (currentVolatility > m_context.RiskOptimizerConfig.AutoPause.VolatilitySpikeFactor) {
+             state.ShouldPause = true; // This is a temporary pause for the current signal, not a long-term pause
+             state.Reason = PAUSE_VOLATILITY_SPIKE;
+             state.Message = "Skipping trade due to extreme volatility spike.";
+             return state;
+        }
+    }
+
+    return state;
+}
+
+//+------------------------------------------------------------------+
+//| Check Trailing Stop                                              |
+//+------------------------------------------------------------------+
+TrailingAction CRiskOptimizer::CheckTrailingStop(long positionTicket, double currentAsk, double currentBid)
+{
+    TrailingAction action = {false, 0.0, 0.0, 0.0, TRAILING_NONE};
+    if (!m_context.RiskOptimizerConfig.Trailing.EnableSmartTrailing) {
+        return action;
+    }
+
+    // Get position info
+    if (!m_context.Trade.PositionSelectByTicket(positionTicket)) {
+        return action;
+    }
+
+    double openPrice = m_context.Trade.PositionGetDouble(POSITION_PRICE_OPEN);
+    double currentSL = m_context.Trade.PositionGetDouble(POSITION_SL);
+    double initialRiskPoints = MathAbs(openPrice - currentSL) / m_context.Symbol.Point();
+    if (initialRiskPoints <= 0) {
+        return action;
+    }
+
+    double currentProfitPoints = 0;
+    ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)m_context.Trade.PositionGetInteger(POSITION_TYPE);
+    if (type == POSITION_TYPE_BUY) {
+        currentProfitPoints = (currentBid - openPrice) / m_context.Symbol.Point();
+    } else {
+        currentProfitPoints = (openPrice - currentAsk) / m_context.Symbol.Point();
+    }
+
+    double rMultiple = currentProfitPoints / initialRiskPoints;
+    action.RMultiple = rMultiple;
+
+    double newSL = currentSL;
+    ENUM_TRAILING_PHASE newPhase = TRAILING_NONE;
+
+    // Determine the highest applicable trailing phase
+    if (m_context.RiskOptimizerConfig.Trailing.EnableRMultipleTrailing) {
+        if (rMultiple >= m_context.RiskOptimizerConfig.Trailing.ThirdLockRMultiple) newPhase = TRAILING_THIRD_LOCK;
+        else if (rMultiple >= m_context.RiskOptimizerConfig.Trailing.SecondLockRMultiple) newPhase = TRAILING_SECOND_LOCK;
+        else if (rMultiple >= m_context.RiskOptimizerConfig.Trailing.FirstLockRMultiple) newPhase = TRAILING_FIRST_LOCK;
+        else if (rMultiple >= m_context.RiskOptimizerConfig.Trailing.BreakEvenRMultiple) newPhase = TRAILING_BREAKEVEN;
+    }
+
+    // Calculate new SL based on the determined phase
+    switch (newPhase) {
+        case TRAILING_THIRD_LOCK:
+            action.LockPercentage = m_context.RiskOptimizerConfig.Trailing.LockPercentageThird;
+            newSL = openPrice + (type == POSITION_TYPE_BUY ? 1 : -1) * initialRiskPoints * m_context.RiskOptimizerConfig.Trailing.ThirdLockRMultiple * (1.0 - action.LockPercentage / 100.0) * m_context.Symbol.Point();
+            break;
+        case TRAILING_SECOND_LOCK:
+            action.LockPercentage = m_context.RiskOptimizerConfig.Trailing.LockPercentageSecond;
+            newSL = openPrice + (type == POSITION_TYPE_BUY ? 1 : -1) * initialRiskPoints * m_context.RiskOptimizerConfig.Trailing.SecondLockRMultiple * (1.0 - action.LockPercentage / 100.0) * m_context.Symbol.Point();
+            break;
+        case TRAILING_FIRST_LOCK:
+            action.LockPercentage = m_context.RiskOptimizerConfig.Trailing.LockPercentageFirst;
+            newSL = openPrice + (type == POSITION_TYPE_BUY ? 1 : -1) * initialRiskPoints * m_context.RiskOptimizerConfig.Trailing.FirstLockRMultiple * (1.0 - action.LockPercentage / 100.0) * m_context.Symbol.Point();
+            break;
+        case TRAILING_BREAKEVEN:
+            newSL = openPrice + (type == POSITION_TYPE_BUY ? m_context.RiskOptimizerConfig.PartialClose.BreakEvenBuffer : -m_context.RiskOptimizerConfig.PartialClose.BreakEvenBuffer) * m_context.Symbol.Point();
+            break;
+    }
+
+    // Check if the new SL is an improvement
+    bool isSLImproved = (type == POSITION_TYPE_BUY && newSL > currentSL) || (type == POSITION_TYPE_SELL && newSL < currentSL);
+
+    if (newPhase != TRAILING_NONE && isSLImproved) {
+        action.ShouldTrail = true;
+        action.NewStopLoss = newSL;
+        action.Phase = newPhase;
+    }
+
+    return action;
+}
+
+//+------------------------------------------------------------------+
+//| Check if Scaling In is Allowed                                   |
+//+------------------------------------------------------------------+
+bool CRiskOptimizer::ShouldScaleIn(long originalTicket)
+{
+    // 1. Basic checks
+    if (!m_context.RiskOptimizerConfig.EnableScaling || m_ScalingCount >= m_context.RiskOptimizerConfig.MaxScalingCount) {
+        return false;
+    }
+
+    // 2. Get position info
+    if (!m_context.Trade.PositionSelectByTicket(originalTicket)) {
+        m_context.Logger.LogWarning("Could not select original position for scaling check.");
+        return false;
+    }
+
+    double openPrice = m_context.Trade.PositionGetDouble(POSITION_PRICE_OPEN);
+    double currentSL = m_context.Trade.PositionGetDouble(POSITION_SL);
+    double currentPrice = m_context.Trade.PositionGetDouble(POSITION_PRICE_CURRENT);
+    ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)m_context.Trade.PositionGetInteger(POSITION_TYPE);
+
+    // 3. Check for breakeven requirement
+    if (m_context.RiskOptimizerConfig.RequireBreakEvenForScaling) {
+        bool isAtBreakEven = (type == POSITION_TYPE_BUY && currentSL >= openPrice) || (type == POSITION_TYPE_SELL && currentSL <= openPrice);
+        if (!isAtBreakEven) {
+            return false; // Not yet at breakeven
+        }
+    }
+
+    // 4. Check for minimum R-multiple requirement
+    double initialRiskPoints = MathAbs(openPrice - currentSL) / m_context.Symbol.Point();
+    if (initialRiskPoints <= 0) {
+        return false;
+    }
+    double currentProfitPoints = (type == POSITION_TYPE_BUY) ? (currentPrice - openPrice) / m_context.Symbol.Point() : (openPrice - currentPrice) / m_context.Symbol.Point();
+    double rMultiple = currentProfitPoints / initialRiskPoints;
+
+    if (rMultiple < m_context.RiskOptimizerConfig.MinRMultipleForScaling) {
+        return false; // Not profitable enough
+    }
+
+    // 5. Check for clear trend requirement
+    if (m_context.RiskOptimizerConfig.ScalingRequiresClearTrend) {
+        ENUM_MARKET_STRATEGY strategy = GetCurrentMarketStrategy();
+        if (strategy != STRATEGY_SWING && strategy != STRATEGY_AGGRESSIVE) {
+            return false; // Market is not in a clear trend
+        }
+    }
+
+    // If all checks pass, it's okay to scale in.
+    // The scaling count will be incremented by the TradeManager after a successful trade.
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Get Current Market Strategy                                      |
+//+------------------------------------------------------------------+
+ENUM_MARKET_STRATEGY CRiskOptimizer::GetCurrentMarketStrategy()
+{
+    return m_CurrentStrategy;
+}
+
+
+
+
+//+------------------------------------------------------------------+
+//|                        PRIVATE METHODS                           |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Update Performance Metrics                                       |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::UpdatePerformanceMetrics()
+{
+    double currentEquity = m_context.Account.Equity();
+
+    // Update equity peak
+    if (currentEquity > m_LastEquityPeak) {
+        m_LastEquityPeak = currentEquity;
+    }
+
+    // Update drawdown
+    m_MaxDrawdownPercent = (m_LastEquityPeak - currentEquity) / m_LastEquityPeak * 100.0;
+
+    // Update daily loss
+    m_CurrentDailyLossPercent = (m_DayStartBalance - m_context.Account.Balance()) / m_DayStartBalance * 100.0;
+}
+
+//+------------------------------------------------------------------+
+//| Adjust Risk Based on Performance                                 |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::AdjustRiskBasedOnPerformance()
+{
+    double baseMultiplier = 1.0;
+
+    // Adjust for drawdown
+    if (m_Config.EnableDrawdownProtection && m_MaxDrawdownPercent > m_Config.DrawdownReduceThreshold) {
+        if (m_Config.EnableTaperedRisk) {
+            double excessDD = m_MaxDrawdownPercent - m_Config.DrawdownReduceThreshold;
+            double maxDDrange = m_Config.MaxAllowedDrawdown - m_Config.DrawdownReduceThreshold;
+            double reductionFactor = (maxDDrange > 0) ? (excessDD / maxDDrange) : 1.0;
+            baseMultiplier = 1.0 - (1.0 - m_Config.MinRiskMultiplier) * MathMin(1.0, reductionFactor);
+        } else {
+            baseMultiplier = m_Config.MinRiskMultiplier;
+        }
+    }
+
+    // Adjust for profit cycles (weekly/monthly)
+    if (m_Config.EnableWeeklyCycle && m_WeeklyProfit < 0) {
+        baseMultiplier *= m_Config.WeeklyLossReduceFactor;
+    }
+    if (m_Config.EnableMonthlyCycle && m_MonthlyProfit > 0) {
+        baseMultiplier *= m_Config.MonthlyProfitBoostFactor;
+    }
+
+    // Clamp the multiplier to avoid extreme values
+    m_CurrentRiskMultiplier = MathMax(m_Config.MinRiskMultiplier, MathMin(m_Config.MaxCycleRiskBoost, baseMultiplier));
+}
+
+//+------------------------------------------------------------------+
+//| Update Volatility and Market Condition Multipliers               |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::UpdateVolatilityAndMarketCondition()
+{
+    // This is a placeholder for more complex logic.
+    // e.g., use Market Profile or other indicators to determine market condition.
+    m_VolatilityBasedMultiplier = 1.0; // Could be adjusted based on ATR ratio
+    m_MarketConditionMultiplier = 1.0; // Could be adjusted based on trend/range detection
+}
+
+//+------------------------------------------------------------------+
+//| Get Final Current Risk Multiplier                                |
+//+------------------------------------------------------------------+
+double CRiskOptimizer::GetCurrentRiskMultiplier()
+{
+    // Combine all factors to get the final multiplier
+    return m_CurrentRiskMultiplier * m_VolatilityBasedMultiplier * m_MarketConditionMultiplier;
+}
+
+//+------------------------------------------------------------------+
+//| Update Cycle Statistics (Daily, Weekly, Monthly)                 |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::UpdateCycleStats()
+{
+    datetime now = TimeCurrent();
+    MqlDateTime timeStruct;
+    TimeToStruct(now, timeStruct);
+
+    // Daily reset
+    if (timeStruct.day != TimeToStruct(m_LastBarTime).day) {
+        m_DayStartBalance = m_context.Account.Balance();
+        m_CurrentDailyLossPercent = 0.0;
+        m_ConsecutiveLosses = 0; // Reset daily consecutive losses
+    }
+
+    // Weekly reset
+    if (m_LastWeekMonday == 0 || (timeStruct.day_of_week == MONDAY && timeStruct.day != TimeToStruct(m_LastBarTime).day)) {
+        m_LastWeekMonday = now;
+        m_WeeklyProfit = 0.0; // This needs to be calculated from trade history
+    }
+
+    // Monthly reset
+    if (timeStruct.mon != m_CurrentMonth) {
+        m_CurrentMonth = timeStruct.mon;
+        m_MonthlyProfit = 0.0; // This needs to be calculated from trade history
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Update ATR Values                                                |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::UpdateATR()
+{
+    m_AverageATR = m_context.Indicators.iATR(m_context.Symbol.Name(), m_context.Timeframe, m_Config.ChandelierLookback, 0);
+    if (m_AverageATR <= 0) {
+        m_context.Logger.LogWarning("Could not calculate average ATR. Using a default value.");
+        m_AverageATR = m_context.Indicators.iATR(m_context.Symbol.Name(), m_context.Timeframe, 14, 1); // Fallback
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Update Market Strategy                                           |
+//+------------------------------------------------------------------+
+void CRiskOptimizer::UpdateMarketStrategy()
+{
+    // Simple logic: Use Market Profile to determine trend/range
+    if (m_context.MarketProfile != NULL) {
+        ENUM_MARKET_CONDITION condition = m_context.MarketProfile.GetMarketCondition();
+        switch (condition) {
+            case MARKET_CONDITION_TREND_UP:
+            case MARKET_CONDITION_TREND_DOWN:
+                m_CurrentStrategy = STRATEGY_SWING;
+                break;
+            case MARKET_CONDITION_RANGING:
+                m_CurrentStrategy = STRATEGY_SCALPING;
+                break;
+            default:
+                m_CurrentStrategy = STRATEGY_DEFAULT;
+                break;
+        }
+    } else {
+        m_CurrentStrategy = STRATEGY_DEFAULT;
+    }
+    m_LastStrategyUpdateTime = TimeCurrent();
+}
+    void UpdateATR();
+
+    // Cập nhật chiến lược thị trường
+    void UpdateMarketStrategy();
+
+public:
+    // Constructor mới, nhận context và config qua tham chiếu
+    CRiskOptimizer(EAContext* context, SRiskOptimizerConfig& config) :
+        m_context(context),
+        m_Config(config)
+    {
+        // Khởi tạo các biến trạng thái
+        m_AverageATR = 0;
+        m_LastATR = 0;
+        m_LastVolatilityRatio = 0;
+        m_LastCalculationTime = 0;
+        m_LastBarTime = 0;
+        m_WeeklyProfit = 0;
+        m_MonthlyProfit = 0;
+        m_ConsecutiveProfitDays = 0;
+        m_LastWeekMonday = 0;
+        m_CurrentMonth = 0;
+        m_IsPaused = false;
+        m_PauseUntil = 0;
+        m_LastSession = SESSION_UNKNOWN;
+        m_LastTradeDay = 0;
+        m_DayStartBalance = 0;
+        m_CurrentDailyLoss = 0;
+        m_LastTrailingStop = 0;
+        m_CurrentTrailingPhase = TRAILING_NONE;
+        m_CurrentStrategy = STRATEGY_DEFAULT;
+        m_LastStrategyUpdateTime = 0;
+        m_ConsecutiveLosses = 0;
+        m_TotalTradesDay = 0;
+        m_IsNewBar = false;
+        m_ScalingCount = 0;
+        ArrayInitialize(m_SpreadHistory, 0.0);
+
+        // Khởi tạo các biến điều chỉnh risk tự động
+        m_BaseRiskPercent = m_Config.RiskPercent;
+        m_CurrentRiskMultiplier = 1.0;
+        m_LastEquityPeak = AccountInfoDouble(ACCOUNT_EQUITY);
+        m_MaxDrawdownPercent = 0.0;
+        m_ConsecutiveWins = 0;
+        m_ConsecutiveLossesForRisk = 0;
+        m_WeeklyProfitPercent = 0.0;
+        m_MonthlyProfitPercent = 0.0;
+        m_LastRiskAdjustmentTime = 0;
+        m_RiskAdjustmentEnabled = m_Config.EnableDrawdownProtection; // Ví dụ: bật nếu có bảo vệ DD
+        m_VolatilityBasedMultiplier = 1.0;
+        m_MarketConditionMultiplier = 1.0;
+
+        m_context.Logger.LogInfo("RiskOptimizer đã được khởi tạo.");
+    }
+
+    // Destructor
+    ~CRiskOptimizer() {
+        // Không cần làm gì ở đây vì không có quản lý bộ nhớ động
+    }
+
+    // --- Giao diện Public --- 
+
+    // Hàm cập nhật mỗi tick
+    void OnTick();
+
+    // Hàm cập nhật mỗi thanh nến mới
+    void OnNewBar();
+
+    // Tính toán các tham số giao dịch (SL, TP, Lot Size)
+    TradeParameters CalculateTradeParameters(const EntryParams& params);
+
+    // Kiểm tra xem có nên tạm dừng giao dịch không
+    PauseState CheckAutoPause();
+
+    // Kiểm tra và thực hiện trailing stop
+    TrailingAction CheckTrailingStop(const PositionInfo& position);
+
+    // Kiểm tra xem có nên scaling không
+    bool ShouldScaleIn(const PositionInfo& position);
+
+    // Thông báo cho RiskOptimizer về một giao dịch đã đóng
+    void OnTradeClosed(double profit, int consecutive_losses);
+
+    // Lấy chiến lược thị trường hiện tại
+    ENUM_MARKET_STRATEGY GetCurrentMarketStrategy();
+
+    // Lấy thông tin cấu hình
+    const SRiskOptimizerConfig& GetConfig() const { return m_Config; }
+
+    // Reset trạng thái (ví dụ: khi thay đổi tài khoản hoặc biểu đồ)
+    void Reset();
+
     
     // Biến cache indicator
     double m_AverageATR;
@@ -419,29 +737,17 @@ private:
     // Lịch sử spread
     double m_SpreadHistory[20];
     
-    // ===== AUTOMATIC RISK ADJUSTMENT VARIABLES =====
-    // Biến theo dõi hiệu suất cho automatic risk adjustment
-    double m_BaseRiskPercent;           // Risk percent gốc từ input
-    double m_CurrentRiskMultiplier;     // Hệ số nhân risk hiện tại
-    double m_LastEquityPeak;            // Đỉnh equity gần nhất
-    double m_MaxDrawdownPercent;        // Max drawdown % từ đỉnh
-    int m_ConsecutiveWins;              // Số lệnh thắng liên tiếp
-    int m_ConsecutiveLossesForRisk;     // Số lệnh thua liên tiếp (cho risk adjustment)
-    double m_WeeklyProfitPercent;       // Lợi nhuận tuần %
-    double m_MonthlyProfitPercent;      // Lợi nhuận tháng %
-    datetime m_LastRiskAdjustmentTime;  // Lần cuối điều chỉnh risk
-    bool m_RiskAdjustmentEnabled;       // Có bật automatic risk adjustment không
-    double m_VolatilityBasedMultiplier; // Hệ số dựa trên volatility
-    double m_MarketConditionMultiplier; // Hệ số dựa trên điều kiện thị trường
-    
     // Phương thức private hỗ trợ
-    bool ValidateMomentumAlternative(bool isLong); // Phương pháp thay thế khi không có profile
-    double GetSLMultiplierForCluster(ENUM_CLUSTER_TYPE cluster); // Hệ số SL dựa trên loại cluster
-    double GetTPMultiplierForCluster(ENUM_CLUSTER_TYPE cluster); // Hệ số TP dựa trên loại cluster
-    double GetTrailingFactorForRegime(ENUM_MARKET_REGIME regime); // Hệ số trailing stop theo regime
+    // bool ValidateMomentumAlternative(bool isLong); // Đã loại bỏ, logic sẽ được tích hợp vào các hàm check điều kiện
+    // double GetSLMultiplierForCluster(ENUM_CLUSTER_TYPE cluster); // Đã loại bỏ, logic sẽ được tích hợp vào CalculateTradeParameters
+    // double GetTPMultiplierForCluster(ENUM_CLUSTER_TYPE cluster); // Đã loại bỏ, logic sẽ được tích hợp vào CalculateTradeParameters
+    // double GetTrailingFactorForRegime(ENUM_MARKET_REGIME regime); // Đã loại bỏ, logic sẽ được tích hợp vào CheckTrailingStop
     
     // Phương thức tự động điều chỉnh Risk
-    double CalculatePerformanceBasedRiskAdjustment(); // Điều chỉnh risk dựa trên performance
+    void UpdatePerformanceMetrics(); // Cập nhật các chỉ số hiệu suất
+    void AdjustRiskBasedOnPerformance(); // Điều chỉnh risk dựa trên hiệu suất
+    void UpdateVolatilityAndMarketCondition(); // Cập nhật các hệ số theo thị trường
+    double GetCurrentRiskMultiplier(); // Lấy hệ số risk hiện tại
     double CalculateDrawdownBasedRiskAdjustment(); // Điều chỉnh risk dựa trên drawdown
     double CalculateVolatilityBasedRiskAdjustment(); // Điều chỉnh risk dựa trên volatility
     double CalculateMarketConditionRiskAdjustment(); // Điều chỉnh risk dựa trên market conditions
@@ -1548,27 +1854,9 @@ bool CRiskOptimizer::ShouldIncreaseRisk()
     return false;
 }
 
-    // ===== AUTOMATIC RISK ADJUSTMENT METHODS =====
-    // Tự động điều chỉnh RiskPercent dựa trên hiệu suất
-    double GetOptimizedRiskPercent();
-    double CalculateAdaptiveRiskPercent();
-    void UpdateRiskBasedOnPerformance();
-    bool IsRiskAdjustmentNeeded();
-    double GetCurrentRiskMultiplier();
-    void ResetRiskAdjustments();
-    
-    // Các phương thức hỗ trợ cho automatic risk adjustment
-    double CalculatePerformanceBasedRiskAdjustment();
-    double CalculateDrawdownBasedRiskAdjustment();
-    double CalculateVolatilityBasedRiskAdjustment();
-    double CalculateMarketConditionRiskAdjustment();
-    void UpdatePerformanceMetrics();
-    bool ShouldReduceRisk();
-    bool ShouldIncreaseRisk();
-
 }; // đóng class CRiskOptimizer
 
 // Đóng namespace ApexPullback
 } // end namespace ApexPullback
 
-#endif // _RISK_OPTIMIZER_MQH_
+#endif // RISKOPTIMIZER_MQH_

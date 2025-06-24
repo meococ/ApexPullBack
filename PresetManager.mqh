@@ -3,11 +3,10 @@
 //|                           Copyright 2023-2024, APEX Forex        |
 //|                             https://www.apexpullback.com         |
 //+------------------------------------------------------------------+
-#pragma once
+#ifndef PRESET_MANAGER_MQH_
+#define PRESET_MANAGER_MQH_
 
-#include "CommonStructs.mqh"
-#include "Enums.mqh"
-#include "Logger.mqh"
+// #include "CommonStructs.mqh" // Should be included ONLY by the main .mq5 file
 
 namespace ApexPullback {
 
@@ -92,13 +91,13 @@ struct PresetConfig {
 //+------------------------------------------------------------------+
 class CPresetManager {
 private:
-    CLogger* m_Logger;
+    EAContext* m_context; // Pointer to the main EA context
     
 public:
     CPresetManager();
     ~CPresetManager();
     
-    void Initialize(CLogger* logger);
+    void Initialize(EAContext* context);
     bool ApplyPreset(EAContext* context, ENUM_MARKET_PRESET preset);
     PresetConfig GetPresetConfig(ENUM_MARKET_PRESET preset);
     string GetPresetDescription(ENUM_MARKET_PRESET preset);
@@ -127,8 +126,7 @@ private:
 //+------------------------------------------------------------------+
 //| Constructor                                                      |
 //+------------------------------------------------------------------+
-CPresetManager::CPresetManager() {
-    m_Logger = NULL;
+CPresetManager::CPresetManager() : m_context(NULL) {
 }
 
 //+------------------------------------------------------------------+
@@ -141,10 +139,10 @@ CPresetManager::~CPresetManager() {
 //+------------------------------------------------------------------+
 //| Khởi tạo PresetManager                                          |
 //+------------------------------------------------------------------+
-void CPresetManager::Initialize(CLogger* logger) {
-    m_Logger = logger;
-    if (m_Logger) {
-        m_Logger->LogInfo("PresetManager initialized successfully");
+void CPresetManager::Initialize(EAContext* context) {
+    m_context = context;
+    if (m_context && m_context->Logger) {
+        m_context->Logger->LogInfo("PresetManager initialized successfully");
     }
 }
 
@@ -153,15 +151,15 @@ void CPresetManager::Initialize(CLogger* logger) {
 //+------------------------------------------------------------------+
 bool CPresetManager::ApplyPreset(EAContext* context, ENUM_MARKET_PRESET preset) {
     if (!context) {
-        if (m_Logger) m_Logger->LogError("Invalid context in ApplyPreset");
+        if (m_context && m_context->Logger) m_context->Logger->LogError("Invalid context in ApplyPreset");
         return false;
     }
     
     PresetConfig config = GetPresetConfig(preset);
     ApplyConfigToContext(context, config);
     
-    if (m_Logger) {
-        m_Logger->LogInfo(StringFormat("Applied preset: %s (%s)", 
+    if (m_context && m_context->Logger) {
+        m_context->Logger->LogInfo(StringFormat("Applied preset: %s (%s)", 
             EnumToString(preset), GetPresetDescription(preset)));
     }
     
@@ -698,5 +696,4 @@ bool CPresetManager::IsIndex(string symbol) {
 }
 
 } // namespace ApexPullback
-
-#endif // PRESET_MANAGER_MQH
+#endif // PRESET_MANAGER_MQH_
